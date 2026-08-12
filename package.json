@@ -5,7 +5,9 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test:manual": "node tests/manual-test.js"
+    "test": "node tests/critical-bugs.test.js && node tests/manual-test.js",
+    "test:manual": "node tests/manual-test.js",
+    "test:critical": "node tests/critical-bugs.test.js"
   },
   "engines": {
     "node": ">=18"
