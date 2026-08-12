@@ -76,6 +76,37 @@ class FsmEngine {
     this.sendMessage = sendMessage || transport.sendMessage;
     this.notifyAgent = notifyAgent || transport.notifyAgent;
     this.stubMarker = Boolean(options && options.stubMarker);
+    /** @type {Map<string, Promise<void>>} */
+    this._inboundChains = new Map();
+  }
+
+  /**
+   * Serialize inbound handling per WhatsApp number so concurrent webhook
+   * deliveries cannot race read-modify-write on the same session.
+   */
+  async handleInbound(waNumber, text) {
+    const key = String(waNumber);
+    const prev = this._inboundChains.get(key) || Promise.resolve();
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    // Keep the chain alive even if a prior handler threw
+    const chain = prev.then(
+      () => gate,
+      () => gate
+    );
+    this._inboundChains.set(key, chain);
+
+    await prev.catch(() => {});
+    try {
+      return await this._handleInboundUnlocked(waNumber, text);
+    } finally {
+      release();
+      if (this._inboundChains.get(key) === chain) {
+        this._inboundChains.delete(key);
+      }
+    }
   }
 
   async getOrCreateSession(waNumber) {
@@ -227,11 +258,11 @@ class FsmEngine {
   }
 
   /**
-   * Process one inbound customer message.
+   * Process one inbound customer message (caller must serialize per number).
    * @param {string} waNumber
    * @param {string} text
    */
-  async handleInbound(waNumber, text) {
+  async _handleInboundUnlocked(waNumber, text) {
     const normalized = normalizeInput(text);
     let session = await this.getOrCreateSession(waNumber);
 

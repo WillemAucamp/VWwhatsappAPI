@@ -84,12 +84,19 @@ class MemorySessionStore {
       this.map.delete(String(waNumber));
       return null;
     }
-    return { ...data };
+    // Deep-copy mutable fields so concurrent callers cannot share path arrays
+    return {
+      ...data,
+      path: Array.isArray(data.path) ? [...data.path] : [],
+    };
   }
 
   async set(waNumber, session) {
     session.updatedAt = now();
-    this.map.set(String(waNumber), { ...session });
+    this.map.set(String(waNumber), {
+      ...session,
+      path: Array.isArray(session.path) ? [...session.path] : [],
+    });
     return session;
   }
 
