@@ -1,15 +1,37 @@
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
 const config = require('../config');
+
+/**
+ * Verify Meta X-Hub-Signature-256 against the raw request body.
+ * @param {Buffer} rawBody
+ * @param {string|undefined} signatureHeader
+ * @param {string} appSecret
+ */
+function verifyWhatsAppSignature(rawBody, signatureHeader, appSecret) {
+  if (!appSecret || !rawBody || !signatureHeader) return false;
+  const expected =
+    'sha256=' +
+    crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
+  const left = Buffer.from(signatureHeader);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
 
 /**
  * Standard WhatsApp Cloud API webhook pattern.
  * Coexistence: same Business number; inbound via webhook, outbound via Graph /messages.
  */
-function createWebhookRouter({ engine, verifyToken }) {
+function createWebhookRouter({ engine, verifyToken, appSecret }) {
   const router = express.Router();
   const token = verifyToken || config.whatsapp.verifyToken;
+  const secret =
+    appSecret !== undefined ? appSecret : config.whatsapp.appSecret;
+  const requireSignature =
+    Boolean(secret) || config.nodeEnv === 'production';
 
   // Verification handshake (Meta)
   router.get('/', (req, res) => {
@@ -25,6 +47,21 @@ function createWebhookRouter({ engine, verifyToken }) {
 
   // Inbound messages
   router.post('/', async (req, res) => {
+    if (requireSignature) {
+      if (!secret) {
+        // eslint-disable-next-line no-console
+        console.error(
+          '[webhook] WHATSAPP_APP_SECRET required in production; rejecting POST'
+        );
+        return res.sendStatus(503);
+      }
+      const signature = req.get('x-hub-signature-256');
+      const rawBody = req.rawBody;
+      if (!verifyWhatsAppSignature(rawBody, signature, secret)) {
+        return res.sendStatus(403);
+      }
+    }
+
     // Acknowledge immediately per WhatsApp webhook best practice
     res.sendStatus(200);
 
@@ -56,4 +93,4 @@ function createWebhookRouter({ engine, verifyToken }) {
   return router;
 }
 
-module.exports = { createWebhookRouter };
+module.exports = { createWebhookRouter, verifyWhatsAppSignature };
