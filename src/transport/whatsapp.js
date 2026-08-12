@@ -35,6 +35,8 @@ async function cloudApiSendMessage(to, payload) {
 
   const bodyText = [payload.text, payload.link].filter(Boolean).join('\n\n');
 
+  // Only Graph-supported fields — never forward internal slots (e.g. mediaSlot)
+  // into the request body; unknown properties cause (#100) Invalid parameter.
   const graphBody = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
@@ -45,11 +47,6 @@ async function cloudApiSendMessage(to, payload) {
       body: bodyText || '',
     },
   };
-
-  // mediaSlot reserved for future image/document sends without touching FSM
-  if (payload.mediaSlot) {
-    graphBody._mediaSlot = payload.mediaSlot;
-  }
 
   const res = await fetch(messagesUrl(), {
     method: 'POST',
