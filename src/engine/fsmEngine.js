@@ -127,13 +127,29 @@ class FsmEngine {
       session.interruptedFrom = fromInterrupt;
     }
 
-    await this._send(session.waNumber, state.promptKey, state);
+    // Non-terminal transitions must not persist if the outbound send fails
+    // (caller keeps the prior session). Terminal states are different: help /
+    // opt-out / decline must stick even when Graph API send fails, otherwise
+    // the bot keeps messaging a user who asked to stop / hand over.
+    let sendError = null;
+    try {
+      await this._send(session.waNumber, state.promptKey, state);
+    } catch (err) {
+      if (!state.terminal) throw err;
+      sendError = err;
+      // eslint-disable-next-line no-console
+      console.error(
+        '[fsm] terminal outbound send failed; persisting terminal state anyway',
+        { stateId, waNumber: session.waNumber, message: err.message }
+      );
+    }
 
     if (state.terminal) {
       await this._finalizeTerminal(session, state);
     }
 
     await this.sessionStore.set(session.waNumber, session);
+    if (sendError) throw sendError;
     return { session, state };
   }
 

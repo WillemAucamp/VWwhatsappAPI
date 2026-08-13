@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "test": "node tests/terminal-send-failure.test.js",
     "test:manual": "node tests/manual-test.js"
   },
   "engines": {
