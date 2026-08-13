@@ -118,6 +118,9 @@ class FsmEngine {
     if (!state) throw new Error(`Unknown state: ${stateId}`);
 
     session.currentState = stateId;
+    // Copy before mutate so a failed non-terminal send cannot corrupt a
+    // shared path array still referenced by the session store.
+    session.path = Array.isArray(session.path) ? session.path.slice() : [];
     session.path.push(stateId);
     session.invalidAttempts = 0;
     session.status = 'active';
