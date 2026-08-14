@@ -76,6 +76,117 @@ class FsmEngine {
     this.sendMessage = sendMessage || transport.sendMessage;
     this.notifyAgent = notifyAgent || transport.notifyAgent;
     this.stubMarker = Boolean(options && options.stubMarker);
+    this.nowFn = (options && options.nowFn) || (() => Date.now());
+  }
+
+  _now() {
+    return this.nowFn();
+  }
+
+  _armWaitingFollowUp(session) {
+    session.lastBotMessageAt = this._now();
+    session.lastFollowUpAt = null;
+    session.followUpCount = 0;
+    session.followUpsExhausted = false;
+  }
+
+  _clearFollowUp(session) {
+    session.lastBotMessageAt = null;
+    session.lastFollowUpAt = null;
+    session.followUpCount = 0;
+    session.followUpsExhausted = false;
+  }
+
+  /**
+   * Next due timestamp for a waiting session, or null if none.
+   */
+  nextFollowUpDueAt(session, followUpConfig = config.followUp) {
+    if (!session || !followUpConfig.enabled) return null;
+    if (session.status !== 'active') return null;
+    if (!session.currentState || !session.lastBotMessageAt) return null;
+    if (session.followUpsExhausted) return null;
+    const state = STATES[session.currentState];
+    if (!state || state.terminal) return null;
+
+    const max = followUpConfig.maxCount;
+    if (session.followUpCount >= max) return null;
+
+    if (session.followUpCount === 0) {
+      return session.lastBotMessageAt + followUpConfig.firstDelayMs;
+    }
+    const anchor = session.lastFollowUpAt || session.lastBotMessageAt;
+    return anchor + followUpConfig.intervalMs;
+  }
+
+  /**
+   * Send a due no-reply follow-up for one number (idempotent if not due).
+   */
+  async processFollowUp(waNumber, now = this._now(), followUpConfig = config.followUp) {
+    if (!followUpConfig.enabled) return { sent: false, reason: 'disabled' };
+
+    const session = await this.sessionStore.get(waNumber);
+    if (!session) return { sent: false, reason: 'no_session' };
+
+    const dueAt = this.nextFollowUpDueAt(session, followUpConfig);
+    if (dueAt == null) return { sent: false, reason: 'not_eligible' };
+    if (now < dueAt) return { sent: false, reason: 'not_due', dueAt };
+
+    const state = STATES[session.currentState];
+    const isFirst = session.followUpCount === 0;
+    const promptKey = isFirst ? 'follow_up_first' : 'follow_up_repeat';
+
+    const nudge = resolveCopy(promptKey, { stubMarker: this.stubMarker });
+    const footer = resolveCopy('help_footer', { stubMarker: this.stubMarker });
+    const parts = [nudge];
+
+    if (followUpConfig.includePrompt && state && state.promptKey) {
+      const question = resolveCopy(state.promptKey, { stubMarker: this.stubMarker });
+      if (question) parts.push(question);
+      if (state.continuePromptKey) {
+        const cont = resolveCopy(state.continuePromptKey, {
+          stubMarker: this.stubMarker,
+        });
+        if (cont) parts.push(cont);
+      }
+    }
+
+    if (footer) parts.push(footer);
+
+    await this.sendMessage(session.waNumber, {
+      text: parts.filter(Boolean).join('\n\n'),
+      link: linkForState(state),
+      meta: {
+        type: 'follow_up',
+        followUpIndex: session.followUpCount + 1,
+        stateId: session.currentState,
+        promptKey,
+      },
+    });
+
+    session.followUpCount += 1;
+    session.lastFollowUpAt = now;
+    if (session.followUpCount >= followUpConfig.maxCount) {
+      session.followUpsExhausted = true;
+      if (followUpConfig.notifyAgentOnExhausted) {
+        await this.notifyAgent({
+          type: 'follow_up_exhausted',
+          waNumber: session.waNumber,
+          path: session.path,
+          currentState: session.currentState,
+          followUpCount: session.followUpCount,
+          timestamp: new Date(now).toISOString(),
+        });
+      }
+    }
+
+    await this.sessionStore.set(session.waNumber, session);
+    return {
+      sent: true,
+      waNumber: session.waNumber,
+      followUpCount: session.followUpCount,
+      stateId: session.currentState,
+      exhausted: session.followUpsExhausted,
+    };
   }
 
   async getOrCreateSession(waNumber) {
@@ -121,7 +232,7 @@ class FsmEngine {
     session.path.push(stateId);
     session.invalidAttempts = 0;
     session.status = 'active';
-    session.updatedAt = Date.now();
+    session.updatedAt = this._now();
 
     if (fromInterrupt) {
       session.interruptedFrom = fromInterrupt;
@@ -130,7 +241,10 @@ class FsmEngine {
     await this._send(session.waNumber, state.promptKey, state);
 
     if (state.terminal) {
+      this._clearFollowUp(session);
       await this._finalizeTerminal(session, state);
+    } else {
+      this._armWaitingFollowUp(session);
     }
 
     await this.sessionStore.set(session.waNumber, session);
@@ -199,6 +313,7 @@ class FsmEngine {
 
     // Re-prompt current state options with footer
     await this._send(session.waNumber, state.promptKey, state, extra);
+    this._armWaitingFollowUp(session);
     await this.sessionStore.set(session.waNumber, session);
     return { session, state, invalid: true };
   }
@@ -215,6 +330,7 @@ class FsmEngine {
     session.status = 'active';
     session.interruptedFrom = null;
     session.lastExitReason = null;
+    this._clearFollowUp(session);
 
     if (notice || footer) {
       await this.sendMessage(session.waNumber, {

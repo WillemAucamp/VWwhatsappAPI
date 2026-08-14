@@ -9,6 +9,7 @@
  *  3) Invalid-input retry + escalation to HUMAN_HANDOVER
  *  4) Help-intent interrupt from two different states
  *  5) Soft-decline reopen
+ *  6) No-reply follow-ups (30m first, then 4h cadence) via fake clock
  *
  * Run: npm run test:manual
  */
@@ -17,7 +18,11 @@ const assert = require('assert');
 const config = require('../src/config');
 const { MemorySessionStore } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
+const { FollowUpScheduler } = require('../src/followup/scheduler');
 const { buildRecord } = require('../src/logger/leadLogger');
+
+const THIRTY_MIN = 30 * 60 * 1000;
+const FOUR_HOURS = 4 * 60 * 60 * 1000;
 
 class CapturingLogger {
   constructor() {
@@ -30,24 +35,28 @@ class CapturingLogger {
   }
 }
 
-function createHarness(label) {
+function createHarness(label, { nowFn } = {}) {
   const messages = [];
   const agentEvents = [];
   const logger = new CapturingLogger();
   const store = new MemorySessionStore();
+  let clock = Date.now();
 
   const engine = new FsmEngine({
     sessionStore: store,
     leadLogger: logger,
     sendMessage: async (to, payload) => {
-      messages.push({ to, ...payload });
+      messages.push({ to, ...payload, at: (nowFn || (() => clock))() });
       return { ok: true };
     },
     notifyAgent: async (event) => {
       agentEvents.push(event);
       return { delivered: false, reason: 'test' };
     },
-    options: { stubMarker: true },
+    options: {
+      stubMarker: true,
+      nowFn: nowFn || (() => clock),
+    },
   });
 
   return {
@@ -57,6 +66,16 @@ function createHarness(label) {
     logger,
     messages,
     agentEvents,
+    get clock() {
+      return clock;
+    },
+    setClock(ms) {
+      clock = ms;
+    },
+    advance(ms) {
+      clock += ms;
+      return clock;
+    },
     async say(wa, text) {
       return engine.handleInbound(wa, text);
     },
@@ -267,6 +286,115 @@ async function testIncomeAbovePathToConfirm() {
   console.log('✓ income above → CREDIT_CHECK');
 }
 
+async function testFollowUpCadence() {
+  const h = createHarness('follow_up_cadence');
+  const wa = '27000000012';
+  const fuCfg = {
+    enabled: true,
+    firstDelayMs: THIRTY_MIN,
+    intervalMs: FOUR_HOURS,
+    maxCount: 3,
+    includePrompt: true,
+    notifyAgentOnExhausted: true,
+  };
+
+  await h.say(wa, 'hi'); // GREETING — arms follow-up
+  let session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'GREETING');
+  assert.ok(session.lastBotMessageAt, 'lastBotMessageAt armed');
+  assert.strictEqual(session.followUpCount, 0);
+
+  // Not due yet
+  h.advance(THIRTY_MIN - 1000);
+  let result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, false);
+  assert.strictEqual(result.reason, 'not_due');
+
+  // First follow-up at 30 minutes
+  h.advance(1000);
+  const before = h.messages.length;
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, true);
+  assert.strictEqual(result.followUpCount, 1);
+  const firstFu = h.messages[h.messages.length - 1];
+  assert.strictEqual(firstFu.meta.type, 'follow_up');
+  assert.ok(String(firstFu.text).includes('{{COPY.follow_up_first}}'));
+  assert.ok(String(firstFu.text).includes('{{COPY.greeting_prompt}}'));
+  assert.ok(h.messages.length > before);
+
+  // Second follow-up after 4 hours (not before)
+  h.advance(FOUR_HOURS - 1000);
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, false);
+
+  h.advance(1000);
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, true);
+  assert.strictEqual(result.followUpCount, 2);
+  assert.ok(
+    String(h.messages[h.messages.length - 1].text).includes('{{COPY.follow_up_repeat}}')
+  );
+
+  // Third follow-up after another 4 hours → exhausted
+  h.advance(FOUR_HOURS);
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, true);
+  assert.strictEqual(result.exhausted, true);
+  assert.ok(h.agentEvents.some((e) => e.type === 'follow_up_exhausted'));
+
+  // No more
+  h.advance(FOUR_HOURS);
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, false);
+
+  // Customer reply resets / advances state — new arm
+  await h.say(wa, '3');
+  session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'LICENSE_CHECK');
+  assert.strictEqual(session.followUpCount, 0);
+  assert.strictEqual(session.followUpsExhausted, false);
+
+  // eslint-disable-next-line no-console
+  console.log('✓ follow-up cadence (30m then 4h) + exhaust + reset on reply');
+}
+
+async function testFollowUpSkippedOnTerminalAndScheduler() {
+  const h = createHarness('follow_up_terminal_skip');
+  const wa = '27000000013';
+  const fuCfg = {
+    enabled: true,
+    firstDelayMs: THIRTY_MIN,
+    intervalMs: FOUR_HOURS,
+    maxCount: 3,
+    includePrompt: true,
+    notifyAgentOnExhausted: false,
+  };
+
+  await h.say(wa, 'hi');
+  await h.say(wa, '3');
+  await h.say(wa, 'no'); // NO_LICENSE_ADVICE terminal
+  h.advance(THIRTY_MIN + 1000);
+  const result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, false);
+
+  // Scheduler tick over waiting session
+  const h2 = createHarness('follow_up_scheduler');
+  const wa2 = '27000000014';
+  await h2.say(wa2, 'hi');
+  const scheduler = new FollowUpScheduler({
+    engine: h2.engine,
+    sessionStore: h2.store,
+    followUpConfig: { ...fuCfg, pollMs: 60_000 },
+    nowFn: () => h2.clock,
+  });
+  h2.advance(THIRTY_MIN);
+  const tick = await scheduler.tick(h2.clock);
+  assert.strictEqual(tick.sent, 1);
+
+  // eslint-disable-next-line no-console
+  console.log('✓ follow-ups skipped on terminal; scheduler tick sends due');
+}
+
 async function main() {
   // Ensure default invalid attempt config is sensible for the scenario
   // eslint-disable-next-line no-console
@@ -281,6 +409,8 @@ async function main() {
   await testInvalidRetryThenEscalate();
   await testHelpIntentFromTwoStates();
   await testIncomeAbovePathToConfirm();
+  await testFollowUpCadence();
+  await testFollowUpSkippedOnTerminalAndScheduler();
 
   // Sanity: buildRecord shape
   const sample = buildRecord({
@@ -289,6 +419,10 @@ async function main() {
     path: ['GREETING'],
   });
   assert.ok(sample.timestamp);
+
+  // Default config sanity
+  assert.strictEqual(config.followUp.firstDelayMs, THIRTY_MIN);
+  assert.strictEqual(config.followUp.intervalMs, FOUR_HOURS);
 
   // eslint-disable-next-line no-console
   console.log('\nAll manual FSM scenarios passed.');

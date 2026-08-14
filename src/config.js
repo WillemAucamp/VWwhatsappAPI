@@ -56,6 +56,21 @@ const config = {
     stockLink: process.env.STOCK_LINK || '',
   },
 
+  /**
+   * No-reply follow-ups while waiting on an active (non-terminal) question.
+   * First nudge after `firstDelayMs`, then every `intervalMs`, up to `maxCount`.
+   */
+  followUp: {
+    enabled: String(process.env.FOLLOW_UP_ENABLED || 'true').toLowerCase() !== 'false',
+    firstDelayMs: intEnv('FOLLOW_UP_FIRST_MS', 30 * 60 * 1000), // 30 minutes
+    intervalMs: intEnv('FOLLOW_UP_INTERVAL_MS', 4 * 60 * 60 * 1000), // 4 hours
+    maxCount: intEnv('FOLLOW_UP_MAX', 3),
+    pollMs: intEnv('FOLLOW_UP_POLL_MS', 60 * 1000),
+    includePrompt: String(process.env.FOLLOW_UP_INCLUDE_PROMPT || 'true').toLowerCase() !== 'false',
+    notifyAgentOnExhausted:
+      String(process.env.FOLLOW_UP_NOTIFY_ON_EXHAUSTED || 'false').toLowerCase() === 'true',
+  },
+
   logger: {
     type: (process.env.LEAD_LOGGER || 'console').toLowerCase(),
     path: process.env.LEAD_LOG_PATH || './data/logs/leads.jsonl',

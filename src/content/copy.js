@@ -58,4 +58,9 @@ module.exports = {
   invalid_input_reprompt: '',
   session_restart_notice: '',
   quiet_thread_notice: '',
+
+  // No-reply follow-ups (human-owned; blank until written)
+  // Sent when the customer has not answered the last bot question.
+  follow_up_first: '', // after FOLLOW_UP_FIRST_MS (default 30 min)
+  follow_up_repeat: '', // each subsequent FOLLOW_UP_INTERVAL_MS (default 4 h)
 };

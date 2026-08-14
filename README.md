@@ -18,9 +18,10 @@ Outbound sending is isolated behind `sendMessage(to, payload)` in `src/transport
 | `src/transport/whatsapp.js` | `sendMessage` + optional agent notify |
 | `src/logger/leadLogger.js` | Pluggable lead logger (console / file / jsonl) |
 | `src/session/store.js` | Per-number session (file default; memory; Redis optional) |
+| `src/followup/scheduler.js` | No-reply follow-up poller (30m then every 4h) |
 | `src/routes/webhook.js` | Cloud API webhook verify + inbound |
-| `src/config.js` + `.env.example` | Keywords, max invalid attempts, TTL, links, credentials |
-| `tests/manual-test.js` | Path / decline / invalid / help-intent exercises |
+| `src/config.js` + `.env.example` | Keywords, max invalid attempts, TTL, follow-ups, links, credentials |
+| `tests/manual-test.js` | Path / decline / invalid / help-intent / follow-up exercises |
 
 ## Behaviour (engine)
 
@@ -30,6 +31,7 @@ Outbound sending is isolated behind `sendMessage(to, payload)` in `src/transport
 - **Terminals** log `{ waNumber, timestamp, exitReason, path }`.
 - **Soft declines** (`soft_closed`): next inbound message restarts at `GREETING`.
 - **Human handover** (`quiet`): silent until `REOPEN_KEYWORDS` or session TTL expiry.
+- **No-reply follow-ups**: while waiting on an active question, first nudge after **30 minutes** (`follow_up_first`), then every **4 hours** (`follow_up_repeat`), up to `FOLLOW_UP_MAX` (default 3). Stops on reply, terminal, or quiet/soft-closed. Copy keys are blank for you to write.
 
 ## Flow (summary)
 

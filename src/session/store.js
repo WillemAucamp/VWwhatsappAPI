@@ -25,6 +25,11 @@ function createEmptySession(waNumber) {
     createdAt: now(),
     updatedAt: now(),
     lastExitReason: null,
+    // Follow-up automation (no reply to last bot question)
+    lastBotMessageAt: null,
+    lastFollowUpAt: null,
+    followUpCount: 0,
+    followUpsExhausted: false,
   };
 }
 
@@ -66,6 +71,27 @@ class FileSessionStore {
     if (fs.existsSync(file)) fs.unlinkSync(file);
   }
 
+  async listAll() {
+    const files = fs.readdirSync(this.dir).filter((f) => f.endsWith('.json'));
+    const sessions = [];
+    for (const file of files) {
+      try {
+        const data = JSON.parse(
+          fs.readFileSync(path.join(this.dir, file), 'utf8')
+        );
+        if (!data || !data.waNumber) continue;
+        if (this._expired(data)) {
+          await this.delete(data.waNumber);
+          continue;
+        }
+        sessions.push(data);
+      } catch {
+        // skip corrupt files
+      }
+    }
+    return sessions;
+  }
+
   _expired(session) {
     if (!session || !session.updatedAt) return true;
     return now() - session.updatedAt > config.session.ttlMs;
@@ -95,6 +121,18 @@ class MemorySessionStore {
 
   async delete(waNumber) {
     this.map.delete(String(waNumber));
+  }
+
+  async listAll() {
+    const sessions = [];
+    for (const [waNumber, data] of this.map.entries()) {
+      if (now() - data.updatedAt > config.session.ttlMs) {
+        this.map.delete(waNumber);
+        continue;
+      }
+      sessions.push({ ...data });
+    }
+    return sessions;
   }
 }
 
@@ -135,6 +173,33 @@ class RedisSessionStore {
 
   async delete(waNumber) {
     await this.client.del(this._key(waNumber));
+  }
+
+  async listAll() {
+    const sessions = [];
+    let cursor = '0';
+    do {
+      // eslint-disable-next-line no-await-in-loop
+      const [next, keys] = await this.client.scan(
+        cursor,
+        'MATCH',
+        `${this.prefix}*`,
+        'COUNT',
+        100
+      );
+      cursor = next;
+      for (const key of keys) {
+        // eslint-disable-next-line no-await-in-loop
+        const raw = await this.client.get(key);
+        if (!raw) continue;
+        try {
+          sessions.push(JSON.parse(raw));
+        } catch {
+          // skip
+        }
+      }
+    } while (cursor !== '0');
+    return sessions;
   }
 }
 

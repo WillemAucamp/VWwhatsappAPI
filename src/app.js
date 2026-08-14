@@ -34,6 +34,10 @@ function createApp(overrides = {}) {
   app.locals.sessionStore = sessionStore;
   app.locals.leadLogger = leadLogger;
 
+  if (overrides.followUpScheduler) {
+    app.locals.followUpScheduler = overrides.followUpScheduler;
+  }
+
   return app;
 }
 
