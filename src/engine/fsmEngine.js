@@ -77,10 +77,43 @@ class FsmEngine {
     this.notifyAgent = notifyAgent || transport.notifyAgent;
     this.stubMarker = Boolean(options && options.stubMarker);
     this.nowFn = (options && options.nowFn) || (() => Date.now());
+    /** @type {Map<string, Promise<void>>} */
+    this._sessionChains = new Map();
   }
 
   _now() {
     return this.nowFn();
+  }
+
+  /**
+   * Serialize all session mutations per WhatsApp number.
+   * Follow-up sends and inbound replies both read-modify-write the same
+   * session; without a shared lock a late follow-up write can roll back a
+   * customer's answer (or undo opt-out / quiet).
+   */
+  async _withSessionLock(waNumber, fn) {
+    const key = String(waNumber);
+    const prev = this._sessionChains.get(key) || Promise.resolve();
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    // Keep the chain alive even if a prior handler threw
+    const chain = prev.then(
+      () => gate,
+      () => gate
+    );
+    this._sessionChains.set(key, chain);
+
+    await prev.catch(() => {});
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this._sessionChains.get(key) === chain) {
+        this._sessionChains.delete(key);
+      }
+    }
   }
 
   _armWaitingFollowUp(session) {
@@ -120,8 +153,19 @@ class FsmEngine {
 
   /**
    * Send a due no-reply follow-up for one number (idempotent if not due).
+   * Shares the per-number session lock with handleInbound.
    */
   async processFollowUp(waNumber, now = this._now(), followUpConfig = config.followUp) {
+    return this._withSessionLock(waNumber, () =>
+      this._processFollowUpUnlocked(waNumber, now, followUpConfig)
+    );
+  }
+
+  async _processFollowUpUnlocked(
+    waNumber,
+    now = this._now(),
+    followUpConfig = config.followUp
+  ) {
     if (!followUpConfig.enabled) return { sent: false, reason: 'disabled' };
 
     const session = await this.sessionStore.get(waNumber);
@@ -344,10 +388,17 @@ class FsmEngine {
 
   /**
    * Process one inbound customer message.
+   * Shares the per-number session lock with processFollowUp.
    * @param {string} waNumber
    * @param {string} text
    */
   async handleInbound(waNumber, text) {
+    return this._withSessionLock(waNumber, () =>
+      this._handleInboundUnlocked(waNumber, text)
+    );
+  }
+
+  async _handleInboundUnlocked(waNumber, text) {
     const normalized = normalizeInput(text);
     let session = await this.getOrCreateSession(waNumber);
 
