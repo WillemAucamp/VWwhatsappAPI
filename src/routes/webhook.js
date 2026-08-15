@@ -2,14 +2,16 @@
 
 const express = require('express');
 const config = require('../config');
+const { createInboundDedupe } = require('../webhook/inboundDedupe');
 
 /**
  * Standard WhatsApp Cloud API webhook pattern.
  * Coexistence: same Business number; inbound via webhook, outbound via Graph /messages.
  */
-function createWebhookRouter({ engine, verifyToken }) {
+function createWebhookRouter({ engine, verifyToken, inboundDedupe } = {}) {
   const router = express.Router();
   const token = verifyToken || config.whatsapp.verifyToken;
+  const dedupe = inboundDedupe || createInboundDedupe();
 
   // Verification handshake (Meta)
   router.get('/', (req, res) => {
@@ -43,6 +45,8 @@ function createWebhookRouter({ engine, verifyToken }) {
             const from = message.from;
             const text = message.text && message.text.body;
             if (!from || text == null) continue;
+            // Meta may redeliver the same wamid; skip duplicates.
+            if (!dedupe.claim(message.id)) continue;
             await engine.handleInbound(from, text);
           }
         }
