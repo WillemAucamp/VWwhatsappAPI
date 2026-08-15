@@ -1,0 +1,20 @@
+{
+  "name": "vw-whatsapp-prequal-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp pre-qualification bot — FSM logic only (Coexistence / Cloud API)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test:manual": "node tests/manual-test.js",
+    "test:dedupe": "node tests/webhook-dedupe.test.js",
+    "test": "npm run test:manual && npm run test:dedupe"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "private": true
+}
