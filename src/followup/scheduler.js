@@ -75,12 +75,37 @@ class FollowUpScheduler {
     try {
       const sessions = await this.sessionStore.listAll();
       const sent = [];
+      const errors = [];
       for (const session of sessions) {
-        // eslint-disable-next-line no-await-in-loop
-        const result = await this.engine.processFollowUp(session.waNumber, now, this.cfg);
-        if (result && result.sent) sent.push(result);
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const result = await this.engine.processFollowUp(
+            session.waNumber,
+            now,
+            this.cfg
+          );
+          if (result && result.sent) sent.push(result);
+        } catch (err) {
+          // One number's Graph/send failure must not abort the tick — otherwise
+          // every later session in listAll() is starved until the bad recipient
+          // stops failing (which may be never for blocked/invalid numbers).
+          errors.push({
+            waNumber: session.waNumber,
+            message: err && err.message ? err.message : String(err),
+          });
+          // eslint-disable-next-line no-console
+          console.error('[follow-up] processFollowUp error', {
+            waNumber: session.waNumber,
+            message: err && err.message ? err.message : String(err),
+          });
+        }
       }
-      return { checked: sessions.length, sent: sent.length, details: sent };
+      return {
+        checked: sessions.length,
+        sent: sent.length,
+        details: sent,
+        errors,
+      };
     } finally {
       this._running = false;
     }
