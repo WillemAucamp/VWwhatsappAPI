@@ -80,6 +80,32 @@ async function testDedupeClaim() {
   console.log('✓ inbound dedupe claim is once-only per id');
 }
 
+async function testBeginCommitRelease() {
+  const dedupe = createInboundDedupe({ ttlMs: 60_000 });
+
+  assert.strictEqual(dedupe.begin('wamid.in-flight'), true);
+  assert.strictEqual(
+    dedupe.begin('wamid.in-flight'),
+    false,
+    'concurrent delivery must not double-process while in flight'
+  );
+  assert.strictEqual(dedupe.inFlightSize(), 1);
+
+  dedupe.release('wamid.in-flight');
+  assert.strictEqual(dedupe.inFlightSize(), 0);
+  assert.strictEqual(
+    dedupe.begin('wamid.in-flight'),
+    true,
+    'release after failure must allow Meta retry of the same wamid'
+  );
+
+  dedupe.commit('wamid.in-flight');
+  assert.strictEqual(dedupe.begin('wamid.in-flight'), false);
+  assert.strictEqual(dedupe.size(), 1);
+  // eslint-disable-next-line no-console
+  console.log('✓ begin/commit/release allows retry only after failure');
+}
+
 async function testDuplicateWebhookDoesNotRestartSoftClosed() {
   const store = new MemorySessionStore();
   const logger = new CapturingLogger();
@@ -207,10 +233,169 @@ async function testDuplicateDoesNotDoubleAdvanceInfoState() {
   console.log('✓ duplicate GREETING choice does not skip STOCK_LIST');
 }
 
+async function testFailedHandleInboundReleasesClaimForRetry() {
+  const store = new MemorySessionStore();
+  const logger = new CapturingLogger();
+  let sendCount = 0;
+  const engine = new FsmEngine({
+    sessionStore: store,
+    leadLogger: logger,
+    sendMessage: async () => {
+      sendCount += 1;
+      if (sendCount === 1) {
+        const err = new Error('WhatsApp send failed: 500');
+        err.status = 500;
+        throw err;
+      }
+      return { ok: true };
+    },
+    notifyAgent: async () => ({ delivered: false }),
+    options: { stubMarker: true },
+  });
+
+  const wa = '27009990003';
+  const dedupe = createInboundDedupe();
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/webhook',
+    createWebhookRouter({
+      engine,
+      inboundDedupe: dedupe,
+      requireSignature: false,
+    })
+  );
+
+  // First delivery: Graph send fails after begin(). Old claim-before-process
+  // marked the wamid done, so Meta's retry was skipped and GREETING never
+  // persisted. begin/release must let the retry complete.
+  const payload = buildTextWebhook({
+    from: wa,
+    text: 'hi',
+    id: 'wamid.send-fail-then-retry',
+  });
+
+  const { server, port } = await listen(app);
+  try {
+    const first = await postJson(port, '/webhook', payload);
+    assert.strictEqual(first.status, 200);
+    assert.strictEqual(sendCount, 1);
+
+    let session = await store.get(wa);
+    assert.ok(
+      !session || session.currentState !== 'GREETING',
+      'failed first delivery must not leave a committed GREETING session'
+    );
+    assert.strictEqual(
+      dedupe.size(),
+      0,
+      'failed processing must not commit the wamid'
+    );
+
+    const second = await postJson(port, '/webhook', payload);
+    assert.strictEqual(second.status, 200);
+    assert.strictEqual(sendCount, 2);
+
+    session = await store.get(wa);
+    assert.strictEqual(
+      session.currentState,
+      'GREETING',
+      'Meta retry after send failure must advance session to GREETING'
+    );
+    assert.strictEqual(dedupe.size(), 1);
+  } finally {
+    server.close();
+  }
+  // eslint-disable-next-line no-console
+  console.log('✓ send failure releases wamid so Meta retry can complete');
+}
+
+async function testOneFailedMessageDoesNotAbortSiblingInBatch() {
+  const store = new MemorySessionStore();
+  const logger = new CapturingLogger();
+  const engine = new FsmEngine({
+    sessionStore: store,
+    leadLogger: logger,
+    sendMessage: async (to) => {
+      if (to === '27009990004') {
+        throw new Error('WhatsApp send failed: 500');
+      }
+      return { ok: true };
+    },
+    notifyAgent: async () => ({ delivered: false }),
+    options: { stubMarker: true },
+  });
+
+  const dedupe = createInboundDedupe();
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/webhook',
+    createWebhookRouter({
+      engine,
+      inboundDedupe: dedupe,
+      requireSignature: false,
+    })
+  );
+
+  const body = {
+    object: 'whatsapp_business_account',
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              messages: [
+                {
+                  id: 'wamid.batch-fail',
+                  from: '27009990004',
+                  type: 'text',
+                  text: { body: 'hi' },
+                },
+                {
+                  id: 'wamid.batch-ok',
+                  from: '27009990005',
+                  type: 'text',
+                  text: { body: 'hi' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  const { server, port } = await listen(app);
+  try {
+    const res = await postJson(port, '/webhook', body);
+    assert.strictEqual(res.status, 200);
+
+    const failed = await store.get('27009990004');
+    const ok = await store.get('27009990005');
+    assert.ok(
+      !failed || failed.currentState !== 'GREETING',
+      'failing number must not commit GREETING'
+    );
+    assert.strictEqual(
+      ok.currentState,
+      'GREETING',
+      'sibling message after a throw must still be processed'
+    );
+  } finally {
+    server.close();
+  }
+  // eslint-disable-next-line no-console
+  console.log('✓ one failed message does not abort later messages in batch');
+}
+
 async function main() {
   await testDedupeClaim();
+  await testBeginCommitRelease();
   await testDuplicateWebhookDoesNotRestartSoftClosed();
   await testDuplicateDoesNotDoubleAdvanceInfoState();
+  await testFailedHandleInboundReleasesClaimForRetry();
+  await testOneFailedMessageDoesNotAbortSiblingInBatch();
   // eslint-disable-next-line no-console
   console.log('\nAll webhook dedupe tests passed.');
 }

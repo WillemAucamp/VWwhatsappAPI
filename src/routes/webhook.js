@@ -89,8 +89,22 @@ function createWebhookRouter({
             const from = message.from;
             const text = message.text && message.text.body;
             if (!from || text == null) continue;
-            if (!dedupe.claim(message.id)) continue;
-            await engine.handleInbound(from, text);
+            // begin/commit/release: do not mark wamid done until handleInbound
+            // succeeds — otherwise a Graph/session failure + Meta retry drops
+            // the customer message forever.
+            if (!dedupe.begin(message.id)) continue;
+            try {
+              await engine.handleInbound(from, text);
+              dedupe.commit(message.id);
+            } catch (err) {
+              dedupe.release(message.id);
+              // eslint-disable-next-line no-console
+              console.error('[webhook] message processing error', {
+                messageId: message.id,
+                from,
+                message: err && err.message ? err.message : String(err),
+              });
+            }
           }
         }
       }
