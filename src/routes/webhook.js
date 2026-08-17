@@ -1,17 +1,49 @@
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
 const config = require('../config');
+const { createInboundDedupe } = require('../webhook/inboundDedupe');
 
 /**
- * Standard WhatsApp Cloud API webhook pattern.
- * Coexistence: same Business number; inbound via webhook, outbound via Graph /messages.
+ * Verify Meta X-Hub-Signature-256 against the raw request body.
+ * @param {Buffer} rawBody
+ * @param {string|undefined} signatureHeader
+ * @param {string} appSecret
  */
-function createWebhookRouter({ engine, verifyToken }) {
+function verifyWhatsAppSignature(rawBody, signatureHeader, appSecret) {
+  if (!appSecret || !rawBody || !signatureHeader) return false;
+  const expected =
+    'sha256=' +
+    crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
+  const left = Buffer.from(signatureHeader);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
+
+/**
+ * Standard WhatsApp Cloud API webhook.
+ * GET  /webhook — Meta verify handshake
+ * POST /webhook — inbound customer text (statuses / echoes ignored)
+ */
+function createWebhookRouter({
+  engine,
+  verifyToken,
+  appSecret,
+  inboundDedupe,
+  requireSignature,
+} = {}) {
   const router = express.Router();
   const token = verifyToken || config.whatsapp.verifyToken;
+  const secret =
+    appSecret !== undefined ? appSecret : config.whatsapp.appSecret;
+  const mustVerify =
+    requireSignature !== undefined
+      ? Boolean(requireSignature)
+      : Boolean(secret) || config.nodeEnv === 'production';
+  const dedupe = inboundDedupe || createInboundDedupe();
 
-  // Verification handshake (Meta)
   router.get('/', (req, res) => {
     const mode = req.query['hub.mode'];
     const challenge = req.query['hub.challenge'];
@@ -23,8 +55,22 @@ function createWebhookRouter({ engine, verifyToken }) {
     return res.sendStatus(403);
   });
 
-  // Inbound messages
   router.post('/', async (req, res) => {
+    if (mustVerify) {
+      if (!secret) {
+        // eslint-disable-next-line no-console
+        console.error(
+          '[webhook] WHATSAPP_APP_SECRET required in production; rejecting POST'
+        );
+        return res.sendStatus(503);
+      }
+      const signature = req.get('x-hub-signature-256');
+      const rawBody = req.rawBody;
+      if (!verifyWhatsAppSignature(rawBody, signature, secret)) {
+        return res.sendStatus(403);
+      }
+    }
+
     // Acknowledge immediately per WhatsApp webhook best practice
     res.sendStatus(200);
 
@@ -43,6 +89,7 @@ function createWebhookRouter({ engine, verifyToken }) {
             const from = message.from;
             const text = message.text && message.text.body;
             if (!from || text == null) continue;
+            if (!dedupe.claim(message.id)) continue;
             await engine.handleInbound(from, text);
           }
         }
@@ -56,4 +103,4 @@ function createWebhookRouter({ engine, verifyToken }) {
   return router;
 }
 
-module.exports = { createWebhookRouter };
+module.exports = { createWebhookRouter, verifyWhatsAppSignature };

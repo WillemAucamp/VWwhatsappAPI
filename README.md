@@ -1,56 +1,68 @@
-# WhatsApp Pre-Qualification Bot — Logic & FSM
+# VWwhatsappAPI — WhatsApp pre-qualification bot
 
-Conversation logic tree for a vehicle-dealership WhatsApp pre-qualification bot. Structure only: state machine, transitions, stub message keys. No advice or sales copy is generated here.
+Single-tenant Cloud API bot for the dealership WhatsApp Business number (**Coexistence**: Business App + API on the same number).
 
-## Integration
+Start here:
 
-Runs on the dealership’s **existing WhatsApp Business number** via Meta **Coexistence** (Cloud API + Business App on the same number). Inbound webhooks + outbound Graph `/messages`. Not whatsapp-web.js.
-
-Outbound sending is isolated behind `sendMessage(to, payload)` in `src/transport/whatsapp.js` so transport changes do not rewrite the FSM.
+1. **Plug into Meta:** [docs/META_SETUP.md](docs/META_SETUP.md)
+2. **Write customer copy:** `src/content/copy.js` (still stubs)
+3. **Conversation tree:** `src/fsm/states.js`
 
 ## Layout
 
-| Path | Role |
-|------|------|
-| `src/fsm/states.js` | FSM **state table** (data only) |
-| `src/engine/fsmEngine.js` | Session resolve, help-intent, options, invalid retries, path updates |
-| `src/content/copy.js` | Stub `{{COPY.*}}` keys (blank; human-owned) |
-| `src/transport/whatsapp.js` | `sendMessage` + optional agent notify |
-| `src/logger/leadLogger.js` | Pluggable lead logger (console / file / jsonl) |
-| `src/session/store.js` | Per-number session (file default; memory; Redis optional) |
-| `src/followup/scheduler.js` | No-reply follow-up poller (30m then every 4h) |
-| `src/routes/webhook.js` | Cloud API webhook verify + inbound |
-| `src/config.js` + `.env.example` | Keywords, max invalid attempts, TTL, follow-ups, links, credentials |
-| `tests/manual-test.js` | Path / decline / invalid / help-intent / follow-up exercises |
+```
+src/
+  index.js                 Process entry — listen, follow-up scheduler, Meta status log
+  app.js                   Express: GET /health, GET|POST /webhook
+  config.js                Env → config
+  meta/readiness.js        Local “are we plugged in?” snapshot (no secrets)
+  transport/whatsapp.js    Graph /messages (text + templates)
+  routes/webhook.js        Meta verify handshake + inbound text
+  webhook/inboundDedupe.js At-least-once wamid guard
+  engine/fsmEngine.js      Session + help-intent + options + follow-ups
+  fsm/states.js            State table only
+  content/copy.js          Human-owned message text
+  content/resolve.js       {{COPY.*}} / link placeholders
+  session/store.js         File (default) / memory / Redis
+  followup/scheduler.js    30m then every 4h no-reply nudges
+  logger/leadLogger.js     Qualify / decline / handover log
+scripts/
+  check-meta.js            Validate .env and ping Graph
+  send-test.js             Send one test text or template
+docs/
+  META_SETUP.md            Connect this bot to your Meta account
+tests/                     FSM paths + webhook / race regressions
+data/                      Sessions + lead logs (gitignored)
+```
 
-## Behaviour (engine)
-
-- **Help intent** (configurable keywords) checked before option match → `HUMAN_HANDOVER` from any state.
-- **Help footer** appended on every bot turn from `help_footer`.
-- **Invalid input**: one re-prompt; then escalate to `HUMAN_HANDOVER` after `MAX_INVALID_ATTEMPTS`.
-- **Terminals** log `{ waNumber, timestamp, exitReason, path }`.
-- **Soft declines** (`soft_closed`): next inbound message restarts at `GREETING`.
-- **Human handover** (`quiet`): silent until `REOPEN_KEYWORDS` or session TTL expiry.
-- **No-reply follow-ups**: while waiting on an active question, first nudge after **30 minutes** (`follow_up_first`), then every **4 hours** (`follow_up_repeat`), up to `FOLLOW_UP_MAX` (default 3). Stops on reply, terminal, or quiet/soft-closed. Copy keys are blank for you to write.
-
-## Flow (summary)
-
-`GREETING` → `SPECIAL_INFO` | `STOCK_LIST` | `LICENSE_CHECK` → income → credit → confirm → `QUALIFIED_LINK` or decline / handover terminals. See `src/fsm/states.js`.
-
-## Setup
+## Run
 
 ```bash
 cp .env.example .env
+# fill Meta values — see docs/META_SETUP.md
 npm install
+npm test
 npm start
 ```
 
-Webhook: `GET/POST /webhook`. Health: `GET /health`.
-
-## Tests
+| URL | Role |
+|-----|------|
+| `GET /health` | Process up + whether Meta env is filled |
+| `GET /webhook` | Meta `hub.verify_token` handshake |
+| `POST /webhook` | Inbound customer text |
 
 ```bash
-npm run test:manual
+npm run check:meta          # token + phone-number lookup
+npm run send:test -- --to 2782XXXXXXXX --template hello_world
 ```
 
-Uses stub markers (`{{COPY.xxx}}`), not real content.
+## Behaviour
+
+- Help / stop keywords from any state → `HUMAN_HANDOVER` (bot goes quiet).
+- Invalid input: one re-prompt, then handover.
+- Soft declines: next inbound restarts at `GREETING`.
+- Follow-ups while waiting on a question: 30 minutes, then every 4 hours, max 3.
+
+Flow: `GREETING` → special / stock / qualify → licence → income → credit → confirm → application link **or** decline / handover.
+
+This repo is **not** whatsapp-web.js. Outbound is official Graph `/messages` only.

@@ -7,15 +7,6 @@ const config = require('../config');
  * Intervals come from config (default: first after 30m, then every 4h).
  */
 class FollowUpScheduler {
-  /**
-   * @param {object} deps
-   * @param {import('../engine/fsmEngine').FsmEngine} deps.engine
-   * @param {object} deps.sessionStore store with listAll()
-   * @param {object} [deps.followUpConfig] override config.followUp
-   * @param {Function} [deps.setIntervalFn]
-   * @param {Function} [deps.clearIntervalFn]
-   * @param {Function} [deps.nowFn]
-   */
   constructor({
     engine,
     sessionStore,
@@ -75,12 +66,34 @@ class FollowUpScheduler {
     try {
       const sessions = await this.sessionStore.listAll();
       const sent = [];
+      const errors = [];
       for (const session of sessions) {
-        // eslint-disable-next-line no-await-in-loop
-        const result = await this.engine.processFollowUp(session.waNumber, now, this.cfg);
-        if (result && result.sent) sent.push(result);
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const result = await this.engine.processFollowUp(
+            session.waNumber,
+            now,
+            this.cfg
+          );
+          if (result && result.sent) sent.push(result);
+        } catch (err) {
+          errors.push({
+            waNumber: session.waNumber,
+            message: err && err.message ? err.message : String(err),
+          });
+          // eslint-disable-next-line no-console
+          console.error('[follow-up] processFollowUp error', {
+            waNumber: session.waNumber,
+            message: err && err.message ? err.message : String(err),
+          });
+        }
       }
-      return { checked: sessions.length, sent: sent.length, details: sent };
+      return {
+        checked: sessions.length,
+        sent: sent.length,
+        details: sent,
+        errors,
+      };
     } finally {
       this._running = false;
     }

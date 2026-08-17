@@ -3,9 +3,8 @@
 const config = require('../config');
 
 /**
- * Transport abstraction — single outbound surface for the FSM engine.
- * Cloud API Graph /messages is the default implementation (Coexistence number).
- * Tests / alternate transports inject a custom sendMessage.
+ * Cloud API Graph /messages (Coexistence number).
+ * Tests inject a custom sendMessage; never put internal fields (mediaSlot) on Graph bodies.
  */
 
 function messagesUrl() {
@@ -13,18 +12,13 @@ function messagesUrl() {
   return `${graphBaseUrl}/${apiVersion}/${phoneNumberId}/messages`;
 }
 
-/**
- * @param {string} to E.164 WhatsApp number (digits)
- * @param {object} payload Transport-agnostic payload
- * @param {string} [payload.text] Plain text body
- * @param {string} [payload.link] Optional URL to include
- * @param {string} [payload.mediaSlot] Optional media slot id
- * @param {object} [payload.meta] Extra metadata for adapters
- */
-async function cloudApiSendMessage(to, payload) {
+function digitsOnly(to) {
+  return String(to || '').replace(/\D/g, '');
+}
+
+function requireCredentials() {
   const token = config.whatsapp.token;
   const phoneNumberId = config.whatsapp.phoneNumberId;
-
   if (!token || !phoneNumberId) {
     const err = new Error(
       'WhatsApp Cloud API credentials missing (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)'
@@ -32,25 +26,11 @@ async function cloudApiSendMessage(to, payload) {
     err.code = 'WHATSAPP_CONFIG_MISSING';
     throw err;
   }
+  return { token, phoneNumberId };
+}
 
-  const bodyText = [payload.text, payload.link].filter(Boolean).join('\n\n');
-
-  const graphBody = {
-    messaging_product: 'whatsapp',
-    recipient_type: 'individual',
-    to: String(to).replace(/\D/g, ''),
-    type: 'text',
-    text: {
-      preview_url: Boolean(payload.link),
-      body: bodyText || '',
-    },
-  };
-
-  // mediaSlot reserved for future image/document sends without touching FSM
-  if (payload.mediaSlot) {
-    graphBody._mediaSlot = payload.mediaSlot;
-  }
-
+async function graphPost(graphBody) {
+  const { token } = requireCredentials();
   const res = await fetch(messagesUrl(), {
     method: 'POST',
     headers: {
@@ -71,9 +51,89 @@ async function cloudApiSendMessage(to, payload) {
 }
 
 /**
- * Default exportable interface used by the engine.
- * Swap by calling setSendMessage(fn) or constructing the engine with a custom sender.
+ * @param {string} to E.164 WhatsApp number (digits)
+ * @param {object} payload Transport-agnostic payload
+ * @param {string} [payload.text] Plain text body
+ * @param {string} [payload.link] Optional URL to include
+ * @param {string} [payload.mediaSlot] Internal only — never sent to Graph
+ * @param {string} [payload.templateName] If set, send an approved template instead of text
+ * @param {string} [payload.templateLanguage]
+ * @param {Array}  [payload.templateComponents]
+ * @param {object} [payload.meta]
  */
+async function cloudApiSendMessage(to, payload = {}) {
+  requireCredentials();
+  const toDigits = digitsOnly(to);
+
+  if (payload.templateName || payload.type === 'template') {
+    return cloudApiSendTemplate(toDigits, {
+      name: payload.templateName || payload.template,
+      language: payload.templateLanguage || payload.language || 'en_US',
+      components: payload.templateComponents || payload.components,
+    });
+  }
+
+  const bodyText = [payload.text, payload.link].filter(Boolean).join('\n\n');
+
+  // Only Graph-supported fields — never forward internal slots (e.g. mediaSlot)
+  return graphPost({
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: toDigits,
+    type: 'text',
+    text: {
+      preview_url: Boolean(payload.link),
+      body: bodyText || '',
+    },
+  });
+}
+
+/**
+ * Send an approved message template (required outside the 24h customer-care window).
+ */
+async function cloudApiSendTemplate(to, { name, language = 'en_US', components } = {}) {
+  requireCredentials();
+  if (!name) {
+    const err = new Error('template name required');
+    err.code = 'WHATSAPP_TEMPLATE_NAME_MISSING';
+    throw err;
+  }
+
+  const template = {
+    name,
+    language: { code: language },
+  };
+  if (Array.isArray(components) && components.length) {
+    template.components = components;
+  }
+
+  return graphPost({
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: digitsOnly(to),
+    type: 'template',
+    template,
+  });
+}
+
+async function graphGet(path, fields) {
+  const { token } = requireCredentials();
+  const { graphBaseUrl, apiVersion } = config.whatsapp;
+  const url = new URL(`${graphBaseUrl}/${apiVersion}/${path}`);
+  if (fields) url.searchParams.set('fields', fields);
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(`WhatsApp Graph GET failed: ${res.status}`);
+    err.status = res.status;
+    err.response = data;
+    throw err;
+  }
+  return data;
+}
+
 let activeSender = cloudApiSendMessage;
 
 function setSendMessage(fn) {
@@ -91,13 +151,8 @@ async function sendMessage(to, payload) {
   return activeSender(to, payload || {});
 }
 
-/**
- * Optional agent notify hook (webhook URL if configured).
- * Kept separate from customer sendMessage.
- */
 async function notifyAgent(event) {
   const url = config.agent.notifyWebhookUrl;
-  // Always log locally so handover is observable without CRM wiring
   // eslint-disable-next-line no-console
   console.log('[agent-notify]', JSON.stringify(event));
 
@@ -125,5 +180,7 @@ module.exports = {
   setSendMessage,
   resetSendMessage,
   cloudApiSendMessage,
+  cloudApiSendTemplate,
+  graphGet,
   notifyAgent,
 };

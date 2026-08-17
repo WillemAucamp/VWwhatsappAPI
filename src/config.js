@@ -18,11 +18,14 @@ function intEnv(name, fallback) {
 const config = {
   port: intEnv('PORT', 3000),
   nodeEnv: process.env.NODE_ENV || 'development',
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
 
   whatsapp: {
     token: process.env.WHATSAPP_TOKEN || '',
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+    wabaId: process.env.WHATSAPP_WABA_ID || '',
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'change-me-verify-token',
+    appSecret: process.env.WHATSAPP_APP_SECRET || '',
     apiVersion: process.env.WHATSAPP_API_VERSION || 'v21.0',
     graphBaseUrl: process.env.WHATSAPP_GRAPH_BASE_URL || 'https://graph.facebook.com',
   },
@@ -62,13 +65,15 @@ const config = {
    */
   followUp: {
     enabled: String(process.env.FOLLOW_UP_ENABLED || 'true').toLowerCase() !== 'false',
-    firstDelayMs: intEnv('FOLLOW_UP_FIRST_MS', 30 * 60 * 1000), // 30 minutes
-    intervalMs: intEnv('FOLLOW_UP_INTERVAL_MS', 4 * 60 * 60 * 1000), // 4 hours
+    firstDelayMs: intEnv('FOLLOW_UP_FIRST_MS', 30 * 60 * 1000),
+    intervalMs: intEnv('FOLLOW_UP_INTERVAL_MS', 4 * 60 * 60 * 1000),
     maxCount: intEnv('FOLLOW_UP_MAX', 3),
     pollMs: intEnv('FOLLOW_UP_POLL_MS', 60 * 1000),
-    includePrompt: String(process.env.FOLLOW_UP_INCLUDE_PROMPT || 'true').toLowerCase() !== 'false',
+    includePrompt:
+      String(process.env.FOLLOW_UP_INCLUDE_PROMPT || 'true').toLowerCase() !== 'false',
     notifyAgentOnExhausted:
-      String(process.env.FOLLOW_UP_NOTIFY_ON_EXHAUSTED || 'false').toLowerCase() === 'true',
+      String(process.env.FOLLOW_UP_NOTIFY_ON_EXHAUSTED || 'false').toLowerCase() ===
+      'true',
   },
 
   logger: {

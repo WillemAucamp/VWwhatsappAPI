@@ -4,14 +4,16 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 
-/**
- * Lightweight session store.
- * Default: JSON files under SESSION_STORE_PATH.
- * Optional: Redis when SESSION_STORE=redis and REDIS_URL is set (lazy require).
- */
-
 function now() {
   return Date.now();
+}
+
+function cloneSession(session) {
+  if (!session) return null;
+  return {
+    ...session,
+    path: Array.isArray(session.path) ? [...session.path] : [],
+  };
 }
 
 function createEmptySession(waNumber) {
@@ -25,7 +27,6 @@ function createEmptySession(waNumber) {
     createdAt: now(),
     updatedAt: now(),
     lastExitReason: null,
-    // Follow-up automation (no reply to last bot question)
     lastBotMessageAt: null,
     lastFollowUpAt: null,
     followUpCount: 0,
@@ -110,12 +111,12 @@ class MemorySessionStore {
       this.map.delete(String(waNumber));
       return null;
     }
-    return { ...data };
+    return cloneSession(data);
   }
 
   async set(waNumber, session) {
     session.updatedAt = now();
-    this.map.set(String(waNumber), { ...session });
+    this.map.set(String(waNumber), cloneSession(session));
     return session;
   }
 
@@ -130,7 +131,7 @@ class MemorySessionStore {
         this.map.delete(waNumber);
         continue;
       }
-      sessions.push({ ...data });
+      sessions.push(cloneSession(data));
     }
     return sessions;
   }
@@ -138,7 +139,6 @@ class MemorySessionStore {
 
 class RedisSessionStore {
   constructor(redisUrl) {
-    // Optional dependency — only loaded when configured
     // eslint-disable-next-line import/no-extraneous-dependencies, global-require
     const Redis = require('ioredis');
     this.client = new Redis(redisUrl);

@@ -3,7 +3,11 @@
 const config = require('../config');
 const { STATES, ENTRY_STATE } = require('../fsm/states');
 const { createEmptySession } = require('../session/store');
-const { buildOutboundText, listValidOptionHints, resolveCopy } = require('../content/resolve');
+const {
+  buildOutboundText,
+  listValidOptionHints,
+  resolveCopy,
+} = require('../content/resolve');
 const { buildRecord } = require('../logger/leadLogger');
 const transport = require('../transport/whatsapp');
 
@@ -20,9 +24,7 @@ function matchesKeywordList(normalized, keywords) {
     const k = String(kw).toLowerCase().trim();
     if (!k) return false;
     if (normalized === k) return true;
-    // phrase containment for multi-word intents like "opt out"
     if (k.includes(' ') && normalized.includes(k)) return true;
-    // whole-word match for single tokens
     if (!k.includes(' ')) {
       const re = new RegExp(`(^|\\s)${escapeRegex(k)}(\\s|$)`, 'i');
       return re.test(normalized);
@@ -59,15 +61,6 @@ function linkForState(state) {
  * FSM engine — resolves session, matches help-intent / options, retries, escalates.
  */
 class FsmEngine {
-  /**
-   * @param {object} deps
-   * @param {object} deps.sessionStore
-   * @param {object} deps.leadLogger
-   * @param {Function} [deps.sendMessage]
-   * @param {Function} [deps.notifyAgent]
-   * @param {object} [deps.options]
-   * @param {boolean} [deps.options.stubMarker] show {{COPY.x}} when blank (tests)
-   */
   constructor({ sessionStore, leadLogger, sendMessage, notifyAgent, options } = {}) {
     if (!sessionStore) throw new Error('sessionStore required');
     if (!leadLogger) throw new Error('leadLogger required');
@@ -77,10 +70,40 @@ class FsmEngine {
     this.notifyAgent = notifyAgent || transport.notifyAgent;
     this.stubMarker = Boolean(options && options.stubMarker);
     this.nowFn = (options && options.nowFn) || (() => Date.now());
+    /** @type {Map<string, Promise<void>>} */
+    this._sessionChains = new Map();
   }
 
   _now() {
     return this.nowFn();
+  }
+
+  /**
+   * Serialize all session mutations per WhatsApp number.
+   * Follow-up sends and inbound replies both read-modify-write the same session.
+   */
+  async _withSessionLock(waNumber, fn) {
+    const key = String(waNumber);
+    const prev = this._sessionChains.get(key) || Promise.resolve();
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const chain = prev.then(
+      () => gate,
+      () => gate
+    );
+    this._sessionChains.set(key, chain);
+
+    await prev.catch(() => {});
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this._sessionChains.get(key) === chain) {
+        this._sessionChains.delete(key);
+      }
+    }
   }
 
   _armWaitingFollowUp(session) {
@@ -97,9 +120,6 @@ class FsmEngine {
     session.followUpsExhausted = false;
   }
 
-  /**
-   * Next due timestamp for a waiting session, or null if none.
-   */
   nextFollowUpDueAt(session, followUpConfig = config.followUp) {
     if (!session || !followUpConfig.enabled) return null;
     if (session.status !== 'active') return null;
@@ -118,10 +138,17 @@ class FsmEngine {
     return anchor + followUpConfig.intervalMs;
   }
 
-  /**
-   * Send a due no-reply follow-up for one number (idempotent if not due).
-   */
   async processFollowUp(waNumber, now = this._now(), followUpConfig = config.followUp) {
+    return this._withSessionLock(waNumber, () =>
+      this._processFollowUpUnlocked(waNumber, now, followUpConfig)
+    );
+  }
+
+  async _processFollowUpUnlocked(
+    waNumber,
+    now = this._now(),
+    followUpConfig = config.followUp
+  ) {
     if (!followUpConfig.enabled) return { sent: false, reason: 'disabled' };
 
     const session = await this.sessionStore.get(waNumber);
@@ -229,6 +256,7 @@ class FsmEngine {
     if (!state) throw new Error(`Unknown state: ${stateId}`);
 
     session.currentState = stateId;
+    session.path = Array.isArray(session.path) ? session.path.slice() : [];
     session.path.push(stateId);
     session.invalidAttempts = 0;
     session.status = 'active';
@@ -238,7 +266,18 @@ class FsmEngine {
       session.interruptedFrom = fromInterrupt;
     }
 
-    await this._send(session.waNumber, state.promptKey, state);
+    let sendError = null;
+    try {
+      await this._send(session.waNumber, state.promptKey, state);
+    } catch (err) {
+      if (!state.terminal) throw err;
+      sendError = err;
+      // eslint-disable-next-line no-console
+      console.error(
+        '[fsm] terminal outbound send failed; persisting terminal state anyway',
+        { stateId, waNumber: session.waNumber, message: err.message }
+      );
+    }
 
     if (state.terminal) {
       this._clearFollowUp(session);
@@ -248,6 +287,7 @@ class FsmEngine {
     }
 
     await this.sessionStore.set(session.waNumber, session);
+    if (sendError) throw sendError;
     return { session, state };
   }
 
@@ -282,8 +322,6 @@ class FsmEngine {
 
     if (state.quiet) {
       session.status = 'quiet';
-    } else if (state.softDecline) {
-      session.status = 'soft_closed';
     } else {
       session.status = 'soft_closed';
     }
@@ -311,7 +349,6 @@ class FsmEngine {
     const hintLine = hints.length ? hints.join(' | ') : '';
     const extra = [reprompt, hintLine].filter(Boolean).join('\n');
 
-    // Re-prompt current state options with footer
     await this._send(session.waNumber, state.promptKey, state, extra);
     this._armWaitingFollowUp(session);
     await this.sessionStore.set(session.waNumber, session);
@@ -342,21 +379,20 @@ class FsmEngine {
     return this._enterState(session, ENTRY_STATE);
   }
 
-  /**
-   * Process one inbound customer message.
-   * @param {string} waNumber
-   * @param {string} text
-   */
   async handleInbound(waNumber, text) {
+    return this._withSessionLock(waNumber, () =>
+      this._handleInboundUnlocked(waNumber, text)
+    );
+  }
+
+  async _handleInboundUnlocked(waNumber, text) {
     const normalized = normalizeInput(text);
     let session = await this.getOrCreateSession(waNumber);
 
-    // Quiet thread (HUMAN_HANDOVER): stay silent unless reopen keyword
     if (session.status === 'quiet') {
       if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
         return this._restart(session);
       }
-      // Bot stays quiet — optional stub notice only if configured non-empty
       const quietNotice = resolveCopy('quiet_thread_notice', {
         stubMarker: false,
       });
@@ -366,26 +402,21 @@ class FsmEngine {
       return { session, quiet: true };
     }
 
-    // Soft decline closed: any new message restarts cleanly
     if (session.status === 'soft_closed') {
       return this._restart(session);
     }
 
-    // New / no state → enter GREETING (first message may also be help-intent)
     if (!session.currentState || session.status === 'new') {
-      // Universal opt-out even before first state settles
       if (matchesKeywordList(normalized, config.fsm.helpIntentKeywords)) {
         session.status = 'active';
         session.path = [];
         return this._routeToHuman(session, null);
       }
 
-      // First inbound starts the flow (message itself is not matched as a choice)
       session.status = 'active';
       return this._enterState(session, ENTRY_STATE);
     }
 
-    // Universal help / opt-out — before option matching, from any state
     if (matchesKeywordList(normalized, config.fsm.helpIntentKeywords)) {
       return this._routeToHuman(session, session.currentState);
     }
@@ -395,7 +426,6 @@ class FsmEngine {
       return this._enterState(session, ENTRY_STATE);
     }
 
-    // Terminal should not receive input while active; treat as restart safety net
     if (state.terminal) {
       if (state.quiet) {
         session.status = 'quiet';
@@ -406,7 +436,6 @@ class FsmEngine {
       return this._restart(session);
     }
 
-    // Info states always continue to a fixed next state on any non-help input
     if (state.type === 'info' && state.next) {
       return this._enterState(session, state.next);
     }

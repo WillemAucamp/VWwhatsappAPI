@@ -1,0 +1,33 @@
+'use strict';
+
+const { spawnSync } = require('child_process');
+const path = require('path');
+
+const files = [
+  'manual-test.js',
+  'critical-bugs.test.js',
+  'terminal-send-failure.test.js',
+  'followup-inbound-race.test.js',
+  'webhook-dedupe.test.js',
+  'followup-tick-isolation.test.js',
+  'meta-readiness.test.js',
+  'transport-graph.test.js',
+];
+
+let failed = 0;
+for (const file of files) {
+  const full = path.join(__dirname, file);
+  // eslint-disable-next-line no-console
+  console.log(`\n======== ${file} ========`);
+  const result = spawnSync(process.execPath, [full], { stdio: 'inherit' });
+  if (result.status !== 0) failed += 1;
+}
+
+if (failed) {
+  // eslint-disable-next-line no-console
+  console.error(`\n${failed} test file(s) failed`);
+  process.exit(1);
+}
+
+// eslint-disable-next-line no-console
+console.log('\nAll test files passed.');

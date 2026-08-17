@@ -3,7 +3,8 @@
 /**
  * Customer-facing copy stubs.
  * Every key the FSM references lives here, blank until a human writes real content.
- * Do not put advice, sales language, or persuasive text in this file during the build.
+ * Fill these before real clients — empty keys send empty WhatsApp bodies.
+ * See docs/META_SETUP.md.
  *
  * Placeholder convention in FSM prompts: {{COPY.key_name}}
  * Runtime also injects {{FOOTER.help}} and link placeholders from config.
