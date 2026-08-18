@@ -179,34 +179,53 @@ class FsmEngine {
 
     if (footer) parts.push(footer);
 
-    await this.sendMessage(session.waNumber, {
-      text: parts.filter(Boolean).join('\n\n'),
-      link: linkForState(state),
-      meta: {
-        type: 'follow_up',
-        followUpIndex: session.followUpCount + 1,
-        stateId: session.currentState,
-        promptKey,
-      },
-    });
+    // Persist the follow-up slot before Graph send. Otherwise a successful
+    // send + failed sessionStore.set leaves lastFollowUpAt unset and the next
+    // scheduler tick re-sends the same nudge.
+    const prevCount = session.followUpCount;
+    const prevFollowUpAt = session.lastFollowUpAt;
+    const prevExhausted = session.followUpsExhausted;
 
     session.followUpCount += 1;
     session.lastFollowUpAt = now;
     if (session.followUpCount >= followUpConfig.maxCount) {
       session.followUpsExhausted = true;
-      if (followUpConfig.notifyAgentOnExhausted) {
-        await this.notifyAgent({
-          type: 'follow_up_exhausted',
-          waNumber: session.waNumber,
-          path: session.path,
-          currentState: session.currentState,
-          followUpCount: session.followUpCount,
-          timestamp: new Date(now).toISOString(),
-        });
-      }
+    }
+    await this.sessionStore.set(session.waNumber, session);
+
+    try {
+      await this.sendMessage(session.waNumber, {
+        text: parts.filter(Boolean).join('\n\n'),
+        link: linkForState(state),
+        meta: {
+          type: 'follow_up',
+          followUpIndex: session.followUpCount,
+          stateId: session.currentState,
+          promptKey,
+        },
+      });
+    } catch (err) {
+      session.followUpCount = prevCount;
+      session.lastFollowUpAt = prevFollowUpAt;
+      session.followUpsExhausted = prevExhausted;
+      await this.sessionStore.set(session.waNumber, session);
+      throw err;
     }
 
-    await this.sessionStore.set(session.waNumber, session);
+    if (
+      session.followUpsExhausted &&
+      followUpConfig.notifyAgentOnExhausted
+    ) {
+      await this.notifyAgent({
+        type: 'follow_up_exhausted',
+        waNumber: session.waNumber,
+        path: session.path,
+        currentState: session.currentState,
+        followUpCount: session.followUpCount,
+        timestamp: new Date(now).toISOString(),
+      });
+    }
+
     return {
       sent: true,
       waNumber: session.waNumber,
@@ -284,9 +303,9 @@ class FsmEngine {
       await this._finalizeTerminal(session, state);
     } else {
       this._armWaitingFollowUp(session);
+      await this.sessionStore.set(session.waNumber, session);
     }
 
-    await this.sessionStore.set(session.waNumber, session);
     if (sendError) throw sendError;
     return { session, state };
   }
@@ -294,6 +313,19 @@ class FsmEngine {
   async _finalizeTerminal(session, state) {
     const exitReason = state.exitReason;
     session.lastExitReason = exitReason;
+
+    if (state.quiet) {
+      session.status = 'quiet';
+    } else {
+      session.status = 'soft_closed';
+    }
+
+    // Persist terminal/quiet status BEFORE lead/agent side effects. If set
+    // runs after logLead and throws, the customer already got the terminal
+    // WhatsApp message + a CRM lead, but the store still says "active" at the
+    // prior question — Meta retry / re-answer then double-logs the lead and
+    // continues the funnel.
+    await this.sessionStore.set(session.waNumber, session);
 
     const record = buildRecord({
       waNumber: session.waNumber,
@@ -318,12 +350,6 @@ class FsmEngine {
         agentHandoverNumber: config.agent.handoverNumber || null,
         timestamp: record.timestamp,
       });
-    }
-
-    if (state.quiet) {
-      session.status = 'quiet';
-    } else {
-      session.status = 'soft_closed';
     }
   }
 

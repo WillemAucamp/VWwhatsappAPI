@@ -63,7 +63,12 @@ class FileSessionStore {
   async set(waNumber, session) {
     session.updatedAt = now();
     const file = this._file(waNumber);
-    fs.writeFileSync(file, JSON.stringify(session, null, 2), 'utf8');
+    // Atomic replace: writeFileSync truncates first, so a crash mid-write
+    // left an empty/partial JSON that get() treated as "no session" and
+    // wiped in-progress qualification state.
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(session, null, 2), 'utf8');
+    fs.renameSync(tmp, file);
     return session;
   }
 
