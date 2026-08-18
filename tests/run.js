@@ -7,6 +7,7 @@ const files = [
   'manual-test.js',
   'critical-bugs.test.js',
   'terminal-send-failure.test.js',
+  'terminal-persist-before-lead.test.js',
   'followup-inbound-race.test.js',
   'webhook-dedupe.test.js',
   'followup-tick-isolation.test.js',
