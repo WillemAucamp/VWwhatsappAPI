@@ -13,6 +13,15 @@ function cloneSession(session) {
   return {
     ...session,
     path: Array.isArray(session.path) ? [...session.path] : [],
+    pendingLead: session.pendingLead
+      ? {
+          ...session.pendingLead,
+          path: Array.isArray(session.pendingLead.path)
+            ? [...session.pendingLead.path]
+            : [],
+          meta: session.pendingLead.meta ? { ...session.pendingLead.meta } : {},
+        }
+      : null,
   };
 }
 
@@ -27,6 +36,7 @@ function createEmptySession(waNumber) {
     createdAt: now(),
     updatedAt: now(),
     lastExitReason: null,
+    pendingLead: null,
     lastBotMessageAt: null,
     lastFollowUpAt: null,
     followUpCount: 0,

@@ -338,19 +338,61 @@ class FsmEngine {
       },
     });
 
-    await this.leadLogger.logLead(record);
+    // Side effects after a successful terminal persist must not fail the
+    // inbound. Throwing here releases webhook dedupe; a Meta retry (or the
+    // customer's next message) sees soft_closed/quiet and _restart()s, so the
+    // completed path is wiped and the lead is never written. Queue instead
+    // and flush on the next inbound before restart/quiet handling.
+    try {
+      await this.leadLogger.logLead(record);
+      session.pendingLead = null;
+    } catch (err) {
+      session.pendingLead = record;
+      await this.sessionStore.set(session.waNumber, session);
+      // eslint-disable-next-line no-console
+      console.error(
+        '[fsm] lead log failed after terminal persist; queued pendingLead',
+        {
+          waNumber: session.waNumber,
+          exitReason,
+          message: err && err.message ? err.message : String(err),
+        }
+      );
+    }
 
     if (state.notifyAgent) {
-      await this.notifyAgent({
-        type: 'handover',
-        exitReason,
-        waNumber: session.waNumber,
-        path: session.path,
-        interruptedFrom: session.interruptedFrom,
-        agentHandoverNumber: config.agent.handoverNumber || null,
-        timestamp: record.timestamp,
-      });
+      try {
+        await this.notifyAgent({
+          type: 'handover',
+          exitReason,
+          waNumber: session.waNumber,
+          path: session.path,
+          interruptedFrom: session.interruptedFrom,
+          agentHandoverNumber: config.agent.handoverNumber || null,
+          timestamp: record.timestamp,
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[fsm] agent notify failed after terminal persist', {
+          waNumber: session.waNumber,
+          exitReason,
+          message: err && err.message ? err.message : String(err),
+        });
+      }
     }
+  }
+
+  /**
+   * Write a lead that failed during _finalizeTerminal before soft_closed
+   * restart / quiet handling can drop the completed qualification path.
+   */
+  async _flushPendingLead(session) {
+    if (!session || !session.pendingLead) return false;
+    const record = session.pendingLead;
+    await this.leadLogger.logLead(record);
+    session.pendingLead = null;
+    await this.sessionStore.set(session.waNumber, session);
+    return true;
   }
 
   async _routeToHuman(session, interruptedFrom) {
@@ -393,6 +435,7 @@ class FsmEngine {
     session.status = 'active';
     session.interruptedFrom = null;
     session.lastExitReason = null;
+    session.pendingLead = null;
     this._clearFollowUp(session);
 
     if (notice || footer) {
@@ -416,6 +459,7 @@ class FsmEngine {
     let session = await this.getOrCreateSession(waNumber);
 
     if (session.status === 'quiet') {
+      await this._flushPendingLead(session);
       if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
         return this._restart(session);
       }
@@ -429,6 +473,7 @@ class FsmEngine {
     }
 
     if (session.status === 'soft_closed') {
+      await this._flushPendingLead(session);
       return this._restart(session);
     }
 
