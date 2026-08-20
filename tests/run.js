@@ -9,6 +9,7 @@ const files = [
   'terminal-send-failure.test.js',
   'terminal-persist-before-lead.test.js',
   'pending-lead-flush.test.js',
+  'pending-lead-prepersist.test.js',
   'followup-inbound-race.test.js',
   'webhook-dedupe.test.js',
   'followup-tick-isolation.test.js',

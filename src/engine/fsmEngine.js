@@ -72,6 +72,35 @@ class FsmEngine {
     this.nowFn = (options && options.nowFn) || (() => Date.now());
     /** @type {Map<string, Promise<void>>} */
     this._sessionChains = new Map();
+    /** @type {Set<string>} in-process idempotency for pendingLead flushes */
+    this._loggedLeadKeys = new Set();
+  }
+
+  _leadKey(record) {
+    if (!record) return '';
+    const pathKey = Array.isArray(record.path) ? record.path.join('>') : '';
+    return `${record.waNumber}|${record.exitReason}|${pathKey}|${record.timestamp}`;
+  }
+
+  /**
+   * Log a lead at most once per record fingerprint for this process.
+   * pendingLead reuse after a successful log + failed clear-set must not
+   * double-write the CRM/log on the next inbound flush.
+   */
+  async _logLeadOnce(record) {
+    const key = this._leadKey(record);
+    if (!key) {
+      await this.leadLogger.logLead(record);
+      return true;
+    }
+    if (this._loggedLeadKeys.has(key)) return false;
+    await this.leadLogger.logLead(record);
+    this._loggedLeadKeys.add(key);
+    if (this._loggedLeadKeys.size > 4096) {
+      const oldest = this._loggedLeadKeys.values().next().value;
+      this._loggedLeadKeys.delete(oldest);
+    }
+    return true;
   }
 
   _now() {
@@ -320,13 +349,6 @@ class FsmEngine {
       session.status = 'soft_closed';
     }
 
-    // Persist terminal/quiet status BEFORE lead/agent side effects. If set
-    // runs after logLead and throws, the customer already got the terminal
-    // WhatsApp message + a CRM lead, but the store still says "active" at the
-    // prior question — Meta retry / re-answer then double-logs the lead and
-    // continues the funnel.
-    await this.sessionStore.set(session.waNumber, session);
-
     const record = buildRecord({
       waNumber: session.waNumber,
       exitReason,
@@ -338,20 +360,25 @@ class FsmEngine {
       },
     });
 
-    // Side effects after a successful terminal persist must not fail the
-    // inbound. Throwing here releases webhook dedupe; a Meta retry (or the
-    // customer's next message) sees soft_closed/quiet and _restart()s, so the
-    // completed path is wiped and the lead is never written. Queue instead
-    // and flush on the next inbound before restart/quiet handling.
+    // Persist terminal/quiet status WITH pendingLead before logLead.
+    // Soft_closed alone then a failed/crashed pendingLead write left disk in
+    // soft_closed with nothing to flush — the next inbound _restart()s and
+    // the qualification lead is gone forever. Pre-queuing keeps the payload
+    // durable even when logLead (or a later clear-set) fails.
+    session.pendingLead = record;
+    await this.sessionStore.set(session.waNumber, session);
+
     try {
-      await this.leadLogger.logLead(record);
+      await this._logLeadOnce(record);
       session.pendingLead = null;
-    } catch (err) {
-      session.pendingLead = record;
       await this.sessionStore.set(session.waNumber, session);
+    } catch (err) {
+      // pendingLead remains on disk from the first persist when logLead
+      // failed. If logLead succeeded and only clear-set failed, flush is
+      // idempotent via _logLeadOnce.
       // eslint-disable-next-line no-console
       console.error(
-        '[fsm] lead log failed after terminal persist; queued pendingLead',
+        '[fsm] lead log or pendingLead clear failed after terminal persist; leaving pendingLead queued',
         {
           waNumber: session.waNumber,
           exitReason,
@@ -389,7 +416,7 @@ class FsmEngine {
   async _flushPendingLead(session) {
     if (!session || !session.pendingLead) return false;
     const record = session.pendingLead;
-    await this.leadLogger.logLead(record);
+    await this._logLeadOnce(record);
     session.pendingLead = null;
     await this.sessionStore.set(session.waNumber, session);
     return true;
