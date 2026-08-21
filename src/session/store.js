@@ -8,6 +8,17 @@ function now() {
   return Date.now();
 }
 
+/**
+ * Sessions with a queued pendingLead must not be TTL-purged: that payload is
+ * the only durable copy of a qualification lead after logLead failed, and
+ * listAll()/get() would otherwise delete it forever.
+ */
+function isSessionExpired(session, ttlMs = config.session.ttlMs, at = now()) {
+  if (!session || !session.updatedAt) return true;
+  if (session.pendingLead) return false;
+  return at - session.updatedAt > ttlMs;
+}
+
 function cloneSession(session) {
   if (!session) return null;
   return {
@@ -60,7 +71,7 @@ class FileSessionStore {
     if (!fs.existsSync(file)) return null;
     try {
       const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (this._expired(data)) {
+      if (isSessionExpired(data)) {
         await this.delete(waNumber);
         return null;
       }
@@ -96,7 +107,7 @@ class FileSessionStore {
           fs.readFileSync(path.join(this.dir, file), 'utf8')
         );
         if (!data || !data.waNumber) continue;
-        if (this._expired(data)) {
+        if (isSessionExpired(data)) {
           await this.delete(data.waNumber);
           continue;
         }
@@ -106,11 +117,6 @@ class FileSessionStore {
       }
     }
     return sessions;
-  }
-
-  _expired(session) {
-    if (!session || !session.updatedAt) return true;
-    return now() - session.updatedAt > config.session.ttlMs;
   }
 }
 
@@ -122,7 +128,7 @@ class MemorySessionStore {
   async get(waNumber) {
     const data = this.map.get(String(waNumber));
     if (!data) return null;
-    if (now() - data.updatedAt > config.session.ttlMs) {
+    if (isSessionExpired(data)) {
       this.map.delete(String(waNumber));
       return null;
     }
@@ -142,7 +148,7 @@ class MemorySessionStore {
   async listAll() {
     const sessions = [];
     for (const [waNumber, data] of this.map.entries()) {
-      if (now() - data.updatedAt > config.session.ttlMs) {
+      if (isSessionExpired(data)) {
         this.map.delete(waNumber);
         continue;
       }
@@ -177,12 +183,14 @@ class RedisSessionStore {
 
   async set(waNumber, session) {
     session.updatedAt = now();
-    await this.client.set(
-      this._key(waNumber),
-      JSON.stringify(session),
-      'EX',
-      this.ttlSec
-    );
+    const key = this._key(waNumber);
+    const payload = JSON.stringify(session);
+    // Queued leads must outlive the normal session TTL or Redis EX drops them.
+    if (session.pendingLead) {
+      await this.client.set(key, payload);
+    } else {
+      await this.client.set(key, payload, 'EX', this.ttlSec);
+    }
     return session;
   }
 
@@ -233,6 +241,7 @@ function createSessionStore(override) {
 module.exports = {
   createSessionStore,
   createEmptySession,
+  isSessionExpired,
   FileSessionStore,
   MemorySessionStore,
 };

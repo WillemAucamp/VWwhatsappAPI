@@ -422,6 +422,18 @@ class FsmEngine {
     return true;
   }
 
+  /**
+   * Background / scheduler entry: flush a queued pendingLead under the
+   * per-number lock so CRM recovery does not depend on the customer texting.
+   */
+  async flushPendingLead(waNumber) {
+    return this._withSessionLock(waNumber, async () => {
+      const session = await this.sessionStore.get(waNumber);
+      if (!session) return false;
+      return this._flushPendingLead(session);
+    });
+  }
+
   async _routeToHuman(session, interruptedFrom) {
     session.interruptedFrom = interruptedFrom || session.currentState;
     return this._enterState(session, 'HUMAN_HANDOVER', {

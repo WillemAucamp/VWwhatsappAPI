@@ -66,9 +66,19 @@ class FollowUpScheduler {
     try {
       const sessions = await this.sessionStore.listAll();
       const sent = [];
+      const flushed = [];
       const errors = [];
       for (const session of sessions) {
         try {
+          // Drain queued leads before follow-up eligibility. Pending leads are
+          // exempt from session TTL, but still need a writer when CRM recovers
+          // even if the customer never messages again.
+          if (session.pendingLead && typeof this.engine.flushPendingLead === 'function') {
+            // eslint-disable-next-line no-await-in-loop
+            const didFlush = await this.engine.flushPendingLead(session.waNumber);
+            if (didFlush) flushed.push(session.waNumber);
+          }
+
           // eslint-disable-next-line no-await-in-loop
           const result = await this.engine.processFollowUp(
             session.waNumber,
@@ -91,6 +101,7 @@ class FollowUpScheduler {
       return {
         checked: sessions.length,
         sent: sent.length,
+        flushed: flushed.length,
         details: sent,
         errors,
       };
