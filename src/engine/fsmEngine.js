@@ -329,6 +329,12 @@ class FsmEngine {
 
     if (state.terminal) {
       this._clearFollowUp(session);
+      // Soft_closed/quiet must stick (opt-out / completed qualify), but if Graph
+      // never delivered the terminal body the next inbound must retry that send
+      // instead of _restart()-ing and discarding the finished path.
+      session.pendingTerminalOutbound = sendError
+        ? { stateId: state.id, promptKey: state.promptKey }
+        : null;
       await this._finalizeTerminal(session, state);
     } else {
       this._armWaitingFollowUp(session);
@@ -337,6 +343,46 @@ class FsmEngine {
 
     if (sendError) throw sendError;
     return { session, state };
+  }
+
+  /**
+   * Re-send a terminal prompt that failed after the session was already
+   * finalized to soft_closed/quiet. Does not restart the funnel.
+   */
+  async _retryTerminalOutbound(session) {
+    const pending = session.pendingTerminalOutbound;
+    const stateId =
+      (pending && pending.stateId) || session.currentState;
+    const state = STATES[stateId];
+    if (!state || !state.terminal) {
+      session.pendingTerminalOutbound = null;
+      await this.sessionStore.set(session.waNumber, session);
+      return { session, retried: false, reason: 'no_terminal_state' };
+    }
+
+    const promptKey =
+      (pending && pending.promptKey) || state.promptKey;
+
+    try {
+      await this._send(session.waNumber, promptKey, state);
+    } catch (err) {
+      // Leave pendingTerminalOutbound set so a later inbound can try again.
+      // eslint-disable-next-line no-console
+      console.error(
+        '[fsm] terminal outbound retry failed; keeping pendingTerminalOutbound',
+        {
+          stateId,
+          waNumber: session.waNumber,
+          message: err && err.message ? err.message : String(err),
+        }
+      );
+      throw err;
+    }
+
+    session.pendingTerminalOutbound = null;
+    session.updatedAt = this._now();
+    await this.sessionStore.set(session.waNumber, session);
+    return { session, state, resentTerminal: true };
   }
 
   async _finalizeTerminal(session, state) {
@@ -475,6 +521,7 @@ class FsmEngine {
     session.interruptedFrom = null;
     session.lastExitReason = null;
     session.pendingLead = null;
+    session.pendingTerminalOutbound = null;
     this._clearFollowUp(session);
 
     if (notice || footer) {
@@ -499,6 +546,9 @@ class FsmEngine {
 
     if (session.status === 'quiet') {
       await this._flushPendingLead(session);
+      if (session.pendingTerminalOutbound) {
+        return this._retryTerminalOutbound(session);
+      }
       if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
         return this._restart(session);
       }
@@ -513,6 +563,9 @@ class FsmEngine {
 
     if (session.status === 'soft_closed') {
       await this._flushPendingLead(session);
+      if (session.pendingTerminalOutbound) {
+        return this._retryTerminalOutbound(session);
+      }
       return this._restart(session);
     }
 
@@ -537,6 +590,9 @@ class FsmEngine {
     }
 
     if (state.terminal) {
+      if (session.pendingTerminalOutbound) {
+        return this._retryTerminalOutbound(session);
+      }
       if (state.quiet) {
         session.status = 'quiet';
         await this.sessionStore.set(waNumber, session);

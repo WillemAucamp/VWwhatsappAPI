@@ -33,6 +33,9 @@ function cloneSession(session) {
           meta: session.pendingLead.meta ? { ...session.pendingLead.meta } : {},
         }
       : null,
+    pendingTerminalOutbound: session.pendingTerminalOutbound
+      ? { ...session.pendingTerminalOutbound }
+      : null,
   };
 }
 
@@ -48,6 +51,9 @@ function createEmptySession(waNumber) {
     updatedAt: now(),
     lastExitReason: null,
     pendingLead: null,
+    // Set when a terminal Graph send fails after we still persist soft_closed/quiet.
+    // Next inbound retries that outbound instead of wiping the completed path.
+    pendingTerminalOutbound: null,
     lastBotMessageAt: null,
     lastFollowUpAt: null,
     followUpCount: 0,

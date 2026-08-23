@@ -7,6 +7,7 @@ const files = [
   'manual-test.js',
   'critical-bugs.test.js',
   'terminal-send-failure.test.js',
+  'terminal-outbound-retry.test.js',
   'terminal-persist-before-lead.test.js',
   'pending-lead-flush.test.js',
   'pending-lead-prepersist.test.js',
