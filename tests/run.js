@@ -12,6 +12,7 @@ const files = [
   'pending-lead-flush.test.js',
   'pending-lead-prepersist.test.js',
   'pending-lead-ttl.test.js',
+  'pending-terminal-outbound-ttl.test.js',
   'followup-inbound-race.test.js',
   'webhook-dedupe.test.js',
   'followup-tick-isolation.test.js',
