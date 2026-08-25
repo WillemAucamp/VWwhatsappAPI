@@ -10,6 +10,7 @@ const files = [
   'terminal-outbound-retry.test.js',
   'terminal-persist-before-lead.test.js',
   'pending-lead-flush.test.js',
+  'pending-lead-restart-idempotency.test.js',
   'pending-lead-prepersist.test.js',
   'pending-lead-ttl.test.js',
   'pending-terminal-outbound-ttl.test.js',
