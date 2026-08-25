@@ -39,6 +39,7 @@ function cloneSession(session) {
     pendingTerminalOutbound: session.pendingTerminalOutbound
       ? { ...session.pendingTerminalOutbound }
       : null,
+    lastLoggedLeadKey: session.lastLoggedLeadKey || null,
   };
 }
 
@@ -57,6 +58,9 @@ function createEmptySession(waNumber) {
     // Set when a terminal Graph send fails after we still persist soft_closed/quiet.
     // Next inbound retries that outbound instead of wiping the completed path.
     pendingTerminalOutbound: null,
+    // Durable lead-log fingerprint so a successful logLead + failed pendingLead
+    // clear cannot double-write after process restart (in-memory set is lost).
+    lastLoggedLeadKey: null,
     lastBotMessageAt: null,
     lastFollowUpAt: null,
     followUpCount: 0,

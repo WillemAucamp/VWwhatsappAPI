@@ -83,24 +83,61 @@ class FsmEngine {
   }
 
   /**
-   * Log a lead at most once per record fingerprint for this process.
-   * pendingLead reuse after a successful log + failed clear-set must not
-   * double-write the CRM/log on the next inbound flush.
+   * Log a lead at most once per record fingerprint.
+   * In-memory _loggedLeadKeys covers same-process retries; session.lastLoggedLeadKey
+   * is persisted after a successful log so a failed pendingLead clear + process
+   * restart cannot double-write the CRM/log on the next flush.
    */
-  async _logLeadOnce(record) {
+  async _logLeadOnce(record, session) {
     const key = this._leadKey(record);
     if (!key) {
       await this.leadLogger.logLead(record);
       return true;
     }
-    if (this._loggedLeadKeys.has(key)) return false;
+    if (session && session.lastLoggedLeadKey === key) return false;
+    if (this._loggedLeadKeys.has(key)) {
+      if (session) session.lastLoggedLeadKey = key;
+      return false;
+    }
     await this.leadLogger.logLead(record);
     this._loggedLeadKeys.add(key);
+    if (session) session.lastLoggedLeadKey = key;
     if (this._loggedLeadKeys.size > 4096) {
       const oldest = this._loggedLeadKeys.values().next().value;
       this._loggedLeadKeys.delete(oldest);
     }
     return true;
+  }
+
+  /**
+   * After logLead succeeds, durably record the fingerprint while pendingLead
+   * is still set. Then clear pendingLead. If only the clear write fails (or
+   * the process dies after this marker), the next flush skips logLead.
+   */
+  async _persistLoggedLeadAndClearPending(session, record) {
+    const key = this._leadKey(record);
+    if (key) session.lastLoggedLeadKey = key;
+    // Marker write: lastLoggedLeadKey set, pendingLead still present.
+    await this.sessionStore.set(session.waNumber, session);
+    session.pendingLead = null;
+    await this.sessionStore.set(session.waNumber, session);
+  }
+
+  /**
+   * If logLead succeeded but marker/clear persistence failed, try once more to
+   * leave lastLoggedLeadKey on disk so a restart flush will not double-log.
+   */
+  async _bestEffortPersistLeadLogMarker(session, record) {
+    const key = this._leadKey(record);
+    if (!key) return;
+    if (session.lastLoggedLeadKey !== key && !this._loggedLeadKeys.has(key)) return;
+    try {
+      session.lastLoggedLeadKey = key;
+      session.pendingLead = record;
+      await this.sessionStore.set(session.waNumber, session);
+    } catch (_) {
+      // Disk still broken — pendingLead from the initial terminal persist remains.
+    }
   }
 
   _now() {
@@ -415,13 +452,13 @@ class FsmEngine {
     await this.sessionStore.set(session.waNumber, session);
 
     try {
-      await this._logLeadOnce(record);
-      session.pendingLead = null;
-      await this.sessionStore.set(session.waNumber, session);
+      await this._logLeadOnce(record, session);
+      await this._persistLoggedLeadAndClearPending(session, record);
     } catch (err) {
       // pendingLead remains on disk from the first persist when logLead
-      // failed. If logLead succeeded and only clear-set failed, flush is
-      // idempotent via _logLeadOnce.
+      // failed. If logLead succeeded and the marker/clear set failed,
+      // best-effort write lastLoggedLeadKey so a restart flush is idempotent.
+      await this._bestEffortPersistLeadLogMarker(session, record);
       // eslint-disable-next-line no-console
       console.error(
         '[fsm] lead log or pendingLead clear failed after terminal persist; leaving pendingLead queued',
@@ -462,9 +499,20 @@ class FsmEngine {
   async _flushPendingLead(session) {
     if (!session || !session.pendingLead) return false;
     const record = session.pendingLead;
-    await this._logLeadOnce(record);
-    session.pendingLead = null;
-    await this.sessionStore.set(session.waNumber, session);
+    const key = this._leadKey(record);
+    // Already logged (marker survived a failed clear or prior flush).
+    if (key && session.lastLoggedLeadKey === key) {
+      session.pendingLead = null;
+      await this.sessionStore.set(session.waNumber, session);
+      return true;
+    }
+    try {
+      await this._logLeadOnce(record, session);
+      await this._persistLoggedLeadAndClearPending(session, record);
+    } catch (err) {
+      await this._bestEffortPersistLeadLogMarker(session, record);
+      throw err;
+    }
     return true;
   }
 
@@ -522,6 +570,7 @@ class FsmEngine {
     session.lastExitReason = null;
     session.pendingLead = null;
     session.pendingTerminalOutbound = null;
+    session.lastLoggedLeadKey = null;
     this._clearFollowUp(session);
 
     if (notice || footer) {
