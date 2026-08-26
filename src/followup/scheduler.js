@@ -67,6 +67,7 @@ class FollowUpScheduler {
       const sessions = await this.sessionStore.listAll();
       const sent = [];
       const flushed = [];
+      const resentTerminal = [];
       const errors = [];
       for (const session of sessions) {
         try {
@@ -77,6 +78,22 @@ class FollowUpScheduler {
             // eslint-disable-next-line no-await-in-loop
             const didFlush = await this.engine.flushPendingLead(session.waNumber);
             if (didFlush) flushed.push(session.waNumber);
+          }
+
+          // Terminal Graph failures leave pendingTerminalOutbound after soft_closed.
+          // The customer already answered the last question and is waiting for the
+          // application link / handover — they will not inbound to trigger retry.
+          if (
+            session.pendingTerminalOutbound &&
+            typeof this.engine.retryPendingTerminalOutbound === 'function'
+          ) {
+            // eslint-disable-next-line no-await-in-loop
+            const retryResult = await this.engine.retryPendingTerminalOutbound(
+              session.waNumber
+            );
+            if (retryResult && retryResult.resentTerminal) {
+              resentTerminal.push(session.waNumber);
+            }
           }
 
           // eslint-disable-next-line no-await-in-loop
@@ -102,6 +119,7 @@ class FollowUpScheduler {
         checked: sessions.length,
         sent: sent.length,
         flushed: flushed.length,
+        resentTerminal: resentTerminal.length,
         details: sent,
         errors,
       };

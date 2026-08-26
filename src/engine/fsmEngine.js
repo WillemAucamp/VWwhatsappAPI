@@ -528,6 +528,22 @@ class FsmEngine {
     });
   }
 
+  /**
+   * Background / scheduler entry: re-send a terminal WhatsApp body that failed
+   * after soft_closed/quiet was persisted. Qualified users who are waiting for
+   * the application link will not message again — recovery cannot depend on
+   * inbound alone.
+   */
+  async retryPendingTerminalOutbound(waNumber) {
+    return this._withSessionLock(waNumber, async () => {
+      const session = await this.sessionStore.get(waNumber);
+      if (!session || !session.pendingTerminalOutbound) {
+        return { retried: false, reason: 'none_pending' };
+      }
+      return this._retryTerminalOutbound(session);
+    });
+  }
+
   async _routeToHuman(session, interruptedFrom) {
     session.interruptedFrom = interruptedFrom || session.currentState;
     return this._enterState(session, 'HUMAN_HANDOVER', {
