@@ -1,0 +1,21 @@
+{
+  "name": "vw-whatsapp-prequal-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp pre-qualification bot on Meta Cloud API (Coexistence)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node tests/run.js",
+    "test:manual": "node tests/manual-test.js",
+    "check:meta": "node scripts/check-meta.js",
+    "send:test": "node scripts/send-test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "private": true
+}
