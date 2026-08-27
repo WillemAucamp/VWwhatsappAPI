@@ -18,7 +18,12 @@ function intEnv(name, fallback) {
 const config = {
   port: intEnv('PORT', 3000),
   nodeEnv: process.env.NODE_ENV || 'development',
-  publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
+  // Prefer explicit PUBLIC_BASE_URL; on Render, RENDER_EXTERNAL_URL is injected.
+  publicBaseUrl: (
+    process.env.PUBLIC_BASE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    ''
+  ).replace(/\/$/, ''),
 
   whatsapp: {
     token: process.env.WHATSAPP_TOKEN || '',
