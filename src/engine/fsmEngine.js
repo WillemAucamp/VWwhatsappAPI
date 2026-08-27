@@ -471,17 +471,40 @@ class FsmEngine {
     }
 
     if (state.notifyAgent) {
+      const event = {
+        type: 'handover',
+        exitReason,
+        waNumber: session.waNumber,
+        path: session.path,
+        interruptedFrom: session.interruptedFrom,
+        agentHandoverNumber: config.agent.handoverNumber || null,
+        timestamp: record.timestamp,
+      };
       try {
-        await this.notifyAgent({
-          type: 'handover',
-          exitReason,
-          waNumber: session.waNumber,
-          path: session.path,
-          interruptedFrom: session.interruptedFrom,
-          agentHandoverNumber: config.agent.handoverNumber || null,
-          timestamp: record.timestamp,
-        });
+        const result = await this.notifyAgent(event);
+        // Default transport returns { delivered: false } on HTTP/network
+        // failure without throwing. Quiet/soft_closed customers often never
+        // message again, so a failed handover notify must be queued for the
+        // scheduler — otherwise staff never learn the customer asked for help.
+        const needsRetry = this._agentNotifyNeedsRetry(result);
+        session.pendingAgentNotify = needsRetry ? event : null;
+        await this.sessionStore.set(session.waNumber, session);
       } catch (err) {
+        session.pendingAgentNotify = event;
+        try {
+          await this.sessionStore.set(session.waNumber, session);
+        } catch (setErr) {
+          // eslint-disable-next-line no-console
+          console.error(
+            '[fsm] failed to persist pendingAgentNotify after notify throw',
+            {
+              waNumber: session.waNumber,
+              exitReason,
+              message:
+                setErr && setErr.message ? setErr.message : String(setErr),
+            }
+          );
+        }
         // eslint-disable-next-line no-console
         console.error('[fsm] agent notify failed after terminal persist', {
           waNumber: session.waNumber,
@@ -490,6 +513,57 @@ class FsmEngine {
         });
       }
     }
+  }
+
+  /**
+   * True when an agent webhook was attempted (or should have been) and did not
+   * succeed. `no_webhook` means nothing is configured — do not queue forever.
+   */
+  _agentNotifyNeedsRetry(result) {
+    if (result == null) return false;
+    if (result.delivered === true) return false;
+    if (result.reason === 'no_webhook') return false;
+    // Explicit failure, or a custom notifier that returned delivered:false.
+    if (result.delivered === false) return true;
+    return false;
+  }
+
+  /**
+   * Re-deliver a queued agent handover webhook under the session lock.
+   */
+  async _flushPendingAgentNotify(session) {
+    if (!session || !session.pendingAgentNotify) return false;
+    const event = session.pendingAgentNotify;
+    try {
+      const result = await this.notifyAgent(event);
+      if (this._agentNotifyNeedsRetry(result)) {
+        // Leave pendingAgentNotify set for a later tick.
+        return false;
+      }
+      session.pendingAgentNotify = null;
+      await this.sessionStore.set(session.waNumber, session);
+      return true;
+    } catch (err) {
+      // Keep pendingAgentNotify for retry.
+      // eslint-disable-next-line no-console
+      console.error('[fsm] pendingAgentNotify flush failed', {
+        waNumber: session.waNumber,
+        message: err && err.message ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+
+  /**
+   * Background / scheduler entry: retry a failed agent handover notify when
+   * the customer has gone quiet / soft_closed and will not inbound again.
+   */
+  async flushPendingAgentNotify(waNumber) {
+    return this._withSessionLock(waNumber, async () => {
+      const session = await this.sessionStore.get(waNumber);
+      if (!session) return false;
+      return this._flushPendingAgentNotify(session);
+    });
   }
 
   /**
@@ -587,6 +661,8 @@ class FsmEngine {
     session.pendingLead = null;
     session.pendingTerminalOutbound = null;
     session.lastLoggedLeadKey = null;
+    // pendingAgentNotify is intentionally preserved across restart: the handover
+    // webhook is still owed to staff even if the customer starts a new funnel.
     this._clearFollowUp(session);
 
     if (notice || footer) {
@@ -611,6 +687,13 @@ class FsmEngine {
 
     if (session.status === 'quiet') {
       await this._flushPendingLead(session);
+      if (session.pendingAgentNotify) {
+        try {
+          await this._flushPendingAgentNotify(session);
+        } catch (_) {
+          // Scheduler will retry; continue quiet handling.
+        }
+      }
       if (session.pendingTerminalOutbound) {
         return this._retryTerminalOutbound(session);
       }
@@ -628,6 +711,13 @@ class FsmEngine {
 
     if (session.status === 'soft_closed') {
       await this._flushPendingLead(session);
+      if (session.pendingAgentNotify) {
+        try {
+          await this._flushPendingAgentNotify(session);
+        } catch (_) {
+          // Scheduler will retry; do not block soft_closed restart.
+        }
+      }
       if (session.pendingTerminalOutbound) {
         return this._retryTerminalOutbound(session);
       }

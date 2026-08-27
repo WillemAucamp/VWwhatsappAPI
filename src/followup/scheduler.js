@@ -67,6 +67,7 @@ class FollowUpScheduler {
       const sessions = await this.sessionStore.listAll();
       const sent = [];
       const flushed = [];
+      const notifiedAgent = [];
       const resentTerminal = [];
       const errors = [];
       for (const session of sessions) {
@@ -78,6 +79,20 @@ class FollowUpScheduler {
             // eslint-disable-next-line no-await-in-loop
             const didFlush = await this.engine.flushPendingLead(session.waNumber);
             if (didFlush) flushed.push(session.waNumber);
+          }
+
+          // Failed agent handover webhooks leave pendingAgentNotify after quiet /
+          // soft_closed. Customers who asked for a human often stop messaging —
+          // recovery cannot depend on inbound alone.
+          if (
+            session.pendingAgentNotify &&
+            typeof this.engine.flushPendingAgentNotify === 'function'
+          ) {
+            // eslint-disable-next-line no-await-in-loop
+            const didNotify = await this.engine.flushPendingAgentNotify(
+              session.waNumber
+            );
+            if (didNotify) notifiedAgent.push(session.waNumber);
           }
 
           // Terminal Graph failures leave pendingTerminalOutbound after soft_closed.
@@ -119,6 +134,7 @@ class FollowUpScheduler {
         checked: sessions.length,
         sent: sent.length,
         flushed: flushed.length,
+        notifiedAgent: notifiedAgent.length,
         resentTerminal: resentTerminal.length,
         details: sent,
         errors,
