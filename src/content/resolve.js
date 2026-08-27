@@ -3,8 +3,13 @@
 const copy = require('./copy');
 const config = require('../config');
 
+/** WhatsApp reply-button title limit */
+const BUTTON_TITLE_MAX = 20;
+/** Use list message when more options than reply buttons allow */
+const REPLY_BUTTON_MAX = 3;
+
 /**
- * Resolve {{COPY.xxx}} and simple link placeholders from stub content.
+ * Resolve {{COPY.xxx}} and simple link placeholders from content.
  * Blank keys resolve to empty strings (or a visible stub marker in tests).
  */
 
@@ -24,8 +29,6 @@ function applyPlaceholders(template, extras = {}, { stubMarker = false } = {}) {
   if (!template) return '';
   let out = String(template);
 
-  // Nested {{COPY.*}} inside populated content. Skip when stubMarker is on so
-  // already-emitted {{COPY.key}} markers are not wiped back to empty strings.
   if (!stubMarker) {
     out = out.replace(/\{\{COPY\.([a-zA-Z0-9_]+)\}\}/g, (_, key) =>
       resolveCopy(key, { stubMarker: false })
@@ -63,9 +66,67 @@ function buildOutboundText(
 function listValidOptionHints(state) {
   if (!state || !state.optionLabels) return [];
   return Object.entries(state.optionLabels).map(([key, labels]) => {
+    if (state.optionTitles && state.optionTitles[key]) {
+      return state.optionTitles[key];
+    }
     const primary = Array.isArray(labels) && labels.length ? labels[0] : key;
     return primary;
   });
+}
+
+function truncateTitle(title, max = BUTTON_TITLE_MAX) {
+  const t = String(title || '').trim();
+  if (!t) return 'Option';
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
+/**
+ * Build Cloud API interactive action from FSM state options.
+ * ≤3 options → reply buttons; more → list message.
+ * Reply `id` is always the FSM option key.
+ *
+ * @returns {null|{type:'button',buttons:Array}|{type:'list',button:string,sections:Array}}
+ */
+function buildInteractiveFromState(state) {
+  if (!state || !state.options) return null;
+  const keys = Object.keys(state.options);
+  if (!keys.length) return null;
+
+  const rows = keys.map((key) => {
+    const titled =
+      state.optionTitles && state.optionTitles[key]
+        ? state.optionTitles[key]
+        : null;
+    const labels = state.optionLabels && state.optionLabels[key];
+    const fallback =
+      Array.isArray(labels) && labels.length ? labels[0] : key;
+    return {
+      id: String(key),
+      title: truncateTitle(titled || fallback),
+    };
+  });
+
+  if (rows.length <= REPLY_BUTTON_MAX) {
+    return {
+      type: 'button',
+      buttons: rows,
+    };
+  }
+
+  return {
+    type: 'list',
+    button: 'Choose',
+    sections: [
+      {
+        title: 'Options',
+        rows: rows.map((r) => ({
+          id: r.id,
+          title: truncateTitle(r.title, 24),
+        })),
+      },
+    ],
+  };
 }
 
 module.exports = {
@@ -73,4 +134,7 @@ module.exports = {
   applyPlaceholders,
   buildOutboundText,
   listValidOptionHints,
+  buildInteractiveFromState,
+  BUTTON_TITLE_MAX,
+  REPLY_BUTTON_MAX,
 };

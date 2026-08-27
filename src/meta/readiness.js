@@ -45,8 +45,10 @@ function getMetaReadiness() {
   if (!config.publicBaseUrl) {
     warnings.push('PUBLIC_BASE_URL unset — Meta cannot reach /webhook until this is a public https URL');
   }
-  if (!copyInfo.greetingFilled) {
-    warnings.push('src/content/copy.js greeting_prompt is blank — clients will receive empty bot messages');
+  if (!copyInfo.greetingFilled || copyInfo.blank > 0) {
+    warnings.push(
+      `src/content/copy.js has ${copyInfo.blank} blank key(s) — empty WhatsApp bodies / incomplete menus`
+    );
   }
 
   return {
@@ -65,7 +67,11 @@ function getMetaReadiness() {
     copy: copyInfo,
     missing,
     warnings,
-    readyToPlugIn: missing.length === 0 && Boolean(config.publicBaseUrl),
+    readyToPlugIn:
+      missing.length === 0 &&
+      Boolean(config.publicBaseUrl) &&
+      copyInfo.greetingFilled &&
+      copyInfo.blank === 0,
   };
 }
 

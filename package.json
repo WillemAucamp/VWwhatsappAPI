@@ -1,7 +1,7 @@
 {
   "name": "vw-whatsapp-prequal-bot",
   "version": "1.0.0",
-  "description": "WhatsApp pre-qualification bot on Meta Cloud API (Coexistence)",
+  "description": "WhatsApp interactive menu pre-qualification bot on Meta Cloud API (Coexistence)",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

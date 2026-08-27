@@ -67,9 +67,42 @@ async function testTextViaTemplateNameOnSendMessage() {
   });
 }
 
+async function testInteractiveButtonGraphBody() {
+  await withFakeFetch(async (getBody) => {
+    await cloudApiSendMessage('27821234567', {
+      text: 'Pick one',
+      interactive: {
+        type: 'button',
+        buttons: [
+          { id: '1', title: 'Specials' },
+          { id: '2', title: 'See cars' },
+          { id: '3', title: 'Qualify me' },
+        ],
+      },
+      mediaSlot: 'ignored',
+      meta: { stateId: 'GREETING' },
+    });
+    const body = getBody();
+    assert.strictEqual(body.type, 'interactive');
+    assert.strictEqual(body.interactive.type, 'button');
+    assert.strictEqual(body.interactive.body.text, 'Pick one');
+    assert.strictEqual(body.interactive.action.buttons.length, 3);
+    assert.strictEqual(body.interactive.action.buttons[0].type, 'reply');
+    assert.strictEqual(body.interactive.action.buttons[2].reply.id, '3');
+    assert.strictEqual(
+      Object.prototype.hasOwnProperty.call(body, 'mediaSlot'),
+      false
+    );
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(body, 'meta'), false);
+    // eslint-disable-next-line no-console
+    console.log('✓ interactive button Graph body omits internal fields');
+  });
+}
+
 async function main() {
   await testTemplateGraphBody();
   await testTextViaTemplateNameOnSendMessage();
+  await testInteractiveButtonGraphBody();
   // eslint-disable-next-line no-console
   console.log('\ntransport graph tests passed.');
 }

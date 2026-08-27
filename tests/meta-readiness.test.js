@@ -4,14 +4,14 @@ const assert = require('assert');
 const { getMetaReadiness, copyStatus } = require('../src/meta/readiness');
 const config = require('../src/config');
 
-function testCopyStatusCountsStubs() {
+function testCopyStatusCountsFilledKeys() {
   const status = copyStatus();
   assert.ok(status.total > 0);
   assert.strictEqual(status.filled + status.blank, status.total);
-  assert.strictEqual(status.greetingFilled, false);
-  assert.ok(status.blankKeys.includes('greeting_prompt'));
+  assert.strictEqual(status.greetingFilled, true);
+  assert.strictEqual(status.blank, 0);
   // eslint-disable-next-line no-console
-  console.log('✓ copy status reports blank stub keys');
+  console.log('✓ copy status reports filled launch keys');
 }
 
 function testReadinessWithoutSecrets() {
@@ -89,7 +89,7 @@ function testReadinessReadyWhenConfigured() {
 }
 
 async function main() {
-  testCopyStatusCountsStubs();
+  testCopyStatusCountsFilledKeys();
   testReadinessWithoutSecrets();
   testReadinessReadyWhenConfigured();
   // eslint-disable-next-line no-console

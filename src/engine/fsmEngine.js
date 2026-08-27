@@ -5,6 +5,7 @@ const { STATES, ENTRY_STATE } = require('../fsm/states');
 const { createEmptySession } = require('../session/store');
 const {
   buildOutboundText,
+  buildInteractiveFromState,
   listValidOptionHints,
   resolveCopy,
 } = require('../content/resolve');
@@ -48,6 +49,25 @@ function matchOption(state, normalized) {
     }
   }
   return null;
+}
+
+/**
+ * Prefer interactive reply id (button/list), then free-text optionLabels.
+ * @param {object} state
+ * @param {string} normalized
+ * @param {string|null|undefined} replyId
+ */
+function resolveOptionKey(state, normalized, replyId) {
+  if (
+    replyId != null &&
+    replyId !== '' &&
+    state &&
+    state.options &&
+    Object.prototype.hasOwnProperty.call(state.options, replyId)
+  ) {
+    return String(replyId);
+  }
+  return matchOption(state, normalized);
 }
 
 function linkForState(state) {
@@ -260,7 +280,8 @@ class FsmEngine {
     await this.sessionStore.set(session.waNumber, session);
 
     try {
-      await this.sendMessage(session.waNumber, {
+      const interactive = buildInteractiveFromState(state);
+      const followPayload = {
         text: parts.filter(Boolean).join('\n\n'),
         link: linkForState(state),
         meta: {
@@ -269,7 +290,12 @@ class FsmEngine {
           stateId: session.currentState,
           promptKey,
         },
-      });
+      };
+      if (interactive) {
+        followPayload.interactive = interactive;
+        followPayload.type = 'interactive';
+      }
+      await this.sendMessage(session.waNumber, followPayload);
     } catch (err) {
       session.followUpCount = prevCount;
       session.lastFollowUpAt = prevFollowUpAt;
@@ -325,6 +351,7 @@ class FsmEngine {
 
     const parts = [body, continueText, extraText].filter(Boolean);
     const text = parts.join('\n\n');
+    const interactive = buildInteractiveFromState(state);
 
     const payload = {
       text,
@@ -332,6 +359,10 @@ class FsmEngine {
       mediaSlot: state && state.mediaSlot ? state.mediaSlot : undefined,
       meta: { stateId: state ? state.id : null, promptKey },
     };
+    if (interactive) {
+      payload.interactive = interactive;
+      payload.type = 'interactive';
+    }
 
     return this.sendMessage(waNumber, payload);
   }
@@ -599,14 +630,18 @@ class FsmEngine {
     return this._enterState(session, ENTRY_STATE);
   }
 
-  async handleInbound(waNumber, text) {
+  async handleInbound(waNumber, text, extras = {}) {
     return this._withSessionLock(waNumber, () =>
-      this._handleInboundUnlocked(waNumber, text)
+      this._handleInboundUnlocked(waNumber, text, extras)
     );
   }
 
-  async _handleInboundUnlocked(waNumber, text) {
+  async _handleInboundUnlocked(waNumber, text, extras = {}) {
     const normalized = normalizeInput(text);
+    const replyId =
+      extras && extras.replyId != null && extras.replyId !== ''
+        ? String(extras.replyId)
+        : null;
     let session = await this.getOrCreateSession(waNumber);
 
     if (session.status === 'quiet') {
@@ -667,12 +702,17 @@ class FsmEngine {
       return this._restart(session);
     }
 
-    if (state.type === 'info' && state.next) {
-      return this._enterState(session, state.next);
-    }
-
-    const optionKey = matchOption(state, normalized);
+    const optionKey = resolveOptionKey(state, normalized, replyId);
     if (!optionKey) {
+      // Info states with a fixed next: allow any non-help tap/text to continue
+      // only when there are no options defined.
+      if (
+        state.type === 'info' &&
+        state.next &&
+        (!state.options || !Object.keys(state.options).length)
+      ) {
+        return this._enterState(session, state.next);
+      }
       return this._handleInvalid(session, state);
     }
 
@@ -690,4 +730,5 @@ module.exports = {
   normalizeInput,
   matchesKeywordList,
   matchOption,
+  resolveOptionKey,
 };

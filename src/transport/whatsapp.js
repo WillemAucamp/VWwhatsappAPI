@@ -4,7 +4,8 @@ const config = require('../config');
 
 /**
  * Cloud API Graph /messages (Coexistence number).
- * Tests inject a custom sendMessage; never put internal fields (mediaSlot) on Graph bodies.
+ * Supports text, templates, and interactive (reply buttons / lists).
+ * Never put internal fields (mediaSlot, meta) on Graph bodies.
  */
 
 function messagesUrl() {
@@ -51,15 +52,79 @@ async function graphPost(graphBody) {
 }
 
 /**
+ * @param {object} interactive Spec from buildInteractiveFromState
+ * @param {string} bodyText
+ */
+function buildInteractiveGraph(interactive, bodyText) {
+  if (!interactive || !interactive.type) {
+    const err = new Error('interactive.type required');
+    err.code = 'WHATSAPP_INTERACTIVE_INVALID';
+    throw err;
+  }
+
+  if (interactive.type === 'button') {
+    const buttons = (interactive.buttons || []).slice(0, 3).map((b) => ({
+      type: 'reply',
+      reply: {
+        id: String(b.id),
+        title: String(b.title || b.id).slice(0, 20),
+      },
+    }));
+    if (!buttons.length) {
+      const err = new Error('interactive buttons required');
+      err.code = 'WHATSAPP_INTERACTIVE_INVALID';
+      throw err;
+    }
+    return {
+      type: 'button',
+      body: { text: bodyText || ' ' },
+      action: { buttons },
+    };
+  }
+
+  if (interactive.type === 'list') {
+    const sections = (interactive.sections || []).map((section) => ({
+      title: section.title ? String(section.title).slice(0, 24) : undefined,
+      rows: (section.rows || []).map((row) => ({
+        id: String(row.id),
+        title: String(row.title || row.id).slice(0, 24),
+        description: row.description
+          ? String(row.description).slice(0, 72)
+          : undefined,
+      })),
+    }));
+    return {
+      type: 'list',
+      body: { text: bodyText || ' ' },
+      action: {
+        button: String(interactive.button || 'Choose').slice(0, 20),
+        sections,
+      },
+    };
+  }
+
+  const err = new Error(`Unsupported interactive type: ${interactive.type}`);
+  err.code = 'WHATSAPP_INTERACTIVE_INVALID';
+  throw err;
+}
+
+async function cloudApiSendInteractive(to, { text, link, interactive } = {}) {
+  requireCredentials();
+  const bodyText = [text, link].filter(Boolean).join('\n\n');
+  const interactivePayload = buildInteractiveGraph(interactive, bodyText);
+
+  return graphPost({
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: digitsOnly(to),
+    type: 'interactive',
+    interactive: interactivePayload,
+  });
+}
+
+/**
  * @param {string} to E.164 WhatsApp number (digits)
  * @param {object} payload Transport-agnostic payload
- * @param {string} [payload.text] Plain text body
- * @param {string} [payload.link] Optional URL to include
- * @param {string} [payload.mediaSlot] Internal only — never sent to Graph
- * @param {string} [payload.templateName] If set, send an approved template instead of text
- * @param {string} [payload.templateLanguage]
- * @param {Array}  [payload.templateComponents]
- * @param {object} [payload.meta]
  */
 async function cloudApiSendMessage(to, payload = {}) {
   requireCredentials();
@@ -73,9 +138,19 @@ async function cloudApiSendMessage(to, payload = {}) {
     });
   }
 
+  if (
+    payload.interactive ||
+    payload.type === 'interactive'
+  ) {
+    return cloudApiSendInteractive(toDigits, {
+      text: payload.text,
+      link: payload.link,
+      interactive: payload.interactive,
+    });
+  }
+
   const bodyText = [payload.text, payload.link].filter(Boolean).join('\n\n');
 
-  // Only Graph-supported fields — never forward internal slots (e.g. mediaSlot)
   return graphPost({
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
@@ -181,6 +256,8 @@ module.exports = {
   resetSendMessage,
   cloudApiSendMessage,
   cloudApiSendTemplate,
+  cloudApiSendInteractive,
+  buildInteractiveGraph,
   graphGet,
   notifyAgent,
 };

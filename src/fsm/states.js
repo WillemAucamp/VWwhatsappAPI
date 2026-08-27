@@ -3,19 +3,16 @@
 /**
  * FSM state table — data only, no branching logic.
  *
+ * Interactive menus (Cloud API):
+ *   optionTitles  WhatsApp button / list row titles (≤20 chars for buttons)
+ *   options       reply id (option key) → next state
+ *   optionLabels  free-text fallback synonyms (typed replies / tests)
+ *
  * Each state:
- *   id            unique state id
- *   promptKey     key into content/copy.js (resolved as {{COPY.*}})
- *   type          'choice' | 'info' | 'terminal'
- *   options       valid inputs → next state (choice states)
- *   next          fixed next state (info states that always continue)
- *   terminal      true if conversation ends for this path
- *   exitReason    lead-logger reason for terminal states
- *   softDecline   if true, next inbound message may restart the session
- *   quiet         if true, bot stays silent until reopen keywords / TTL
- *   notifyAgent   if true, agent notification fires on enter
- *   sendLink      optional link slot: 'application' | 'stock'
- *   mediaSlot     optional media slot id for transport (e.g. stock list)
+ *   id, promptKey, type ('choice'|'info'|'terminal')
+ *   options, optionTitles, optionLabels
+ *   next, terminal, exitReason, softDecline, quiet, notifyAgent
+ *   sendLink, mediaSlot, continuePromptKey
  */
 
 /** @typedef {'choice'|'info'|'terminal'} StateType */
@@ -31,9 +28,13 @@ const STATES = {
       '2': 'STOCK_LIST',
       '3': 'LICENSE_CHECK',
     },
-    // Human-readable labels for matching (normalized). Numbers also accepted.
+    optionTitles: {
+      '1': 'Specials',
+      '2': 'See cars',
+      '3': 'Qualify me',
+    },
     optionLabels: {
-      '1': ['1', 'i saw a special', 'special'],
+      '1': ['1', 'i saw a special', 'special', 'specials'],
       '2': ['2', 'let me see your cars', 'cars', 'stock'],
       '3': ['3', 'qualify me', 'qualify'],
     },
@@ -45,9 +46,11 @@ const STATES = {
     continuePromptKey: 'special_info_continue',
     type: 'info',
     next: 'LICENSE_CHECK',
-    // Any non-help input advances; labels listed for re-prompt clarity
     options: {
       '1': 'LICENSE_CHECK',
+    },
+    optionTitles: {
+      '1': 'Continue',
     },
     optionLabels: {
       '1': ['1', 'continue', 'ok', 'yes', 'next'],
@@ -65,6 +68,9 @@ const STATES = {
     options: {
       '1': 'LICENSE_CHECK',
     },
+    optionTitles: {
+      '1': 'Continue',
+    },
     optionLabels: {
       '1': ['1', 'continue', 'ok', 'yes', 'next'],
     },
@@ -77,6 +83,10 @@ const STATES = {
     options: {
       yes: 'INCOME_CHECK',
       no: 'NO_LICENSE_ADVICE',
+    },
+    optionTitles: {
+      yes: 'Yes',
+      no: 'No',
     },
     optionLabels: {
       yes: ['yes', 'y', '1'],
@@ -102,6 +112,11 @@ const STATES = {
       below: 'AFFORDABILITY_DECLINE',
       mid: 'CREDIT_CHECK',
       above: 'CREDIT_CHECK',
+    },
+    optionTitles: {
+      below: 'Below R8,500',
+      mid: 'R8.5k–R15k',
+      above: 'Above R15,000',
     },
     optionLabels: {
       below: ['1', 'below', 'below r8500', 'below r8,500', 'under 8500'],
@@ -129,6 +144,11 @@ const STATES = {
       average: 'CONFIRM_QUALIFY',
       great: 'CONFIRM_QUALIFY',
     },
+    optionTitles: {
+      poor: 'Poor',
+      average: 'Average',
+      great: 'Great',
+    },
     optionLabels: {
       poor: ['1', 'poor'],
       average: ['2', 'average', 'avg'],
@@ -153,6 +173,10 @@ const STATES = {
     options: {
       yes: 'QUALIFIED_LINK',
       no: 'AGENT_SOFT_HANDOVER',
+    },
+    optionTitles: {
+      yes: 'Yes, send link',
+      no: 'Speak to agent',
     },
     optionLabels: {
       yes: ['yes', 'y', '1'],

@@ -1,8 +1,17 @@
 # Plug this bot into your Meta WhatsApp account
 
-Goal: the Cloud API bot answers the **same number** already on WhatsApp Business (Coexistence), so you can start messaging clients.
+Goal: the Cloud API bot answers the **same number** already on WhatsApp Business (**Coexistence**), using **interactive reply buttons** for the menu tree.
 
 You need a **public https URL** for `/webhook`. Meta cannot call `localhost`.
+
+## 0. Coexistence already done?
+
+If the Business App number is already connected to Cloud API (Coexistence):
+
+1. Skip section 2.
+2. Jump to **§1** (copy IDs/token) → **§3** (run bot) → **§4** (webhook) → smoke tests.
+
+Keep the WhatsApp Business app installed on the handset.
 
 ## 1. Values from Meta Developer
 
@@ -16,6 +25,8 @@ Open [Meta for Developers](https://developers.facebook.com/) → your app → **
 | `WHATSAPP_VERIFY_TOKEN` | Any long random string **you** invent — you paste the same value into Meta |
 | `WHATSAPP_APP_SECRET` | App Dashboard → Settings → Basic → App Secret |
 | `PUBLIC_BASE_URL` | Public origin of this process, no trailing slash, e.g. `https://abc.ngrok-free.app` |
+| `APPLICATION_LINK` | URL sent after a successful qualify |
+| `STOCK_LINK` | URL shown on the stock menu step |
 | `NODE_ENV` | `production` on a real host (forces webhook HMAC) |
 
 ```bash
@@ -24,13 +35,14 @@ cp .env.example .env
 
 ## 2. Coexistence (keep the Business App)
 
-This bot is built for **the existing Business number**, not a new API-only number.
+Connect the number that is **already registered on WhatsApp Business App** — do **not** use a migrate/API-only path that removes the phone app.
 
-1. WhatsApp Manager / Embedded Signup: connect that number with **Coexistence** so the phone app stays live.
-2. Do not delete the WhatsApp Business app from the handset.
-3. After connect, 1:1 chats sync. Labels / greeting / quick replies stay **in the app only** — Cloud API cannot set those labels.
+1. WhatsApp Manager / Embedded Signup: choose **connect existing WhatsApp Business app account** (Coexistence / Business app onboarding).
+2. Verify on the handset (in-app code, SMS, or QR). App version must be **≥ 2.24.17**.
+3. Do not uninstall WhatsApp Business from the phone.
+4. After connect, 1:1 chats sync. Labels / greeting / quick replies stay **in the app only**.
 
-Until Coexistence is on, a Cloud API token for a *different* test number still works for `send-test`. Live client chats on your sales number need Coexistence on **that** number.
+If Meta only offers “migrate number to API” and warns the Business App will stop: **cancel** — that is not Coexistence.
 
 ## 3. Run the bot where Meta can reach it
 
@@ -49,7 +61,7 @@ ngrok http 3000
 
 Set `PUBLIC_BASE_URL` to that `https://…` origin and restart.
 
-Production: any Node 18+ host (Render, Railway, Fly, a VM). `PORT` is read from the environment. Health check: `GET /health`.
+Production: any Node 18+ host (Render, Railway, Fly, a VM). Prefer a single process with durable `data/` (sessions + lead logs). Health check: `GET /health`.
 
 ## 4. Point Meta at `/webhook`
 
@@ -61,7 +73,7 @@ Developer app → **WhatsApp → Configuration** (or the webhook panel on API Se
 
 Meta sends `GET /webhook?hub.mode=subscribe&hub.verify_token=…&hub.challenge=…`. A 200 with the challenge means the handshake worked.
 
-Then send a WhatsApp message **from a test phone to the business number**. You should see a POST in the bot logs and a reply (once copy is filled).
+Then message the business number from a personal phone. You should get an **interactive menu** (tappable options), not only plain text.
 
 ## 5. Confirm credentials
 
@@ -69,7 +81,7 @@ Then send a WhatsApp message **from a test phone to the business number**. You s
 npm run check:meta
 ```
 
-This loads `.env`, checks missing keys, and `GET`s the phone number on Graph. If this fails, the token or phone-number ID is wrong — do not debug the FSM yet.
+This loads `.env`, checks missing keys / blank copy, and `GET`s the phone number on Graph. If this fails, the token or phone-number ID is wrong — do not debug the menu tree yet.
 
 ## 6. Send a first message
 
@@ -81,31 +93,27 @@ npm run send:test -- --to 2782XXXXXXXX --template hello_world --lang en_US
 
 Use the client number in international form, no `+` or spaces (`2782…` not `082…`).
 
-**Free-form text** only works inside the 24-hour window after *they* message you (or after a template they reply to):
+**Live pilot:** text the business number → tap **Qualify me** → walk licence → income → credit → confirm.
 
-```bash
-npm run send:test -- --to 2782XXXXXXXX --text "Test from the dealership bot"
-```
-
-If Graph returns `#131047`, the 24h window is closed — use a template.
+Free-form bot text (and interactive menus) only work inside the **24-hour** window after *they* message you (or after a template they reply to). If Graph returns `#131047`, use a template.
 
 ## 7. Before real clients
 
-1. Fill `src/content/copy.js`. Blank keys send empty WhatsApp bodies.
-2. Put a **system user** permanent token in `WHATSAPP_TOKEN` (the dashboard token dies in hours).
-3. Keep `WHATSAPP_APP_SECRET` set. Production rejects unsigned webhook POSTs.
-4. Submit any templates you will send outside 24h (declines, reminders) in WhatsApp Manager → Message templates. Utility copy reviews cleaner than marketing.
-5. Add a payment method on the WABA if you will send paid template conversations.
-6. Pilot: you text the business number, walk GREETING → qualify / decline / `help`.
+1. Confirm `src/content/copy.js` and button titles in `src/fsm/states.js` match your dealership voice.
+2. Set real `APPLICATION_LINK` and `STOCK_LINK`.
+3. Put a **system user** permanent token in `WHATSAPP_TOKEN` (dashboard tokens expire).
+4. Keep `WHATSAPP_APP_SECRET` set. Production rejects unsigned webhook POSTs.
+5. Submit any templates you need outside 24h in WhatsApp Manager.
+6. Add a payment method on the WABA if you will send paid template conversations.
 
-## 8. What “messaging clients” means on this bot
+## 8. How the interactive menu works
 
-| You want | How |
+| Layer | Role |
 |---|---|
-| Client texts the sales number, bot answers | Webhook + copy filled. This is the live path. |
-| You text a client first | Approved template via `send-test` or later sheet automation |
-| Status on a Google Sheet sends “declined” | Not wired yet — needs `/sheet-events` + a decline template |
-| Auto-change WhatsApp **labels** | Not possible on Cloud API |
+| `src/fsm/states.js` | Branching tree: option key → next state; `optionTitles` = button labels |
+| `src/content/copy.js` | Body text above the buttons |
+| `src/transport/whatsapp.js` | Graph `type=interactive` (reply buttons ≤3, else list) |
+| `POST /webhook` | Accepts `text` and `interactive` (`button_reply` / `list_reply`) |
 
 Staff can still reply in the WhatsApp Business app on the same thread (Coexistence). The bot goes quiet after `help` / `stop` / handover.
 
@@ -116,8 +124,10 @@ Staff can still reply in the WhatsApp Business app on the same thread (Coexisten
 | Webhook verify fails | `WHATSAPP_VERIFY_TOKEN` matches Meta; URL is `https` and ends with `/webhook` |
 | POST 403 | `WHATSAPP_APP_SECRET` must match the app that signed the webhook |
 | POST 503 in production | App secret missing |
+| Taps do nothing | Webhook subscribed to **messages**; bot logs show `interactive` inbound |
 | Send `#100` | Payload had a non-Graph field (this bot strips `mediaSlot`) |
 | Send `#190` | Token expired — create a system-user token |
 | Send `#131047` | Outside 24h — use a template |
-| Empty replies | `src/content/copy.js` still blank |
+| Empty replies | Copy key blank or env links unset |
 | `check-meta` Graph fail | Wrong token, phone-number ID, or app does not own that WABA |
+| Coexistence missing | You used migrate/API-only; reconnect with Business app onboarding |

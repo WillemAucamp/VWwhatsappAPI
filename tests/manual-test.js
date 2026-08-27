@@ -1,10 +1,10 @@
 'use strict';
 
 /**
- * Manual FSM exercise script — dummy/stub copy only, no real advice content.
+ * Manual FSM exercise script — interactive menus + typed-text fallback.
  *
  * Covers:
- *  1) Full qualify path
+ *  1) Full qualify path (text + interactive taps)
  *  2) Each decline branch (no_license, affordability, credit, declined_self_serve)
  *  3) Invalid-input retry + escalation to HUMAN_HANDOVER
  *  4) Help-intent interrupt from two different states
@@ -16,6 +16,7 @@
 
 const assert = require('assert');
 const config = require('../src/config');
+const copy = require('../src/content/copy');
 const { MemorySessionStore } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
 const { FollowUpScheduler } = require('../src/followup/scheduler');
@@ -79,6 +80,9 @@ function createHarness(label, { nowFn } = {}) {
     async say(wa, text) {
       return engine.handleInbound(wa, text);
     },
+    async tap(wa, replyId, title = '') {
+      return engine.handleInbound(wa, title, { replyId });
+    },
   };
 }
 
@@ -88,12 +92,23 @@ function lastLead(h) {
 
 function assertFooterOnOutbound(h, minExpected = 1) {
   const withFooter = h.messages.filter(
-    (m) => m.text && String(m.text).includes('{{COPY.help_footer}}')
+    (m) => m.text && String(m.text).includes(copy.help_footer)
   );
   assert.ok(
     withFooter.length >= minExpected,
     `${h.label}: expected help footer on outbound turns`
   );
+}
+
+function assertInteractiveButtons(h, stateHint) {
+  const interactive = h.messages.filter((m) => m.interactive);
+  assert.ok(
+    interactive.length >= 1,
+    `${h.label}: expected interactive menu outbound${stateHint ? ` (${stateHint})` : ''}`
+  );
+  const last = interactive[interactive.length - 1];
+  assert.strictEqual(last.interactive.type, 'button');
+  assert.ok(last.interactive.buttons.length >= 1);
 }
 
 async function testFullQualifyPath() {
@@ -318,8 +333,9 @@ async function testFollowUpCadence() {
   assert.strictEqual(result.followUpCount, 1);
   const firstFu = h.messages[h.messages.length - 1];
   assert.strictEqual(firstFu.meta.type, 'follow_up');
-  assert.ok(String(firstFu.text).includes('{{COPY.follow_up_first}}'));
-  assert.ok(String(firstFu.text).includes('{{COPY.greeting_prompt}}'));
+  assert.ok(String(firstFu.text).includes(copy.follow_up_first));
+  assert.ok(String(firstFu.text).includes(copy.greeting_prompt));
+  assert.ok(firstFu.interactive && firstFu.interactive.type === 'button');
   assert.ok(h.messages.length > before);
 
   // Second follow-up after 4 hours (not before)
@@ -332,7 +348,7 @@ async function testFollowUpCadence() {
   assert.strictEqual(result.sent, true);
   assert.strictEqual(result.followUpCount, 2);
   assert.ok(
-    String(h.messages[h.messages.length - 1].text).includes('{{COPY.follow_up_repeat}}')
+    String(h.messages[h.messages.length - 1].text).includes(copy.follow_up_repeat)
   );
 
   // Third follow-up after another 4 hours → exhausted
@@ -395,12 +411,39 @@ async function testFollowUpSkippedOnTerminalAndScheduler() {
   console.log('✓ follow-ups skipped on terminal; scheduler tick sends due');
 }
 
+async function testInteractiveButtonQualifyPath() {
+  const h = createHarness('interactive_qualify');
+  const wa = '27000000099';
+
+  await h.say(wa, 'hi');
+  assertInteractiveButtons(h, 'GREETING');
+  await h.tap(wa, '3', 'Qualify me');
+  await h.tap(wa, 'yes', 'Yes');
+  await h.tap(wa, 'mid', 'R8.5k–R15k');
+  await h.tap(wa, 'great', 'Great');
+  await h.tap(wa, 'yes', 'Yes, send link');
+
+  const lead = lastLead(h);
+  assert.strictEqual(lead.exitReason, 'qualified_self_serve');
+  assert.deepStrictEqual(lead.path, [
+    'GREETING',
+    'LICENSE_CHECK',
+    'INCOME_CHECK',
+    'CREDIT_CHECK',
+    'CONFIRM_QUALIFY',
+    'QUALIFIED_LINK',
+  ]);
+  // eslint-disable-next-line no-console
+  console.log('✓ interactive button qualify path');
+}
+
 async function main() {
   // Ensure default invalid attempt config is sensible for the scenario
   // eslint-disable-next-line no-console
-  console.log('Running FSM manual tests (stub copy markers, no advice content)…\n');
+  console.log('Running FSM manual tests (interactive menus + text fallback)…\n');
 
   await testFullQualifyPath();
+  await testInteractiveButtonQualifyPath();
   await testViaSpecialAndStock();
   await testNoLicenseDecline();
   await testAffordabilityDecline();

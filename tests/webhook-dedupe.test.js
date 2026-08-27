@@ -49,6 +49,36 @@ function buildTextWebhook({ from, text, id }) {
   };
 }
 
+function buildInteractiveButtonWebhook({ from, id, replyId, title }) {
+  return {
+    object: 'whatsapp_business_account',
+    entry: [
+      {
+        changes: [
+          {
+            value: {
+              messages: [
+                {
+                  id,
+                  from,
+                  type: 'interactive',
+                  interactive: {
+                    type: 'button_reply',
+                    button_reply: {
+                      id: replyId,
+                      title: title || replyId,
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function listen(app) {
   return new Promise((resolve) => {
     const server = app.listen(0, () => {
@@ -389,6 +419,56 @@ async function testOneFailedMessageDoesNotAbortSiblingInBatch() {
   console.log('✓ one failed message does not abort later messages in batch');
 }
 
+async function testInteractiveButtonReplyAdvancesMenu() {
+  const store = new MemorySessionStore();
+  const logger = new CapturingLogger();
+  const engine = new FsmEngine({
+    sessionStore: store,
+    leadLogger: logger,
+    sendMessage: async () => ({ ok: true }),
+    notifyAgent: async () => ({ delivered: false }),
+    options: { stubMarker: true },
+  });
+
+  const wa = '27009990077';
+  await engine.handleInbound(wa, 'hi');
+  let session = await store.get(wa);
+  assert.strictEqual(session.currentState, 'GREETING');
+
+  const dedupe = createInboundDedupe();
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/webhook',
+    createWebhookRouter({
+      engine,
+      inboundDedupe: dedupe,
+      requireSignature: false,
+    })
+  );
+
+  const { server, port } = await listen(app);
+  try {
+    const res = await postJson(
+      port,
+      '/webhook',
+      buildInteractiveButtonWebhook({
+        from: wa,
+        id: 'wamid.button-qualify',
+        replyId: '3',
+        title: 'Qualify me',
+      })
+    );
+    assert.strictEqual(res.status, 200);
+    session = await store.get(wa);
+    assert.strictEqual(session.currentState, 'LICENSE_CHECK');
+  } finally {
+    server.close();
+  }
+  // eslint-disable-next-line no-console
+  console.log('✓ interactive button_reply advances GREETING → LICENSE_CHECK');
+}
+
 async function main() {
   await testDedupeClaim();
   await testBeginCommitRelease();
@@ -396,6 +476,7 @@ async function main() {
   await testDuplicateDoesNotDoubleAdvanceInfoState();
   await testFailedHandleInboundReleasesClaimForRetry();
   await testOneFailedMessageDoesNotAbortSiblingInBatch();
+  await testInteractiveButtonReplyAdvancesMenu();
   // eslint-disable-next-line no-console
   console.log('\nAll webhook dedupe tests passed.');
 }

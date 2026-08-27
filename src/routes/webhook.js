@@ -23,9 +23,36 @@ function verifyWhatsAppSignature(rawBody, signatureHeader, appSecret) {
 }
 
 /**
+ * Normalize inbound Cloud API message to text + optional interactive reply id.
+ * @returns {{from:string,text:string,replyId:string|null}|null}
+ */
+function extractInboundMessage(message) {
+  if (!message || !message.from) return null;
+
+  if (message.type === 'text') {
+    const text = message.text && message.text.body;
+    if (text == null) return null;
+    return { from: message.from, text: String(text), replyId: null };
+  }
+
+  if (message.type === 'interactive') {
+    const interactive = message.interactive || {};
+    const reply =
+      interactive.button_reply || interactive.list_reply || null;
+    if (!reply) return null;
+    const replyId = reply.id != null ? String(reply.id) : null;
+    const text = reply.title != null ? String(reply.title) : '';
+    if (!replyId && !text) return null;
+    return { from: message.from, text, replyId };
+  }
+
+  return null;
+}
+
+/**
  * Standard WhatsApp Cloud API webhook.
  * GET  /webhook — Meta verify handshake
- * POST /webhook — inbound customer text (statuses / echoes ignored)
+ * POST /webhook — inbound text + interactive button/list replies
  */
 function createWebhookRouter({
   engine,
@@ -71,7 +98,6 @@ function createWebhookRouter({
       }
     }
 
-    // Acknowledge immediately per WhatsApp webhook best practice
     res.sendStatus(200);
 
     try {
@@ -85,23 +111,20 @@ function createWebhookRouter({
           const value = change.value || {};
           const messages = value.messages || [];
           for (const message of messages) {
-            if (message.type !== 'text') continue;
-            const from = message.from;
-            const text = message.text && message.text.body;
-            if (!from || text == null) continue;
-            // begin/commit/release: do not mark wamid done until handleInbound
-            // succeeds — otherwise a Graph/session failure + Meta retry drops
-            // the customer message forever.
+            const inbound = extractInboundMessage(message);
+            if (!inbound) continue;
             if (!dedupe.begin(message.id)) continue;
             try {
-              await engine.handleInbound(from, text);
+              await engine.handleInbound(inbound.from, inbound.text, {
+                replyId: inbound.replyId,
+              });
               dedupe.commit(message.id);
             } catch (err) {
               dedupe.release(message.id);
               // eslint-disable-next-line no-console
               console.error('[webhook] message processing error', {
                 messageId: message.id,
-                from,
+                from: inbound.from,
                 message: err && err.message ? err.message : String(err),
               });
             }
@@ -117,4 +140,8 @@ function createWebhookRouter({
   return router;
 }
 
-module.exports = { createWebhookRouter, verifyWhatsAppSignature };
+module.exports = {
+  createWebhookRouter,
+  verifyWhatsAppSignature,
+  extractInboundMessage,
+};
