@@ -4,7 +4,7 @@
  * Regression: successful logLead + failed pendingLead clear must not
  * double-write the lead after process restart.
  *
- * Trigger: QUALIFIED_LINK finalize logs the lead, then sessionStore.set to
+ * Trigger: SEND_LINK finalize logs the lead, then sessionStore.set to
  * clear pendingLead throws (or the process dies after logLead). Old
  * _loggedLeadKeys lived only in memory, so a new FsmEngine after restart
  * flushed pendingLead and appended a duplicate CRM/log row.
@@ -15,6 +15,7 @@
 const assert = require('assert');
 const { MemorySessionStore } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
+const { driveToFinalConsent } = require('./melrose-path');
 
 class CapturingLogger {
   constructor() {
@@ -52,13 +53,9 @@ function wrapStoreClearFail(store) {
 }
 
 async function driveToConfirmQualify(engine, wa) {
-  await engine.handleInbound(wa, 'hi');
-  await engine.handleInbound(wa, '3');
-  await engine.handleInbound(wa, 'yes');
-  await engine.handleInbound(wa, '2');
-  await engine.handleInbound(wa, 'great');
+  await driveToFinalConsent(engine, wa);
   const session = await engine.sessionStore.get(wa);
-  assert.strictEqual(session.currentState, 'CONFIRM_QUALIFY');
+  assert.strictEqual(session.currentState, 'FINAL_CONSENT');
 }
 
 function makeEngine(store, logger) {

@@ -4,7 +4,7 @@
  * Regression: session TTL must not delete a soft_closed/quiet session that
  * still holds pendingTerminalOutbound after the lead was flushed.
  *
- * Trigger: QUALIFIED_LINK Graph send fails → soft_closed + pendingTerminalOutbound
+ * Trigger: SEND_LINK Graph send fails → soft_closed + pendingTerminalOutbound
  * + pendingLead. Scheduler (or inbound) flushes the lead, clearing pendingLead
  * and refreshing updatedAt. Customer does not return within SESSION_TTL_MS
  * (or keeps retrying while Graph is down — failed retries do not persist a
@@ -26,6 +26,7 @@ const {
   isSessionExpired,
 } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
+const { driveToFinalConsent } = require('./melrose-path');
 
 class CapturingLogger {
   constructor() {
@@ -39,13 +40,9 @@ class CapturingLogger {
 }
 
 async function driveToConfirmQualify(engine, wa) {
-  await engine.handleInbound(wa, 'hi');
-  await engine.handleInbound(wa, '3');
-  await engine.handleInbound(wa, 'yes');
-  await engine.handleInbound(wa, '2');
-  await engine.handleInbound(wa, 'great');
+  await driveToFinalConsent(engine, wa);
   const session = await engine.sessionStore.get(wa);
-  assert.strictEqual(session.currentState, 'CONFIRM_QUALIFY');
+  assert.strictEqual(session.currentState, 'FINAL_CONSENT');
 }
 
 async function testIsSessionExpiredSkipsPendingTerminalOutbound() {
@@ -62,7 +59,7 @@ async function testIsSessionExpiredSkipsPendingTerminalOutbound() {
     updatedAt: Date.now() - config.session.ttlMs - 1000,
     pendingLead: null,
     pendingTerminalOutbound: {
-      stateId: 'QUALIFIED_LINK',
+      stateId: 'SEND_LINK',
       promptKey: 'qualified_link_body',
     },
   };
@@ -84,8 +81,8 @@ async function testFileStoreDoesNotPurgePendingTerminalOutbound() {
 
   await store.set(wa, {
     waNumber: wa,
-    currentState: 'QUALIFIED_LINK',
-    path: ['GREETING', 'QUALIFIED_LINK'],
+    currentState: 'SEND_LINK',
+    path: ['GREETING', 'SEND_LINK'],
     invalidAttempts: 0,
     status: 'soft_closed',
     interruptedFrom: null,
@@ -94,7 +91,7 @@ async function testFileStoreDoesNotPurgePendingTerminalOutbound() {
     lastExitReason: 'qualified_self_serve',
     pendingLead: null,
     pendingTerminalOutbound: {
-      stateId: 'QUALIFIED_LINK',
+      stateId: 'SEND_LINK',
       promptKey: 'qualified_link_body',
     },
     lastBotMessageAt: null,
@@ -119,7 +116,7 @@ async function testFileStoreDoesNotPurgePendingTerminalOutbound() {
   const got = await store.get(wa);
   assert.ok(got, 'get must not TTL-delete pendingTerminalOutbound session');
   assert.ok(got.pendingTerminalOutbound);
-  assert.strictEqual(got.currentState, 'QUALIFIED_LINK');
+  assert.strictEqual(got.currentState, 'SEND_LINK');
 
   fs.rmSync(dir, { recursive: true, force: true });
 
@@ -177,17 +174,17 @@ async function testInboundRetriesAfterTtlOnceLeadFlushed() {
 
   session = await store.get(wa);
   assert.strictEqual(session.status, 'soft_closed');
-  assert.strictEqual(session.currentState, 'QUALIFIED_LINK');
+  assert.strictEqual(session.currentState, 'SEND_LINK');
   assert.strictEqual(session.pendingTerminalOutbound, null);
   assert.ok(
-    session.path.includes('CONFIRM_QUALIFY'),
+    session.path.includes('FINAL_CONSENT'),
     'completed path must not be wiped by TTL'
   );
   const last = sent[sent.length - 1];
-  assert.strictEqual(last.meta && last.meta.stateId, 'QUALIFIED_LINK');
+  assert.strictEqual(last.meta && last.meta.stateId, 'SEND_LINK');
 
   // eslint-disable-next-line no-console
-  console.log('✓ inbound retries QUALIFIED_LINK after TTL with pendingTerminalOutbound');
+  console.log('✓ inbound retries SEND_LINK after TTL with pendingTerminalOutbound');
 }
 
 async function main() {

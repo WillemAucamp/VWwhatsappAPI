@@ -99,12 +99,13 @@ Free-form bot text (and interactive menus) only work inside the **24-hour** wind
 
 ## 7. Before real clients
 
-1. Confirm `src/content/copy.js` and button titles in `src/fsm/states.js` match your dealership voice.
-2. Set real `APPLICATION_LINK` and `STOCK_LINK`.
+1. Confirm `src/content/copy.js` matches the Melrose PDF script (already loaded).
+2. Set real `APPLICATION_LINK` (Google Form) and `STOCK_LINK`.
 3. Put a **system user** permanent token in `WHATSAPP_TOKEN` (dashboard tokens expire).
 4. Keep `WHATSAPP_APP_SECRET` set. Production rejects unsigned webhook POSTs.
 5. Submit any templates you need outside 24h in WhatsApp Manager.
 6. Add a payment method on the WABA if you will send paid template conversations.
+7. Open items from the Melrose handoff: Promotions content TBD; Opt-Out currently → human_handover; stocklist uses Continue until dynamic vehicle rows are wired.
 
 ## 8. How the interactive menu works
 

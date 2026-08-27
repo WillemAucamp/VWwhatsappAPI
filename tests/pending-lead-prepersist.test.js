@@ -3,7 +3,7 @@
 /**
  * Regression: terminal soft_closed must be persisted WITH pendingLead.
  *
- * Trigger: QUALIFIED_LINK send succeeds, first sessionStore.set writes
+ * Trigger: SEND_LINK send succeeds, first sessionStore.set writes
  * soft_closed, then logLead throws. Old code tried to write pendingLead in a
  * second set — if that set also threw (or the process crashed), disk stayed
  * soft_closed with pendingLead=null. The customer's next message called
@@ -17,6 +17,7 @@
 const assert = require('assert');
 const { MemorySessionStore } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
+const { driveToFinalConsent } = require('./melrose-path');
 
 class FlakyLeadLogger {
   constructor() {
@@ -35,13 +36,9 @@ class FlakyLeadLogger {
 }
 
 async function driveToConfirmQualify(engine, wa) {
-  await engine.handleInbound(wa, 'hi');
-  await engine.handleInbound(wa, '3');
-  await engine.handleInbound(wa, 'yes');
-  await engine.handleInbound(wa, '2');
-  await engine.handleInbound(wa, 'great');
+  await driveToFinalConsent(engine, wa);
   const session = await engine.sessionStore.get(wa);
-  assert.strictEqual(session.currentState, 'CONFIRM_QUALIFY');
+  assert.strictEqual(session.currentState, 'FINAL_CONSENT');
 }
 
 async function testSoftClosedNeverPersistsWithoutPendingLeadOnLogFailure() {
@@ -74,7 +71,7 @@ async function testSoftClosedNeverPersistsWithoutPendingLeadOnLogFailure() {
   await engine.handleInbound(wa, 'yes');
 
   const terminalWrites = writes.filter(
-    (w) => w.currentState === 'QUALIFIED_LINK' && w.status === 'soft_closed'
+    (w) => w.currentState === 'SEND_LINK' && w.status === 'soft_closed'
   );
   assert.ok(terminalWrites.length >= 1, 'soft_closed must be persisted');
   for (const w of terminalWrites) {
@@ -106,7 +103,7 @@ async function testClearSetFailureDoesNotDoubleLogOnFlush() {
     if (
       failClearSet &&
       session.status === 'soft_closed' &&
-      session.currentState === 'QUALIFIED_LINK' &&
+      session.currentState === 'SEND_LINK' &&
       session.pendingLead == null
     ) {
       throw new Error('simulated clear-set failure');
@@ -165,7 +162,7 @@ async function testPendingLeadSurviveSimulatedSecondPersistOutage() {
   const origSet = store.set.bind(store);
   store.set = async (wa, session) => {
     if (
-      session.currentState === 'QUALIFIED_LINK' &&
+      session.currentState === 'SEND_LINK' &&
       session.status === 'soft_closed'
     ) {
       terminalPersists += 1;

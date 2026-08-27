@@ -74,21 +74,23 @@ async function testInteractiveButtonGraphBody() {
       interactive: {
         type: 'button',
         buttons: [
-          { id: '1', title: 'Specials' },
-          { id: '2', title: 'See cars' },
-          { id: '3', title: 'Qualify me' },
+          { id: 'employed_yes', title: 'Yes' },
+          { id: 'employed_no', title: 'No' },
         ],
       },
       mediaSlot: 'ignored',
-      meta: { stateId: 'GREETING' },
+      meta: { stateId: 'EMPLOYMENT_CHECK' },
     });
     const body = getBody();
     assert.strictEqual(body.type, 'interactive');
     assert.strictEqual(body.interactive.type, 'button');
     assert.strictEqual(body.interactive.body.text, 'Pick one');
-    assert.strictEqual(body.interactive.action.buttons.length, 3);
+    assert.strictEqual(body.interactive.action.buttons.length, 2);
     assert.strictEqual(body.interactive.action.buttons[0].type, 'reply');
-    assert.strictEqual(body.interactive.action.buttons[2].reply.id, '3');
+    assert.strictEqual(
+      body.interactive.action.buttons[0].reply.id,
+      'employed_yes'
+    );
     assert.strictEqual(
       Object.prototype.hasOwnProperty.call(body, 'mediaSlot'),
       false
@@ -99,10 +101,44 @@ async function testInteractiveButtonGraphBody() {
   });
 }
 
+async function testInteractiveListGraphBody() {
+  await withFakeFetch(async (getBody) => {
+    await cloudApiSendMessage('27821234567', {
+      text: 'What can I help you with?',
+      interactive: {
+        type: 'list',
+        button: 'Choose',
+        sections: [
+          {
+            title: 'Options',
+            rows: [
+              { id: 'see_cars', title: 'See our cars' },
+              { id: 'qualify_me', title: 'Qualify Me' },
+              { id: 'promotions', title: 'Promotions' },
+              { id: 'opt_out', title: 'Opt-Out' },
+            ],
+          },
+        ],
+      },
+    });
+    const body = getBody();
+    assert.strictEqual(body.type, 'interactive');
+    assert.strictEqual(body.interactive.type, 'list');
+    assert.strictEqual(body.interactive.action.sections[0].rows.length, 4);
+    assert.strictEqual(
+      body.interactive.action.sections[0].rows[1].id,
+      'qualify_me'
+    );
+    // eslint-disable-next-line no-console
+    console.log('✓ interactive list Graph body for greeting menu');
+  });
+}
+
 async function main() {
   await testTemplateGraphBody();
   await testTextViaTemplateNameOnSendMessage();
   await testInteractiveButtonGraphBody();
+  await testInteractiveListGraphBody();
   // eslint-disable-next-line no-console
   console.log('\ntransport graph tests passed.');
 }

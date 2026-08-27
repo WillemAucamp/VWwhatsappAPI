@@ -3,7 +3,7 @@
 /**
  * Regression: logLead failure after terminal persist must not lose the lead.
  *
- * Trigger: QUALIFIED_LINK Graph send + sessionStore.set succeed, then
+ * Trigger: SEND_LINK Graph send + sessionStore.set succeed, then
  * leadLogger.logLead throws (disk full). Old behavior left soft_closed with
  * no lead and threw — the customer's next message (or a Meta retry after
  * dedupe release) called _restart() and the qualification lead was gone.
@@ -14,6 +14,7 @@
 const assert = require('assert');
 const { MemorySessionStore } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
+const { driveToFinalConsent } = require('./melrose-path');
 
 class FlakyLeadLogger {
   constructor() {
@@ -32,13 +33,9 @@ class FlakyLeadLogger {
 }
 
 async function driveToConfirmQualify(engine, wa) {
-  await engine.handleInbound(wa, 'hi');
-  await engine.handleInbound(wa, '3');
-  await engine.handleInbound(wa, 'yes');
-  await engine.handleInbound(wa, '2');
-  await engine.handleInbound(wa, 'great');
+  await driveToFinalConsent(engine, wa);
   const session = await engine.sessionStore.get(wa);
-  assert.strictEqual(session.currentState, 'CONFIRM_QUALIFY');
+  assert.strictEqual(session.currentState, 'FINAL_CONSENT');
 }
 
 async function testPendingLeadFlushedBeforeSoftClosedRestart() {
@@ -62,7 +59,7 @@ async function testPendingLeadFlushedBeforeSoftClosedRestart() {
 
   let session = await store.get(wa);
   assert.strictEqual(session.status, 'soft_closed');
-  assert.strictEqual(session.currentState, 'QUALIFIED_LINK');
+  assert.strictEqual(session.currentState, 'SEND_LINK');
   assert.ok(session.pendingLead, 'failed logLead must queue pendingLead');
   assert.strictEqual(session.pendingLead.exitReason, 'qualified_self_serve');
   assert.strictEqual(logger.leads.length, 0);
@@ -76,11 +73,12 @@ async function testPendingLeadFlushedBeforeSoftClosedRestart() {
     logger.leads[0].path,
     [
       'GREETING',
+      'EMPLOYMENT_CHECK',
+      'AFFORDABILITY_CHECK',
       'LICENSE_CHECK',
-      'INCOME_CHECK',
       'CREDIT_CHECK',
-      'CONFIRM_QUALIFY',
-      'QUALIFIED_LINK',
+      'FINAL_CONSENT',
+      'SEND_LINK',
     ]
   );
 

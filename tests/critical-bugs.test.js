@@ -52,7 +52,7 @@ async function testGraphBodyOmitsMediaSlot() {
       text: 'stock list',
       link: 'https://example.com/stock',
       mediaSlot: 'stock_list',
-      meta: { stateId: 'STOCK_LIST' },
+      meta: { stateId: 'STOCKLIST_CAROUSEL' },
     });
 
     assert.ok(parsedBody, 'fetch was called');
@@ -244,16 +244,16 @@ async function testConcurrentInboundSerialization() {
   delaySend = true;
   // First message starts GREETING (slow send); second should wait then advance
   const p1 = engine.handleInbound(wa, 'hello');
-  const p2 = engine.handleInbound(wa, '3');
+  const p2 = engine.handleInbound(wa, 'qualify me');
   await Promise.all([p1, p2]);
 
   const session = await store.get(wa);
   assert.strictEqual(
     session.currentState,
-    'LICENSE_CHECK',
+    'EMPLOYMENT_CHECK',
     'serialized handling must apply both transitions in order'
   );
-  assert.deepStrictEqual(session.path, ['GREETING', 'LICENSE_CHECK']);
+  assert.deepStrictEqual(session.path, ['GREETING', 'EMPLOYMENT_CHECK']);
   // eslint-disable-next-line no-console
   console.log('✓ concurrent inbound messages serialize per WhatsApp number');
 }

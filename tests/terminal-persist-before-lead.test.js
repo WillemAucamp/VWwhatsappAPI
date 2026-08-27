@@ -3,9 +3,9 @@
 /**
  * Regression: terminal soft_closed/quiet must be persisted before logLead.
  *
- * Trigger: Graph send for QUALIFIED_LINK succeeds, lead is logged, then
+ * Trigger: Graph send for SEND_LINK succeeds, lead is logged, then
  * sessionStore.set throws (disk full / Redis blip). Old order left the
- * session active at CONFIRM_QUALIFY, so a retry/"yes" double-logged the
+ * session active at FINAL_CONSENT, so a retry/"yes" double-logged the
  * lead and re-sent the application link.
  *
  * Run: node tests/terminal-persist-before-lead.test.js
@@ -22,6 +22,7 @@ const {
 } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
 const config = require('../src/config');
+const { driveToFinalConsent } = require('./melrose-path');
 
 class CapturingLogger {
   constructor() {
@@ -35,13 +36,9 @@ class CapturingLogger {
 }
 
 async function driveToConfirmQualify(engine, wa) {
-  await engine.handleInbound(wa, 'hi');
-  await engine.handleInbound(wa, '3');
-  await engine.handleInbound(wa, 'yes');
-  await engine.handleInbound(wa, '2');
-  await engine.handleInbound(wa, 'great');
+  await driveToFinalConsent(engine, wa);
   const session = await engine.sessionStore.get(wa);
-  assert.strictEqual(session.currentState, 'CONFIRM_QUALIFY');
+  assert.strictEqual(session.currentState, 'FINAL_CONSENT');
 }
 
 async function testTerminalSetFailureDoesNotDoubleLogLead() {
@@ -50,7 +47,7 @@ async function testTerminalSetFailureDoesNotDoubleLogLead() {
   let rejectQualifiedSet = false;
   const origSet = store.set.bind(store);
   store.set = async (wa, session) => {
-    if (rejectQualifiedSet && session.currentState === 'QUALIFIED_LINK') {
+    if (rejectQualifiedSet && session.currentState === 'SEND_LINK') {
       throw new Error('simulated session persist failure');
     }
     return origSet(wa, session);
@@ -80,7 +77,7 @@ async function testTerminalSetFailureDoesNotDoubleLogLead() {
   );
 
   const mid = await store.get(wa);
-  assert.strictEqual(mid.currentState, 'CONFIRM_QUALIFY');
+  assert.strictEqual(mid.currentState, 'FINAL_CONSENT');
   assert.strictEqual(mid.status, 'active');
 
   rejectQualifiedSet = false;
@@ -91,7 +88,7 @@ async function testTerminalSetFailureDoesNotDoubleLogLead() {
 
   const final = await store.get(wa);
   assert.strictEqual(final.status, 'soft_closed');
-  assert.strictEqual(final.currentState, 'QUALIFIED_LINK');
+  assert.strictEqual(final.currentState, 'SEND_LINK');
 
   // eslint-disable-next-line no-console
   console.log('✓ terminal persist failure does not double-log leads');
@@ -160,7 +157,13 @@ async function testFileSessionStoreAtomicReplace() {
   const session = createEmptySession(wa);
   session.currentState = 'CREDIT_CHECK';
   session.status = 'active';
-  session.path = ['GREETING', 'LICENSE_CHECK', 'INCOME_CHECK', 'CREDIT_CHECK'];
+  session.path = [
+    'GREETING',
+    'EMPLOYMENT_CHECK',
+    'AFFORDABILITY_CHECK',
+    'LICENSE_CHECK',
+    'CREDIT_CHECK',
+  ];
   await store.set(wa, session);
 
   const file = path.join(dir, `${wa}.json`);

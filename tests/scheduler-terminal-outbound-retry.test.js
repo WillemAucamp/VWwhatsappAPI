@@ -4,7 +4,7 @@
  * Regression: pendingTerminalOutbound must be retried by the scheduler tick,
  * not only on the next inbound.
  *
- * Trigger: QUALIFIED_LINK Graph send fails after soft_closed + lead persist.
+ * Trigger: SEND_LINK Graph send fails after soft_closed + lead persist.
  * The customer already answered the last question and is waiting for the
  * application link — they will not message again. Old behavior only retried
  * on inbound, so the link was never delivered unless Meta redelivered or the
@@ -17,6 +17,7 @@ const assert = require('assert');
 const { MemorySessionStore } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
 const { FollowUpScheduler } = require('../src/followup/scheduler');
+const { driveToFinalConsent } = require('./melrose-path');
 
 class CapturingLogger {
   constructor() {
@@ -30,13 +31,9 @@ class CapturingLogger {
 }
 
 async function driveToConfirmQualify(engine, wa) {
-  await engine.handleInbound(wa, 'hi');
-  await engine.handleInbound(wa, '3');
-  await engine.handleInbound(wa, 'yes');
-  await engine.handleInbound(wa, '2');
-  await engine.handleInbound(wa, 'great');
+  await driveToFinalConsent(engine, wa);
   const session = await engine.sessionStore.get(wa);
-  assert.strictEqual(session.currentState, 'CONFIRM_QUALIFY');
+  assert.strictEqual(session.currentState, 'FINAL_CONSENT');
 }
 
 async function testSchedulerRetriesUndeliveredQualifiedLink() {
@@ -96,18 +93,18 @@ async function testSchedulerRetriesUndeliveredQualifiedLink() {
   // No inbound — only the scheduler tick may recover the undelivered link.
   const result = await scheduler.tick(clock);
   assert.strictEqual(result.resentTerminal, 1);
-  assert.ok(sent.length > before, 'scheduler must re-send QUALIFIED_LINK');
+  assert.ok(sent.length > before, 'scheduler must re-send SEND_LINK');
   const last = sent[sent.length - 1];
-  assert.strictEqual(last.meta && last.meta.stateId, 'QUALIFIED_LINK');
+  assert.strictEqual(last.meta && last.meta.stateId, 'SEND_LINK');
 
   session = await store.get(wa);
   assert.strictEqual(session.status, 'soft_closed');
-  assert.strictEqual(session.currentState, 'QUALIFIED_LINK');
+  assert.strictEqual(session.currentState, 'SEND_LINK');
   assert.strictEqual(session.pendingTerminalOutbound, null);
   assert.strictEqual(logger.leads.length, 1);
 
   // eslint-disable-next-line no-console
-  console.log('✓ scheduler retries undelivered QUALIFIED_LINK without inbound');
+  console.log('✓ scheduler retries undelivered SEND_LINK without inbound');
 }
 
 async function testSchedulerKeepsPendingWhenRetryStillFails() {

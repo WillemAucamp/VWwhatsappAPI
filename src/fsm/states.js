@@ -1,21 +1,17 @@
 'use strict';
 
 /**
- * FSM state table — data only, no branching logic.
+ * VW Melrose FSM — from VW_Melrose_WhatsApp_Bot_Flow.pdf.
  *
  * Interactive menus (Cloud API):
  *   optionTitles  WhatsApp button / list row titles (≤20 chars for buttons)
  *   options       reply id (option key) → next state
- *   optionLabels  free-text fallback synonyms (typed replies / tests)
+ *   optionLabels  free-text fallback synonyms
  *
- * Each state:
- *   id, promptKey, type ('choice'|'info'|'terminal')
- *   options, optionTitles, optionLabels
- *   next, terminal, exitReason, softDecline, quiet, notifyAgent
- *   sendLink, mediaSlot, continuePromptKey
+ * Greeting has 4 options → list message (reply buttons max out at 3).
+ * Stocklist: any selection → employment_check (dynamic car_id list TBD;
+ *   Continue stands in until live vehicle rows are wired).
  */
-
-/** @typedef {'choice'|'info'|'terminal'} StateType */
 
 /** @type {Record<string, object>} */
 const STATES = {
@@ -24,56 +20,142 @@ const STATES = {
     promptKey: 'greeting_prompt',
     type: 'choice',
     options: {
-      '1': 'SPECIAL_INFO',
-      '2': 'STOCK_LIST',
-      '3': 'LICENSE_CHECK',
+      see_cars: 'STOCKLIST_CAROUSEL',
+      qualify_me: 'EMPLOYMENT_CHECK',
+      promotions: 'PROMOTIONS',
+      opt_out: 'HUMAN_HANDOVER',
     },
     optionTitles: {
-      '1': 'Specials',
-      '2': 'See cars',
-      '3': 'Qualify me',
+      see_cars: 'See our cars',
+      qualify_me: 'Qualify Me',
+      promotions: 'Promotions',
+      opt_out: 'Opt-Out',
     },
     optionLabels: {
-      '1': ['1', 'i saw a special', 'special', 'specials'],
-      '2': ['2', 'let me see your cars', 'cars', 'stock'],
-      '3': ['3', 'qualify me', 'qualify'],
+      see_cars: ['see our cars', 'cars', 'stock', 'see_cars', '1'],
+      qualify_me: ['qualify me', 'qualify', 'qualify_me', '2'],
+      promotions: ['promotions', 'specials', 'promo', '3'],
+      opt_out: ['opt-out', 'opt out', 'optout', 'unsubscribe', '4'],
     },
   },
 
-  SPECIAL_INFO: {
-    id: 'SPECIAL_INFO',
-    promptKey: 'special_info_body',
-    continuePromptKey: 'special_info_continue',
-    type: 'info',
-    next: 'LICENSE_CHECK',
-    options: {
-      '1': 'LICENSE_CHECK',
-    },
-    optionTitles: {
-      '1': 'Continue',
-    },
-    optionLabels: {
-      '1': ['1', 'continue', 'ok', 'yes', 'next'],
-    },
-  },
-
-  STOCK_LIST: {
-    id: 'STOCK_LIST',
-    promptKey: 'stock_list_body',
-    continuePromptKey: 'stock_list_continue',
-    type: 'info',
-    next: 'LICENSE_CHECK',
+  STOCKLIST_CAROUSEL: {
+    id: 'STOCKLIST_CAROUSEL',
+    promptKey: 'stocklist_body',
+    type: 'choice',
     sendLink: 'stock',
     mediaSlot: 'stock_list',
+    // PDF: any car_id → employment_check. Until dynamic stock is wired,
+    // Continue (and future car_* ids) all route there.
     options: {
-      '1': 'LICENSE_CHECK',
+      any_car: 'EMPLOYMENT_CHECK',
     },
     optionTitles: {
-      '1': 'Continue',
+      any_car: 'Continue',
     },
     optionLabels: {
-      '1': ['1', 'continue', 'ok', 'yes', 'next'],
+      any_car: [
+        'continue',
+        'ok',
+        'yes',
+        'next',
+        '1',
+        'any_car',
+        'select',
+      ],
     },
+  },
+
+  PROMOTIONS: {
+    id: 'PROMOTIONS',
+    promptKey: 'promotions_body',
+    type: 'choice',
+    options: {
+      back: 'GREETING',
+    },
+    optionTitles: {
+      back: 'Main menu',
+    },
+    optionLabels: {
+      back: ['back', 'main menu', 'menu', '1'],
+    },
+  },
+
+  EMPLOYMENT_CHECK: {
+    id: 'EMPLOYMENT_CHECK',
+    promptKey: 'employment_check_prompt',
+    type: 'choice',
+    options: {
+      employed_yes: 'AFFORDABILITY_CHECK',
+      employed_no: 'END_CHAT_EMPLOYED_NO',
+    },
+    optionTitles: {
+      employed_yes: 'Yes',
+      employed_no: 'No',
+    },
+    optionLabels: {
+      employed_yes: ['yes', 'y', '1', 'employed_yes', 'employed'],
+      employed_no: ['no', 'n', '2', 'employed_no'],
+    },
+  },
+
+  END_CHAT_EMPLOYED_NO: {
+    id: 'END_CHAT_EMPLOYED_NO',
+    promptKey: 'employed_no_end',
+    type: 'terminal',
+    terminal: true,
+    exitReason: 'employed_no',
+    softDecline: true,
+    notifyAgent: false,
+  },
+
+  AFFORDABILITY_CHECK: {
+    id: 'AFFORDABILITY_CHECK',
+    promptKey: 'affordability_check_prompt',
+    type: 'choice',
+    options: {
+      income_over_15k: 'LICENSE_CHECK',
+      income_over_9k: 'LICENSE_CHECK',
+      income_under_5k: 'END_CHAT_INCOME',
+    },
+    optionTitles: {
+      income_over_15k: 'More than R15k',
+      income_over_9k: 'More than R9k',
+      income_under_5k: 'Less than R5k',
+    },
+    optionLabels: {
+      income_over_15k: [
+        'more than r15k',
+        'over 15k',
+        'above 15k',
+        'income_over_15k',
+        '1',
+      ],
+      income_over_9k: [
+        'more than r9k',
+        'over 9k',
+        'above 9k',
+        'income_over_9k',
+        '2',
+      ],
+      income_under_5k: [
+        'less than r5k',
+        'under 5k',
+        'below 5k',
+        'income_under_5k',
+        '3',
+      ],
+    },
+  },
+
+  END_CHAT_INCOME: {
+    id: 'END_CHAT_INCOME',
+    promptKey: 'income_under_5k_end',
+    type: 'terminal',
+    terminal: true,
+    exitReason: 'income_under_5k',
+    softDecline: true,
+    notifyAgent: false,
   },
 
   LICENSE_CHECK: {
@@ -81,58 +163,28 @@ const STATES = {
     promptKey: 'license_check_prompt',
     type: 'choice',
     options: {
-      yes: 'INCOME_CHECK',
-      no: 'NO_LICENSE_ADVICE',
+      license_yes: 'CREDIT_CHECK',
+      license_no: 'LICENSE_NO_HANDOVER',
     },
     optionTitles: {
-      yes: 'Yes',
-      no: 'No',
+      license_yes: 'Yes',
+      license_no: 'No',
     },
     optionLabels: {
-      yes: ['yes', 'y', '1'],
-      no: ['no', 'n', '2'],
+      license_yes: ['yes', 'y', '1', 'license_yes'],
+      license_no: ['no', 'n', '2', 'license_no'],
     },
   },
 
-  NO_LICENSE_ADVICE: {
-    id: 'NO_LICENSE_ADVICE',
-    promptKey: 'no_license_advice',
+  LICENSE_NO_HANDOVER: {
+    id: 'LICENSE_NO_HANDOVER',
+    promptKey: 'human_handover_body',
     type: 'terminal',
     terminal: true,
     exitReason: 'no_license',
-    softDecline: true,
-    notifyAgent: false,
-  },
-
-  INCOME_CHECK: {
-    id: 'INCOME_CHECK',
-    promptKey: 'income_check_prompt',
-    type: 'choice',
-    options: {
-      below: 'AFFORDABILITY_DECLINE',
-      mid: 'CREDIT_CHECK',
-      above: 'CREDIT_CHECK',
-    },
-    optionTitles: {
-      below: 'Below R8,500',
-      mid: 'R8.5k–R15k',
-      above: 'Above R15,000',
-    },
-    optionLabels: {
-      below: ['1', 'below', 'below r8500', 'below r8,500', 'under 8500'],
-      mid: ['2', 'r8500-r15000', 'r8,500–r15,000', '8500-15000', 'mid'],
-      above: ['3', 'above', 'above r15000', 'above r15,000', 'over 15000'],
-    },
-  },
-
-  AFFORDABILITY_DECLINE: {
-    id: 'AFFORDABILITY_DECLINE',
-    promptKey: 'affordability_decline_advice',
-    type: 'terminal',
-    terminal: true,
-    exitReason: 'affordability_decline',
-    softDecline: true,
-    notifyAgent: false,
+    softDecline: false,
+    quiet: true,
+    notifyAgent: true,
   },
 
   CREDIT_CHECK: {
@@ -140,53 +192,51 @@ const STATES = {
     promptKey: 'credit_check_prompt',
     type: 'choice',
     options: {
-      poor: 'CREDIT_DECLINE',
-      average: 'CONFIRM_QUALIFY',
-      great: 'CONFIRM_QUALIFY',
+      credit_good: 'FINAL_CONSENT',
+      credit_bad: 'CREDIT_BAD_HANDOVER',
     },
     optionTitles: {
-      poor: 'Poor',
-      average: 'Average',
-      great: 'Great',
+      credit_good: 'Good',
+      credit_bad: 'Bad',
     },
     optionLabels: {
-      poor: ['1', 'poor'],
-      average: ['2', 'average', 'avg'],
-      great: ['3', 'great', 'good', 'excellent'],
+      credit_good: ['good', 'great', 'excellent', '1', 'credit_good'],
+      credit_bad: ['bad', 'poor', '2', 'credit_bad'],
     },
   },
 
-  CREDIT_DECLINE: {
-    id: 'CREDIT_DECLINE',
-    promptKey: 'credit_decline_advice',
+  CREDIT_BAD_HANDOVER: {
+    id: 'CREDIT_BAD_HANDOVER',
+    promptKey: 'human_handover_body',
     type: 'terminal',
     terminal: true,
-    exitReason: 'credit_decline',
-    softDecline: true,
-    notifyAgent: false,
+    exitReason: 'credit_bad',
+    softDecline: false,
+    quiet: true,
+    notifyAgent: true,
   },
 
-  CONFIRM_QUALIFY: {
-    id: 'CONFIRM_QUALIFY',
-    promptKey: 'confirm_qualify_prompt',
+  FINAL_CONSENT: {
+    id: 'FINAL_CONSENT',
+    promptKey: 'final_consent_prompt',
     type: 'choice',
     options: {
-      yes: 'QUALIFIED_LINK',
-      no: 'AGENT_SOFT_HANDOVER',
+      consent_yes: 'SEND_LINK',
+      consent_no: 'CONSENT_NO_HANDOVER',
     },
     optionTitles: {
-      yes: 'Yes, send link',
-      no: 'Speak to agent',
+      consent_yes: 'Yes, send it',
+      consent_no: 'Not right now',
     },
     optionLabels: {
-      yes: ['yes', 'y', '1'],
-      no: ['no', 'n', '2'],
+      consent_yes: ['yes', 'y', '1', 'yes, send it', 'consent_yes', 'send'],
+      consent_no: ['no', 'n', '2', 'not right now', 'consent_no'],
     },
   },
 
-  QUALIFIED_LINK: {
-    id: 'QUALIFIED_LINK',
-    promptKey: 'qualified_link_body',
+  SEND_LINK: {
+    id: 'SEND_LINK',
+    promptKey: 'send_link_body',
     type: 'terminal',
     terminal: true,
     exitReason: 'qualified_self_serve',
@@ -195,13 +245,14 @@ const STATES = {
     notifyAgent: false,
   },
 
-  AGENT_SOFT_HANDOVER: {
-    id: 'AGENT_SOFT_HANDOVER',
-    promptKey: 'agent_soft_handover_body',
+  CONSENT_NO_HANDOVER: {
+    id: 'CONSENT_NO_HANDOVER',
+    promptKey: 'human_handover_body',
     type: 'terminal',
     terminal: true,
     exitReason: 'declined_self_serve',
-    softDecline: true,
+    softDecline: false,
+    quiet: true,
     notifyAgent: true,
   },
 

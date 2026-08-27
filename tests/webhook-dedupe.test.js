@@ -13,6 +13,7 @@ const { createWebhookRouter } = require('../src/routes/webhook');
 const { createInboundDedupe } = require('../src/webhook/inboundDedupe');
 const { MemorySessionStore } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
+const { driveToFinalConsent } = require('./melrose-path');
 
 class CapturingLogger {
   constructor() {
@@ -148,15 +149,11 @@ async function testDuplicateWebhookDoesNotRestartSoftClosed() {
   });
 
   const wa = '27009990001';
-  // Drive to CONFIRM_QUALIFY — the next "yes" soft-closes as qualified
-  await engine.handleInbound(wa, 'hi');
-  await engine.handleInbound(wa, '3');
-  await engine.handleInbound(wa, 'yes');
-  await engine.handleInbound(wa, '2');
-  await engine.handleInbound(wa, 'great');
+  // Drive to FINAL_CONSENT — the next "yes" soft-closes as qualified
+  await driveToFinalConsent(engine, wa);
 
   let session = await store.get(wa);
-  assert.strictEqual(session.currentState, 'CONFIRM_QUALIFY');
+  assert.strictEqual(session.currentState, 'FINAL_CONSENT');
 
   const dedupe = createInboundDedupe();
   const app = express();
@@ -185,7 +182,7 @@ async function testDuplicateWebhookDoesNotRestartSoftClosed() {
 
     session = await store.get(wa);
     assert.strictEqual(session.status, 'soft_closed');
-    assert.strictEqual(session.currentState, 'QUALIFIED_LINK');
+    assert.strictEqual(session.currentState, 'SEND_LINK');
     assert.strictEqual(logger.leads.length, 1);
 
     const second = await postJson(port, '/webhook', payload);
@@ -197,7 +194,7 @@ async function testDuplicateWebhookDoesNotRestartSoftClosed() {
       'soft_closed',
       'duplicate qualify wamid must not reopen soft_closed session'
     );
-    assert.strictEqual(session.currentState, 'QUALIFIED_LINK');
+    assert.strictEqual(session.currentState, 'SEND_LINK');
     assert.strictEqual(logger.leads.length, 1);
   } finally {
     server.close();
@@ -234,11 +231,11 @@ async function testDuplicateDoesNotDoubleAdvanceInfoState() {
     })
   );
 
-  // Simulate Meta delivering the same "2" twice (retry). Without dedupe the
-  // second delivery would treat STOCK_LIST as info and jump to LICENSE_CHECK.
+  // Simulate Meta delivering the same "see our cars" twice (retry).
+  // Without dedupe the second delivery would advance past STOCKLIST.
   const payload = buildTextWebhook({
     from: wa,
-    text: '2',
+    text: 'see our cars',
     id: 'wamid.stock-choice',
   });
 
@@ -252,15 +249,15 @@ async function testDuplicateDoesNotDoubleAdvanceInfoState() {
     session = await store.get(wa);
     assert.strictEqual(
       session.currentState,
-      'STOCK_LIST',
-      'retry of GREETING "2" must not auto-advance info state to LICENSE_CHECK'
+      'STOCKLIST_CAROUSEL',
+      'retry of GREETING "see our cars" must not advance past stocklist'
     );
-    assert.deepStrictEqual(session.path, ['GREETING', 'STOCK_LIST']);
+    assert.deepStrictEqual(session.path, ['GREETING', 'STOCKLIST_CAROUSEL']);
   } finally {
     server.close();
   }
   // eslint-disable-next-line no-console
-  console.log('✓ duplicate GREETING choice does not skip STOCK_LIST');
+  console.log('✓ duplicate GREETING choice does not skip STOCKLIST_CAROUSEL');
 }
 
 async function testFailedHandleInboundReleasesClaimForRetry() {
@@ -455,18 +452,18 @@ async function testInteractiveButtonReplyAdvancesMenu() {
       buildInteractiveButtonWebhook({
         from: wa,
         id: 'wamid.button-qualify',
-        replyId: '3',
-        title: 'Qualify me',
+        replyId: 'qualify_me',
+        title: 'Qualify Me',
       })
     );
     assert.strictEqual(res.status, 200);
     session = await store.get(wa);
-    assert.strictEqual(session.currentState, 'LICENSE_CHECK');
+    assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
   } finally {
     server.close();
   }
   // eslint-disable-next-line no-console
-  console.log('✓ interactive button_reply advances GREETING → LICENSE_CHECK');
+  console.log('✓ interactive button_reply advances GREETING → EMPLOYMENT_CHECK');
 }
 
 async function main() {

@@ -23,6 +23,7 @@ const {
 } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
 const { FollowUpScheduler } = require('../src/followup/scheduler');
+const { driveToFinalConsent } = require('./melrose-path');
 
 class FlakyLeadLogger {
   constructor() {
@@ -41,13 +42,9 @@ class FlakyLeadLogger {
 }
 
 async function driveToConfirmQualify(engine, wa) {
-  await engine.handleInbound(wa, 'hi');
-  await engine.handleInbound(wa, '3');
-  await engine.handleInbound(wa, 'yes');
-  await engine.handleInbound(wa, '2');
-  await engine.handleInbound(wa, 'great');
+  await driveToFinalConsent(engine, wa);
   const session = await engine.sessionStore.get(wa);
-  assert.strictEqual(session.currentState, 'CONFIRM_QUALIFY');
+  assert.strictEqual(session.currentState, 'FINAL_CONSENT');
 }
 
 async function testIsSessionExpiredSkipsPendingLead() {
@@ -86,8 +83,8 @@ async function testFileStoreListAllDoesNotPurgePendingLead() {
 
   await store.set(wa, {
     waNumber: wa,
-    currentState: 'QUALIFIED_LINK',
-    path: ['GREETING', 'QUALIFIED_LINK'],
+    currentState: 'SEND_LINK',
+    path: ['GREETING', 'SEND_LINK'],
     invalidAttempts: 0,
     status: 'soft_closed',
     interruptedFrom: null,
@@ -97,7 +94,7 @@ async function testFileStoreListAllDoesNotPurgePendingLead() {
     pendingLead: {
       waNumber: wa,
       exitReason: 'qualified_self_serve',
-      path: ['GREETING', 'QUALIFIED_LINK'],
+      path: ['GREETING', 'SEND_LINK'],
       timestamp: new Date(past).toISOString(),
       meta: {},
     },
