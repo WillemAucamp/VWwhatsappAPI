@@ -3,8 +3,12 @@
 const config = require('../config');
 
 /**
- * Polls sessions and asks the engine to send due no-reply follow-ups.
- * Intervals come from config (default: first after 30m, then every 4h).
+ * Polls sessions for:
+ *   - queued pendingLead / pendingTerminalOutbound recovery (always)
+ *   - no-reply follow-up nudges when FOLLOW_UP_ENABLED (config.followUp.enabled)
+ *
+ * FOLLOW_UP_ENABLED=false must not stop lead flush or terminal outbound retry —
+ * those recover CRM writes and application-link delivery for quiet customers.
  */
 class FollowUpScheduler {
   constructor({
@@ -30,11 +34,6 @@ class FollowUpScheduler {
   }
 
   start() {
-    if (!this.cfg.enabled) {
-      // eslint-disable-next-line no-console
-      console.log('[follow-up] disabled');
-      return this;
-    }
     if (this._timer) return this;
     const pollMs = Math.max(1000, this.cfg.pollMs || 60_000);
     this._timer = this.setIntervalFn(() => {
@@ -44,10 +43,19 @@ class FollowUpScheduler {
       });
     }, pollMs);
     if (typeof this._timer.unref === 'function') this._timer.unref();
-    // eslint-disable-next-line no-console
-    console.log(
-      `[follow-up] scheduler started (first=${this.cfg.firstDelayMs}ms, every=${this.cfg.intervalMs}ms, max=${this.cfg.maxCount}, poll=${pollMs}ms)`
-    );
+    // Always poll: pendingLead / pendingTerminalOutbound recovery must run even
+    // when FOLLOW_UP_ENABLED=false (that flag only disables no-reply nudges).
+    if (!this.cfg.enabled) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[follow-up] nudges disabled; recovery poll still running (poll=${pollMs}ms)`
+      );
+    } else {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[follow-up] scheduler started (first=${this.cfg.firstDelayMs}ms, every=${this.cfg.intervalMs}ms, max=${this.cfg.maxCount}, poll=${pollMs}ms)`
+      );
+    }
     return this;
   }
 
@@ -61,7 +69,6 @@ class FollowUpScheduler {
 
   async tick(now = this.nowFn()) {
     if (this._running) return { skipped: true, reason: 'overlap' };
-    if (!this.cfg.enabled) return { skipped: true, reason: 'disabled' };
     this._running = true;
     try {
       const sessions = await this.sessionStore.listAll();
@@ -74,6 +81,7 @@ class FollowUpScheduler {
           // Drain queued leads before follow-up eligibility. Pending leads are
           // exempt from session TTL, but still need a writer when CRM recovers
           // even if the customer never messages again.
+          // Runs even when FOLLOW_UP_ENABLED=false — that flag only gates nudges.
           if (session.pendingLead && typeof this.engine.flushPendingLead === 'function') {
             // eslint-disable-next-line no-await-in-loop
             const didFlush = await this.engine.flushPendingLead(session.waNumber);
@@ -94,6 +102,10 @@ class FollowUpScheduler {
             if (retryResult && retryResult.resentTerminal) {
               resentTerminal.push(session.waNumber);
             }
+          }
+
+          if (!this.cfg.enabled) {
+            continue;
           }
 
           // eslint-disable-next-line no-await-in-loop
@@ -120,6 +132,7 @@ class FollowUpScheduler {
         sent: sent.length,
         flushed: flushed.length,
         resentTerminal: resentTerminal.length,
+        nudgesEnabled: Boolean(this.cfg.enabled),
         details: sent,
         errors,
       };
