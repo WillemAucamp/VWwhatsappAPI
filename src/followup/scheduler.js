@@ -77,24 +77,33 @@ class FollowUpScheduler {
       const resentTerminal = [];
       const errors = [];
       for (const session of sessions) {
-        try {
-          // Drain queued leads before follow-up eligibility. Pending leads are
-          // exempt from session TTL, but still need a writer when CRM recovers
-          // even if the customer never messages again.
-          // Runs even when FOLLOW_UP_ENABLED=false — that flag only gates nudges.
-          if (session.pendingLead && typeof this.engine.flushPendingLead === 'function') {
+        // Isolate CRM flush from terminal WhatsApp retry. A shared try/catch
+        // meant logLead failures skipped pendingTerminalOutbound — qualified
+        // users never got the application link while CRM was down even when
+        // Graph was healthy again.
+        if (session.pendingLead && typeof this.engine.flushPendingLead === 'function') {
+          try {
             // eslint-disable-next-line no-await-in-loop
             const didFlush = await this.engine.flushPendingLead(session.waNumber);
             if (didFlush) flushed.push(session.waNumber);
+          } catch (err) {
+            errors.push({
+              waNumber: session.waNumber,
+              message: err && err.message ? err.message : String(err),
+            });
+            // eslint-disable-next-line no-console
+            console.error('[follow-up] flushPendingLead error', {
+              waNumber: session.waNumber,
+              message: err && err.message ? err.message : String(err),
+            });
           }
+        }
 
-          // Terminal Graph failures leave pendingTerminalOutbound after soft_closed.
-          // The customer already answered the last question and is waiting for the
-          // application link / handover — they will not inbound to trigger retry.
-          if (
-            session.pendingTerminalOutbound &&
-            typeof this.engine.retryPendingTerminalOutbound === 'function'
-          ) {
+        if (
+          session.pendingTerminalOutbound &&
+          typeof this.engine.retryPendingTerminalOutbound === 'function'
+        ) {
+          try {
             // eslint-disable-next-line no-await-in-loop
             const retryResult = await this.engine.retryPendingTerminalOutbound(
               session.waNumber
@@ -102,12 +111,24 @@ class FollowUpScheduler {
             if (retryResult && retryResult.resentTerminal) {
               resentTerminal.push(session.waNumber);
             }
+          } catch (err) {
+            errors.push({
+              waNumber: session.waNumber,
+              message: err && err.message ? err.message : String(err),
+            });
+            // eslint-disable-next-line no-console
+            console.error('[follow-up] retryPendingTerminalOutbound error', {
+              waNumber: session.waNumber,
+              message: err && err.message ? err.message : String(err),
+            });
           }
+        }
 
-          if (!this.cfg.enabled) {
-            continue;
-          }
+        if (!this.cfg.enabled) {
+          continue;
+        }
 
+        try {
           // eslint-disable-next-line no-await-in-loop
           const result = await this.engine.processFollowUp(
             session.waNumber,

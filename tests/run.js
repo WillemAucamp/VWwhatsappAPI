@@ -16,6 +16,8 @@ const files = [
   'pending-terminal-outbound-ttl.test.js',
   'scheduler-terminal-outbound-retry.test.js',
   'scheduler-recovery-when-nudges-disabled.test.js',
+  'crm-down-terminal-retry.test.js',
+  'stale-interactive-reply.test.js',
   'followup-inbound-race.test.js',
   'webhook-dedupe.test.js',
   'followup-tick-isolation.test.js',

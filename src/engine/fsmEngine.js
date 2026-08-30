@@ -53,19 +53,24 @@ function matchOption(state, normalized) {
 
 /**
  * Prefer interactive reply id (button/list), then free-text optionLabels.
+ * When a reply id is present but not valid for the current state (stale button
+ * from an earlier question), do NOT fall back to title matching — Melrose
+ * reuses "Yes"/"No" titles across states, so a stale employment Yes would
+ * otherwise match FINAL_CONSENT's consent_yes and skip real consent.
  * @param {object} state
  * @param {string} normalized
  * @param {string|null|undefined} replyId
  */
 function resolveOptionKey(state, normalized, replyId) {
-  if (
-    replyId != null &&
-    replyId !== '' &&
-    state &&
-    state.options &&
-    Object.prototype.hasOwnProperty.call(state.options, replyId)
-  ) {
-    return String(replyId);
+  if (replyId != null && replyId !== '') {
+    if (
+      state &&
+      state.options &&
+      Object.prototype.hasOwnProperty.call(state.options, replyId)
+    ) {
+      return String(replyId);
+    }
+    return null;
   }
   return matchOption(state, normalized);
 }
@@ -548,6 +553,29 @@ class FsmEngine {
   }
 
   /**
+   * Attempt pendingLead flush; return the error instead of throwing so callers
+   * can still retry pendingTerminalOutbound when CRM is down.
+   * @returns {Error|null}
+   */
+  async _tryFlushPendingLead(session) {
+    if (!session || !session.pendingLead) return null;
+    try {
+      await this._flushPendingLead(session);
+      return null;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(
+        '[fsm] pendingLead flush failed; continuing with terminal retry if needed',
+        {
+          waNumber: session.waNumber,
+          message: err && err.message ? err.message : String(err),
+        }
+      );
+      return err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  /**
    * Background / scheduler entry: flush a queued pendingLead under the
    * per-number lock so CRM recovery does not depend on the customer texting.
    */
@@ -645,10 +673,18 @@ class FsmEngine {
     let session = await this.getOrCreateSession(waNumber);
 
     if (session.status === 'quiet') {
-      await this._flushPendingLead(session);
+      // CRM flush must not block terminal WhatsApp retry — Graph may be healthy
+      // while logLead is still failing. Never _restart while pendingLead remains
+      // (restart clears the only durable copy of the qualification).
+      const flushErr = await this._tryFlushPendingLead(session);
       if (session.pendingTerminalOutbound) {
         return this._retryTerminalOutbound(session);
       }
+      if (session.pendingLead) {
+        if (flushErr) throw flushErr;
+        return { session, quiet: true, pendingLead: true };
+      }
+      if (flushErr) throw flushErr;
       if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
         return this._restart(session);
       }
@@ -662,10 +698,15 @@ class FsmEngine {
     }
 
     if (session.status === 'soft_closed') {
-      await this._flushPendingLead(session);
+      const flushErr = await this._tryFlushPendingLead(session);
       if (session.pendingTerminalOutbound) {
         return this._retryTerminalOutbound(session);
       }
+      if (session.pendingLead) {
+        if (flushErr) throw flushErr;
+        return { session, softClosed: true, pendingLead: true };
+      }
+      if (flushErr) throw flushErr;
       return this._restart(session);
     }
 
