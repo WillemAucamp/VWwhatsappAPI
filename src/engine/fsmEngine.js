@@ -376,6 +376,19 @@ class FsmEngine {
     const state = STATES[stateId];
     if (!state) throw new Error(`Unknown state: ${stateId}`);
 
+    // Snapshot for non-terminal rollback if Graph send fails after we pre-persist.
+    const prevSnapshot = {
+      currentState: session.currentState,
+      path: Array.isArray(session.path) ? session.path.slice() : [],
+      invalidAttempts: session.invalidAttempts,
+      status: session.status,
+      interruptedFrom: session.interruptedFrom,
+      lastBotMessageAt: session.lastBotMessageAt,
+      lastFollowUpAt: session.lastFollowUpAt,
+      followUpCount: session.followUpCount,
+      followUpsExhausted: session.followUpsExhausted,
+    };
+
     session.currentState = stateId;
     session.path = Array.isArray(session.path) ? session.path.slice() : [];
     session.path.push(stateId);
@@ -387,20 +400,19 @@ class FsmEngine {
       session.interruptedFrom = fromInterrupt;
     }
 
-    let sendError = null;
-    try {
-      await this._send(session.waNumber, state.promptKey, state);
-    } catch (err) {
-      if (!state.terminal) throw err;
-      sendError = err;
-      // eslint-disable-next-line no-console
-      console.error(
-        '[fsm] terminal outbound send failed; persisting terminal state anyway',
-        { stateId, waNumber: session.waNumber, message: err.message }
-      );
-    }
-
     if (state.terminal) {
+      let sendError = null;
+      try {
+        await this._send(session.waNumber, state.promptKey, state);
+      } catch (err) {
+        sendError = err;
+        // eslint-disable-next-line no-console
+        console.error(
+          '[fsm] terminal outbound send failed; persisting terminal state anyway',
+          { stateId, waNumber: session.waNumber, message: err.message }
+        );
+      }
+
       this._clearFollowUp(session);
       // Soft_closed/quiet must stick (opt-out / completed qualify), but if Graph
       // never delivered the terminal body the next inbound must retry that send
@@ -409,12 +421,33 @@ class FsmEngine {
         ? { stateId: state.id, promptKey: state.promptKey }
         : null;
       await this._finalizeTerminal(session, state);
-    } else {
-      this._armWaitingFollowUp(session);
-      await this.sessionStore.set(session.waNumber, session);
+
+      if (sendError) throw sendError;
+      return { session, state };
     }
 
-    if (sendError) throw sendError;
+    // Non-terminal: persist BEFORE Graph send. Webhook already returned 200 to
+    // Meta, so a successful send + failed sessionStore.set leaves the customer
+    // reading the new question while disk still has the previous state — the
+    // next interactive tap is then rejected as a stale reply id / invalid.
+    this._armWaitingFollowUp(session);
+    await this.sessionStore.set(session.waNumber, session);
+    try {
+      await this._send(session.waNumber, state.promptKey, state);
+    } catch (err) {
+      session.currentState = prevSnapshot.currentState;
+      session.path = prevSnapshot.path;
+      session.invalidAttempts = prevSnapshot.invalidAttempts;
+      session.status = prevSnapshot.status;
+      session.interruptedFrom = prevSnapshot.interruptedFrom;
+      session.lastBotMessageAt = prevSnapshot.lastBotMessageAt;
+      session.lastFollowUpAt = prevSnapshot.lastFollowUpAt;
+      session.followUpCount = prevSnapshot.followUpCount;
+      session.followUpsExhausted = prevSnapshot.followUpsExhausted;
+      await this.sessionStore.set(session.waNumber, session);
+      throw err;
+    }
+
     return { session, state };
   }
 
