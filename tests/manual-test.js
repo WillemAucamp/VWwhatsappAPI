@@ -1,0 +1,438 @@
+'use strict';
+
+/**
+ * Melrose FSM exercise — VW_Melrose_WhatsApp_Bot_Flow.pdf paths.
+ *
+ * Run: npm run test:manual
+ */
+
+const assert = require('assert');
+const config = require('../src/config');
+const copy = require('../src/content/copy');
+const { MemorySessionStore } = require('../src/session/store');
+const { FsmEngine } = require('../src/engine/fsmEngine');
+const { FollowUpScheduler } = require('../src/followup/scheduler');
+const { buildRecord } = require('../src/logger/leadLogger');
+
+const THIRTY_MIN = 30 * 60 * 1000;
+const FOUR_HOURS = 4 * 60 * 60 * 1000;
+
+class CapturingLogger {
+  constructor() {
+    this.leads = [];
+  }
+
+  async logLead(record) {
+    this.leads.push(record);
+    return record;
+  }
+}
+
+function createHarness(label, { nowFn } = {}) {
+  const messages = [];
+  const agentEvents = [];
+  const logger = new CapturingLogger();
+  const store = new MemorySessionStore();
+  let clock = Date.now();
+
+  const engine = new FsmEngine({
+    sessionStore: store,
+    leadLogger: logger,
+    sendMessage: async (to, payload) => {
+      messages.push({ to, ...payload, at: (nowFn || (() => clock))() });
+      return { ok: true };
+    },
+    notifyAgent: async (event) => {
+      agentEvents.push(event);
+      return { delivered: false, reason: 'test' };
+    },
+    options: {
+      stubMarker: true,
+      nowFn: nowFn || (() => clock),
+    },
+  });
+
+  return {
+    label,
+    engine,
+    store,
+    logger,
+    messages,
+    agentEvents,
+    get clock() {
+      return clock;
+    },
+    setClock(ms) {
+      clock = ms;
+    },
+    advance(ms) {
+      clock += ms;
+      return clock;
+    },
+    async say(wa, text) {
+      return engine.handleInbound(wa, text);
+    },
+    async tap(wa, replyId, title = '') {
+      return engine.handleInbound(wa, title, { replyId });
+    },
+  };
+}
+
+function lastLead(h) {
+  return h.logger.leads[h.logger.leads.length - 1];
+}
+
+function assertGreetingCopy(h) {
+  const first = h.messages[0];
+  assert.ok(first && first.text, `${h.label}: expected greeting outbound`);
+  assert.ok(
+    String(first.text).includes('Willem Aucamp from VW Melrose'),
+    `${h.label}: greeting must use Melrose script`
+  );
+}
+
+function assertInteractiveMenu(h) {
+  const interactive = h.messages.filter((m) => m.interactive);
+  assert.ok(interactive.length >= 1, `${h.label}: expected interactive menu`);
+  const greet = interactive[0];
+  assert.strictEqual(greet.interactive.type, 'list');
+  assert.ok(greet.interactive.sections[0].rows.length === 4);
+}
+
+async function testFullQualifyPath() {
+  const h = createHarness('full_qualify');
+  const wa = '27000000001';
+
+  await h.say(wa, 'hi');
+  await h.say(wa, 'qualify me');
+  await h.say(wa, 'yes');
+  await h.say(wa, 'more than r15k');
+  await h.say(wa, 'yes');
+  await h.say(wa, 'good');
+  await h.say(wa, 'yes');
+
+  const lead = lastLead(h);
+  assert.strictEqual(lead.exitReason, 'qualified_self_serve');
+  assert.deepStrictEqual(lead.path, [
+    'GREETING',
+    'EMPLOYMENT_CHECK',
+    'AFFORDABILITY_CHECK',
+    'LICENSE_CHECK',
+    'CREDIT_CHECK',
+    'FINAL_CONSENT',
+    'SEND_LINK',
+  ]);
+  assertGreetingCopy(h);
+  // eslint-disable-next-line no-console
+  console.log('✓ full qualify path');
+}
+
+async function testInteractiveQualifyPath() {
+  const h = createHarness('interactive_qualify');
+  const wa = '27000000099';
+
+  await h.say(wa, 'hi');
+  assertInteractiveMenu(h);
+  await h.tap(wa, 'qualify_me', 'Qualify Me');
+  await h.tap(wa, 'employed_yes', 'Yes');
+  await h.tap(wa, 'income_over_9k', 'More than R9k');
+  await h.tap(wa, 'license_yes', 'Yes');
+  await h.tap(wa, 'credit_good', 'Good');
+  await h.tap(wa, 'consent_yes', 'Yes, send it');
+
+  const lead = lastLead(h);
+  assert.strictEqual(lead.exitReason, 'qualified_self_serve');
+  assert.ok(String(h.messages[h.messages.length - 1].text).includes(copy.send_link_body.split('\n')[0].replace('{{APPLICATION_LINK}}', '') || 'Here is the link'));
+  // eslint-disable-next-line no-console
+  console.log('✓ interactive qualify path');
+}
+
+async function testSeeCarsThenQualify() {
+  const h = createHarness('see_cars');
+  const wa = '27000000002';
+
+  await h.say(wa, 'hello');
+  await h.say(wa, 'see our cars');
+  const stockMsg = h.messages.find((m) => m.mediaSlot === 'stock_list');
+  assert.ok(stockMsg, 'stock mediaSlot present');
+  assert.ok(String(stockMsg.text).includes('Here is our current stock'));
+  await h.say(wa, 'continue');
+  const session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
+  assert.deepStrictEqual(session.path, [
+    'GREETING',
+    'STOCKLIST_CAROUSEL',
+    'EMPLOYMENT_CHECK',
+  ]);
+  // eslint-disable-next-line no-console
+  console.log('✓ See our cars → stocklist → employment_check');
+}
+
+async function testEmployedNoEndChat() {
+  const h = createHarness('employed_no');
+  const wa = '27000000004';
+  await h.say(wa, 'hi');
+  await h.say(wa, 'qualify me');
+  await h.say(wa, 'no');
+  const lead = lastLead(h);
+  assert.strictEqual(lead.exitReason, 'employed_no');
+  assert.ok(lead.path.includes('END_CHAT_EMPLOYED_NO'));
+  assert.ok(
+    String(h.messages[h.messages.length - 1].text).includes(
+      'proof of steady income'
+    )
+  );
+  await h.say(wa, 'hello again');
+  const session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'GREETING');
+  // eslint-disable-next-line no-console
+  console.log('✓ employed_no end_chat + soft reopen');
+}
+
+async function testIncomeUnder5kEndChat() {
+  const h = createHarness('income_under_5k');
+  const wa = '27000000005';
+  await h.say(wa, 'hi');
+  await h.say(wa, 'qualify me');
+  await h.say(wa, 'yes');
+  await h.say(wa, 'less than r5k');
+  const lead = lastLead(h);
+  assert.strictEqual(lead.exitReason, 'income_under_5k');
+  assert.ok(lead.path.includes('END_CHAT_INCOME'));
+  // eslint-disable-next-line no-console
+  console.log('✓ income_under_5k end_chat');
+}
+
+async function testLicenseNoHandover() {
+  const h = createHarness('license_no');
+  const wa = '27000000006';
+  await h.say(wa, 'hi');
+  await h.say(wa, 'qualify me');
+  await h.say(wa, 'yes');
+  await h.say(wa, 'more than r15k');
+  await h.say(wa, 'no');
+  const lead = lastLead(h);
+  assert.strictEqual(lead.exitReason, 'no_license');
+  assert.ok(h.agentEvents.some((e) => e.type === 'handover'));
+  assert.ok(
+    String(h.messages[h.messages.length - 1].text).includes(
+      'personal conversation'
+    )
+  );
+  // eslint-disable-next-line no-console
+  console.log('✓ license_no → human_handover');
+}
+
+async function testCreditBadHandover() {
+  const h = createHarness('credit_bad');
+  const wa = '27000000007';
+  await h.say(wa, 'hi');
+  await h.say(wa, 'qualify me');
+  await h.say(wa, 'yes');
+  await h.say(wa, 'more than r9k');
+  await h.say(wa, 'yes');
+  await h.say(wa, 'bad');
+  const lead = lastLead(h);
+  assert.strictEqual(lead.exitReason, 'credit_bad');
+  assert.ok(h.agentEvents.some((e) => e.type === 'handover'));
+  // eslint-disable-next-line no-console
+  console.log('✓ credit_bad → human_handover');
+}
+
+async function testConsentNoHandover() {
+  const h = createHarness('consent_no');
+  const wa = '27000000008';
+  await h.say(wa, 'hi');
+  await h.say(wa, 'qualify me');
+  await h.say(wa, 'yes');
+  await h.say(wa, 'more than r15k');
+  await h.say(wa, 'yes');
+  await h.say(wa, 'good');
+  await h.say(wa, 'not right now');
+  const lead = lastLead(h);
+  assert.strictEqual(lead.exitReason, 'declined_self_serve');
+  assert.ok(h.agentEvents.some((e) => e.type === 'handover'));
+  // eslint-disable-next-line no-console
+  console.log('✓ consent_no → human_handover');
+}
+
+async function testOptOutFromGreeting() {
+  const h = createHarness('opt_out');
+  const wa = '27000000009';
+  await h.say(wa, 'hi');
+  await h.tap(wa, 'opt_out', 'Opt-Out');
+  const lead = lastLead(h);
+  assert.strictEqual(lead.exitReason, 'human_requested');
+  assert.strictEqual((await h.store.get(wa)).status, 'quiet');
+  // eslint-disable-next-line no-console
+  console.log('✓ Opt-Out from greeting → human_handover');
+}
+
+async function testInvalidRetryThenEscalate() {
+  const h = createHarness('invalid');
+  const wa = '27000000010';
+  await h.say(wa, 'hi');
+  await h.say(wa, 'qualify me');
+  await h.say(wa, 'zzzz');
+  let session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
+  await h.say(wa, 'zzzz');
+  const lead = lastLead(h);
+  assert.strictEqual(lead.exitReason, 'human_requested');
+  // eslint-disable-next-line no-console
+  console.log('✓ invalid retry then escalate');
+}
+
+async function testHelpIntentFromTwoStates() {
+  const h1 = createHarness('help_employment');
+  const wa1 = '27000000011';
+  await h1.say(wa1, 'hi');
+  await h1.say(wa1, 'qualify me');
+  await h1.say(wa1, 'help');
+  const lead1 = lastLead(h1);
+  assert.strictEqual(lead1.exitReason, 'human_requested');
+  assert.strictEqual(lead1.interruptedFrom, 'EMPLOYMENT_CHECK');
+
+  const h2 = createHarness('help_credit');
+  const wa2 = '27000000012';
+  await h2.say(wa2, 'hi');
+  await h2.say(wa2, 'qualify me');
+  await h2.say(wa2, 'yes');
+  await h2.say(wa2, 'more than r15k');
+  await h2.say(wa2, 'yes');
+  await h2.say(wa2, 'help');
+  const lead2 = lastLead(h2);
+  assert.strictEqual(lead2.interruptedFrom, 'CREDIT_CHECK');
+  // eslint-disable-next-line no-console
+  console.log('✓ help-intent interrupt from EMPLOYMENT_CHECK and CREDIT_CHECK');
+}
+
+async function testPromotionsTbd() {
+  const h = createHarness('promotions');
+  const wa = '27000000013';
+  await h.say(wa, 'hi');
+  await h.say(wa, 'promotions');
+  let session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'PROMOTIONS');
+  await h.say(wa, 'main menu');
+  session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'GREETING');
+  // eslint-disable-next-line no-console
+  console.log('✓ Promotions TBD → main menu');
+}
+
+async function testFollowUpCadence() {
+  const h = createHarness('follow_up');
+  const wa = '27000000014';
+  const fuCfg = {
+    enabled: true,
+    firstDelayMs: THIRTY_MIN,
+    intervalMs: FOUR_HOURS,
+    maxCount: 3,
+    includePrompt: true,
+    notifyAgentOnExhausted: true,
+  };
+
+  await h.say(wa, 'hi');
+  h.advance(THIRTY_MIN - 1000);
+  let result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, false);
+
+  h.advance(1000);
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, true);
+  const firstFu = h.messages[h.messages.length - 1];
+  assert.ok(String(firstFu.text).includes(copy.follow_up_first));
+  assert.ok(String(firstFu.text).includes(copy.greeting_prompt));
+  assert.ok(firstFu.interactive && firstFu.interactive.type === 'list');
+
+  h.advance(FOUR_HOURS - 1000);
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, false);
+  h.advance(1000);
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, true);
+  assert.ok(
+    String(h.messages[h.messages.length - 1].text).includes(copy.follow_up_repeat)
+  );
+
+  h.advance(FOUR_HOURS);
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.exhausted, true);
+  assert.ok(h.agentEvents.some((e) => e.type === 'follow_up_exhausted'));
+  // eslint-disable-next-line no-console
+  console.log('✓ follow-up cadence');
+}
+
+async function testFollowUpSkippedOnTerminalAndScheduler() {
+  const fuCfg = {
+    enabled: true,
+    firstDelayMs: THIRTY_MIN,
+    intervalMs: FOUR_HOURS,
+    maxCount: 3,
+    includePrompt: true,
+    notifyAgentOnExhausted: false,
+  };
+
+  const h = createHarness('follow_up_terminal');
+  const wa = '27000000015';
+  await h.say(wa, 'hi');
+  await h.say(wa, 'qualify me');
+  await h.say(wa, 'no');
+  h.advance(THIRTY_MIN + 1000);
+  const result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, false);
+
+  const h2 = createHarness('follow_up_scheduler');
+  const wa2 = '27000000016';
+  await h2.say(wa2, 'hi');
+  const scheduler = new FollowUpScheduler({
+    engine: h2.engine,
+    sessionStore: h2.store,
+    followUpConfig: { ...fuCfg, pollMs: 60_000 },
+    nowFn: () => h2.clock,
+  });
+  h2.advance(THIRTY_MIN);
+  const tick = await scheduler.tick(h2.clock);
+  assert.strictEqual(tick.sent, 1);
+  // eslint-disable-next-line no-console
+  console.log('✓ follow-ups skipped on terminal; scheduler tick sends due');
+}
+
+async function main() {
+  // eslint-disable-next-line no-console
+  console.log('Running Melrose FSM manual tests…\n');
+
+  await testFullQualifyPath();
+  await testInteractiveQualifyPath();
+  await testSeeCarsThenQualify();
+  await testEmployedNoEndChat();
+  await testIncomeUnder5kEndChat();
+  await testLicenseNoHandover();
+  await testCreditBadHandover();
+  await testConsentNoHandover();
+  await testOptOutFromGreeting();
+  await testInvalidRetryThenEscalate();
+  await testHelpIntentFromTwoStates();
+  await testPromotionsTbd();
+  await testFollowUpCadence();
+  await testFollowUpSkippedOnTerminalAndScheduler();
+
+  const sample = buildRecord({
+    waNumber: '0',
+    exitReason: 'test',
+    path: ['GREETING'],
+  });
+  assert.ok(sample.timestamp);
+  assert.strictEqual(config.followUp.firstDelayMs, THIRTY_MIN);
+  assert.strictEqual(config.followUp.intervalMs, FOUR_HOURS);
+
+  // eslint-disable-next-line no-console
+  console.log('\nAll Melrose FSM scenarios passed.');
+}
+
+main().catch((err) => {
+  // eslint-disable-next-line no-console
+  console.error('\nManual test failed:', err);
+  process.exit(1);
+});
