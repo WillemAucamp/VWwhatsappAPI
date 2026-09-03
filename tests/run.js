@@ -19,6 +19,7 @@ const files = [
   'crm-down-terminal-retry.test.js',
   'stale-interactive-reply.test.js',
   'nonterminal-persist-before-send.test.js',
+  'terminal-persist-before-send.test.js',
   'followup-inbound-race.test.js',
   'webhook-dedupe.test.js',
   'followup-tick-isolation.test.js',

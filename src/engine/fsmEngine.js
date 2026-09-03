@@ -401,6 +401,20 @@ class FsmEngine {
     }
 
     if (state.terminal) {
+      this._clearFollowUp(session);
+      // Persist soft_closed/quiet + pendingLead BEFORE Graph send.
+      // Webhook already returned 200, so a crash (or deploy) after a successful
+      // SEND_LINK/HANDOVER Graph call would otherwise leave disk on the prior
+      // active state with no pendingLead — quiet self-serve users never inbound
+      // again and the qualification lead is gone forever.
+      // Mark pendingTerminalOutbound until Graph confirms delivery so scheduler /
+      // next inbound can retry if send fails or the clear-set never runs.
+      session.pendingTerminalOutbound = {
+        stateId: state.id,
+        promptKey: state.promptKey,
+      };
+      await this._finalizeTerminal(session, state);
+
       let sendError = null;
       try {
         await this._send(session.waNumber, state.promptKey, state);
@@ -408,19 +422,31 @@ class FsmEngine {
         sendError = err;
         // eslint-disable-next-line no-console
         console.error(
-          '[fsm] terminal outbound send failed; persisting terminal state anyway',
+          '[fsm] terminal outbound send failed; terminal state already persisted',
           { stateId, waNumber: session.waNumber, message: err.message }
         );
       }
 
-      this._clearFollowUp(session);
-      // Soft_closed/quiet must stick (opt-out / completed qualify), but if Graph
-      // never delivered the terminal body the next inbound must retry that send
-      // instead of _restart()-ing and discarding the finished path.
-      session.pendingTerminalOutbound = sendError
-        ? { stateId: state.id, promptKey: state.promptKey }
-        : null;
-      await this._finalizeTerminal(session, state);
+      if (!sendError) {
+        session.pendingTerminalOutbound = null;
+        try {
+          await this.sessionStore.set(session.waNumber, session);
+        } catch (setErr) {
+          // Lead/handover outcome is already durable; leave pendingTerminalOutbound
+          // for scheduler retry (possible duplicate WhatsApp body). Do not throw —
+          // Meta would redeliver and send again.
+          // eslint-disable-next-line no-console
+          console.error(
+            '[fsm] failed to clear pendingTerminalOutbound after successful send',
+            {
+              stateId,
+              waNumber: session.waNumber,
+              message:
+                setErr && setErr.message ? setErr.message : String(setErr),
+            }
+          );
+        }
+      }
 
       if (sendError) throw sendError;
       return { session, state };
