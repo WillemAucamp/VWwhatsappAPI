@@ -309,6 +309,13 @@ class FsmEngine {
       throw err;
     }
 
+    // A successful follow-up re-delivers the open question — clear any
+    // pendingQuestionOutbound left by a crash between persist and Graph send.
+    if (session.pendingQuestionOutbound) {
+      session.pendingQuestionOutbound = null;
+      await this.sessionStore.set(session.waNumber, session);
+    }
+
     if (
       session.followUpsExhausted &&
       followUpConfig.notifyAgentOnExhausted
@@ -387,6 +394,9 @@ class FsmEngine {
       lastFollowUpAt: session.lastFollowUpAt,
       followUpCount: session.followUpCount,
       followUpsExhausted: session.followUpsExhausted,
+      pendingQuestionOutbound: session.pendingQuestionOutbound
+        ? { ...session.pendingQuestionOutbound }
+        : null,
     };
 
     session.currentState = stateId;
@@ -402,6 +412,9 @@ class FsmEngine {
 
     if (state.terminal) {
       this._clearFollowUp(session);
+      // A prior non-terminal pendingQuestionOutbound is no longer relevant once
+      // we finalize to soft_closed/quiet.
+      session.pendingQuestionOutbound = null;
       // Persist soft_closed/quiet + pendingLead BEFORE Graph send.
       // Webhook already returned 200, so a crash (or deploy) after a successful
       // SEND_LINK/HANDOVER Graph call would otherwise leave disk on the prior
@@ -456,7 +469,14 @@ class FsmEngine {
     // Meta, so a successful send + failed sessionStore.set leaves the customer
     // reading the new question while disk still has the previous state — the
     // next interactive tap is then rejected as a stale reply id / invalid.
+    // Mark pendingQuestionOutbound until Graph confirms delivery so a crash
+    // between persist and send cannot leave Meta redelivering the prior answer
+    // against the new state (invalidAttempts → false HUMAN_HANDOVER).
     this._armWaitingFollowUp(session);
+    session.pendingQuestionOutbound = {
+      stateId: state.id,
+      promptKey: state.promptKey,
+    };
     await this.sessionStore.set(session.waNumber, session);
     try {
       await this._send(session.waNumber, state.promptKey, state);
@@ -470,11 +490,72 @@ class FsmEngine {
       session.lastFollowUpAt = prevSnapshot.lastFollowUpAt;
       session.followUpCount = prevSnapshot.followUpCount;
       session.followUpsExhausted = prevSnapshot.followUpsExhausted;
+      session.pendingQuestionOutbound = prevSnapshot.pendingQuestionOutbound;
       await this.sessionStore.set(session.waNumber, session);
       throw err;
     }
 
+    session.pendingQuestionOutbound = null;
+    try {
+      await this.sessionStore.set(session.waNumber, session);
+    } catch (setErr) {
+      // Question was delivered; leave pendingQuestionOutbound for retry
+      // (possible duplicate WhatsApp body). Do not throw — Meta would
+      // redeliver the prior answer and escalate via invalidAttempts.
+      // eslint-disable-next-line no-console
+      console.error(
+        '[fsm] failed to clear pendingQuestionOutbound after successful send',
+        {
+          stateId,
+          waNumber: session.waNumber,
+          message:
+            setErr && setErr.message ? setErr.message : String(setErr),
+        }
+      );
+    }
+
     return { session, state };
+  }
+
+  /**
+   * Re-send a non-terminal prompt that was persisted before Graph confirmed
+   * delivery. Does not advance the funnel or count as an answer.
+   */
+  async _retryQuestionOutbound(session) {
+    const pending = session.pendingQuestionOutbound;
+    const stateId =
+      (pending && pending.stateId) || session.currentState;
+    const state = STATES[stateId];
+    if (!state || state.terminal) {
+      session.pendingQuestionOutbound = null;
+      await this.sessionStore.set(session.waNumber, session);
+      return { session, retried: false, reason: 'no_question_state' };
+    }
+
+    const promptKey =
+      (pending && pending.promptKey) || state.promptKey;
+
+    try {
+      await this._send(session.waNumber, promptKey, state);
+    } catch (err) {
+      // Leave pendingQuestionOutbound set so a later inbound/tick can try again.
+      // eslint-disable-next-line no-console
+      console.error(
+        '[fsm] question outbound retry failed; keeping pendingQuestionOutbound',
+        {
+          stateId,
+          waNumber: session.waNumber,
+          message: err && err.message ? err.message : String(err),
+        }
+      );
+      throw err;
+    }
+
+    session.pendingQuestionOutbound = null;
+    this._armWaitingFollowUp(session);
+    session.updatedAt = this._now();
+    await this.sessionStore.set(session.waNumber, session);
+    return { session, state, resentQuestion: true };
   }
 
   /**
@@ -662,6 +743,23 @@ class FsmEngine {
     });
   }
 
+  /**
+   * Background / scheduler entry: re-send a non-terminal WhatsApp question that
+   * was persisted before Graph confirmed delivery. Crash/deploy between
+   * persist-before-send and the Graph call leaves disk on the new state with
+   * no delivered prompt; recovery cannot depend on treating Meta redeliveries
+   * of the prior answer as input (that burns invalidAttempts → handover).
+   */
+  async retryPendingQuestionOutbound(waNumber) {
+    return this._withSessionLock(waNumber, async () => {
+      const session = await this.sessionStore.get(waNumber);
+      if (!session || !session.pendingQuestionOutbound) {
+        return { retried: false, reason: 'none_pending' };
+      }
+      return this._retryQuestionOutbound(session);
+    });
+  }
+
   async _routeToHuman(session, interruptedFrom) {
     session.interruptedFrom = interruptedFrom || session.currentState;
     return this._enterState(session, 'HUMAN_HANDOVER', {
@@ -704,6 +802,7 @@ class FsmEngine {
     session.lastExitReason = null;
     session.pendingLead = null;
     session.pendingTerminalOutbound = null;
+    session.pendingQuestionOutbound = null;
     session.lastLoggedLeadKey = null;
     this._clearFollowUp(session);
 
@@ -767,6 +866,10 @@ class FsmEngine {
       }
       if (flushErr) throw flushErr;
       return this._restart(session);
+    }
+
+    if (session.pendingQuestionOutbound) {
+      return this._retryQuestionOutbound(session);
     }
 
     if (!session.currentState || session.status === 'new') {

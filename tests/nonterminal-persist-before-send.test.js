@@ -60,6 +60,8 @@ async function testPersistFailureAfterSendDoesNotDesync() {
 
   // With persist-before-send, the failing set happens BEFORE Graph — so the
   // AFFORDABILITY body must never be delivered on a failed transition.
+  // First set after EMPLOYMENT is the AFFORDABILITY pre-persist (with
+  // pendingQuestionOutbound); fail that write.
   failNextSet = true;
   await assert.rejects(
     () => engine.handleInbound(wa, 'yes', { replyId: 'employed_yes' }),

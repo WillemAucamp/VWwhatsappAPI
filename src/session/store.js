@@ -9,16 +9,23 @@ function now() {
 }
 
 /**
- * Sessions with a queued pendingLead or pendingTerminalOutbound must not be
- * TTL-purged. pendingLead is the only durable copy of a qualification lead
- * after logLead failed; pendingTerminalOutbound is the only record that the
- * application link / handover Graph send still needs a retry. listAll()/get()
- * (and Redis EX) would otherwise delete them forever once the lead flush
- * cleared pendingLead and refreshed the TTL clock.
+ * Sessions with a queued pendingLead, pendingTerminalOutbound, or
+ * pendingQuestionOutbound must not be TTL-purged.
+ * pendingLead is the only durable copy of a qualification lead after logLead
+ * failed; pendingTerminalOutbound / pendingQuestionOutbound are the only
+ * record that a Graph send still needs a retry after persist-before-send.
+ * listAll()/get() (and Redis EX) would otherwise delete them forever once a
+ * lead flush cleared pendingLead and refreshed the TTL clock.
  */
 function isSessionExpired(session, ttlMs = config.session.ttlMs, at = now()) {
   if (!session || !session.updatedAt) return true;
-  if (session.pendingLead || session.pendingTerminalOutbound) return false;
+  if (
+    session.pendingLead ||
+    session.pendingTerminalOutbound ||
+    session.pendingQuestionOutbound
+  ) {
+    return false;
+  }
   return at - session.updatedAt > ttlMs;
 }
 
@@ -39,6 +46,9 @@ function cloneSession(session) {
     pendingTerminalOutbound: session.pendingTerminalOutbound
       ? { ...session.pendingTerminalOutbound }
       : null,
+    pendingQuestionOutbound: session.pendingQuestionOutbound
+      ? { ...session.pendingQuestionOutbound }
+      : null,
     lastLoggedLeadKey: session.lastLoggedLeadKey || null,
   };
 }
@@ -58,6 +68,11 @@ function createEmptySession(waNumber) {
     // Set when a terminal Graph send fails after we still persist soft_closed/quiet.
     // Next inbound retries that outbound instead of wiping the completed path.
     pendingTerminalOutbound: null,
+    // Set when a non-terminal state is persisted before Graph send. Crash/deploy
+    // between persist and delivery leaves disk ahead of the customer; Meta
+    // redelivery of the prior answer must retry this question instead of
+    // counting as invalid on the new state.
+    pendingQuestionOutbound: null,
     // Durable lead-log fingerprint so a successful logLead + failed pendingLead
     // clear cannot double-write after process restart (in-memory set is lost).
     lastLoggedLeadKey: null,
@@ -198,9 +213,13 @@ class RedisSessionStore {
     session.updatedAt = now();
     const key = this._key(waNumber);
     const payload = JSON.stringify(session);
-    // Queued leads and undelivered terminal outbounds must outlive the normal
-    // session TTL or Redis EX drops the only retry/CRM recovery state.
-    if (session.pendingLead || session.pendingTerminalOutbound) {
+    // Queued leads and undelivered outbounds must outlive the normal session
+    // TTL or Redis EX drops the only retry/CRM recovery state.
+    if (
+      session.pendingLead ||
+      session.pendingTerminalOutbound ||
+      session.pendingQuestionOutbound
+    ) {
       await this.client.set(key, payload);
     } else {
       await this.client.set(key, payload, 'EX', this.ttlSec);
