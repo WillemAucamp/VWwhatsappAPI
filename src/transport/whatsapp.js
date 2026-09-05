@@ -1,0 +1,263 @@
+'use strict';
+
+const config = require('../config');
+
+/**
+ * Cloud API Graph /messages (Coexistence number).
+ * Supports text, templates, and interactive (reply buttons / lists).
+ * Never put internal fields (mediaSlot, meta) on Graph bodies.
+ */
+
+function messagesUrl() {
+  const { graphBaseUrl, apiVersion, phoneNumberId } = config.whatsapp;
+  return `${graphBaseUrl}/${apiVersion}/${phoneNumberId}/messages`;
+}
+
+function digitsOnly(to) {
+  return String(to || '').replace(/\D/g, '');
+}
+
+function requireCredentials() {
+  const token = config.whatsapp.token;
+  const phoneNumberId = config.whatsapp.phoneNumberId;
+  if (!token || !phoneNumberId) {
+    const err = new Error(
+      'WhatsApp Cloud API credentials missing (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)'
+    );
+    err.code = 'WHATSAPP_CONFIG_MISSING';
+    throw err;
+  }
+  return { token, phoneNumberId };
+}
+
+async function graphPost(graphBody) {
+  const { token } = requireCredentials();
+  const res = await fetch(messagesUrl(), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(graphBody),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(`WhatsApp send failed: ${res.status}`);
+    err.status = res.status;
+    err.response = data;
+    throw err;
+  }
+  return data;
+}
+
+/**
+ * @param {object} interactive Spec from buildInteractiveFromState
+ * @param {string} bodyText
+ */
+function buildInteractiveGraph(interactive, bodyText) {
+  if (!interactive || !interactive.type) {
+    const err = new Error('interactive.type required');
+    err.code = 'WHATSAPP_INTERACTIVE_INVALID';
+    throw err;
+  }
+
+  if (interactive.type === 'button') {
+    const buttons = (interactive.buttons || []).slice(0, 3).map((b) => ({
+      type: 'reply',
+      reply: {
+        id: String(b.id),
+        title: String(b.title || b.id).slice(0, 20),
+      },
+    }));
+    if (!buttons.length) {
+      const err = new Error('interactive buttons required');
+      err.code = 'WHATSAPP_INTERACTIVE_INVALID';
+      throw err;
+    }
+    return {
+      type: 'button',
+      body: { text: bodyText || ' ' },
+      action: { buttons },
+    };
+  }
+
+  if (interactive.type === 'list') {
+    const sections = (interactive.sections || []).map((section) => ({
+      title: section.title ? String(section.title).slice(0, 24) : undefined,
+      rows: (section.rows || []).map((row) => ({
+        id: String(row.id),
+        title: String(row.title || row.id).slice(0, 24),
+        description: row.description
+          ? String(row.description).slice(0, 72)
+          : undefined,
+      })),
+    }));
+    return {
+      type: 'list',
+      body: { text: bodyText || ' ' },
+      action: {
+        button: String(interactive.button || 'Choose').slice(0, 20),
+        sections,
+      },
+    };
+  }
+
+  const err = new Error(`Unsupported interactive type: ${interactive.type}`);
+  err.code = 'WHATSAPP_INTERACTIVE_INVALID';
+  throw err;
+}
+
+async function cloudApiSendInteractive(to, { text, link, interactive } = {}) {
+  requireCredentials();
+  const bodyText = [text, link].filter(Boolean).join('\n\n');
+  const interactivePayload = buildInteractiveGraph(interactive, bodyText);
+
+  return graphPost({
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: digitsOnly(to),
+    type: 'interactive',
+    interactive: interactivePayload,
+  });
+}
+
+/**
+ * @param {string} to E.164 WhatsApp number (digits)
+ * @param {object} payload Transport-agnostic payload
+ */
+async function cloudApiSendMessage(to, payload = {}) {
+  requireCredentials();
+  const toDigits = digitsOnly(to);
+
+  if (payload.templateName || payload.type === 'template') {
+    return cloudApiSendTemplate(toDigits, {
+      name: payload.templateName || payload.template,
+      language: payload.templateLanguage || payload.language || 'en_US',
+      components: payload.templateComponents || payload.components,
+    });
+  }
+
+  if (
+    payload.interactive ||
+    payload.type === 'interactive'
+  ) {
+    return cloudApiSendInteractive(toDigits, {
+      text: payload.text,
+      link: payload.link,
+      interactive: payload.interactive,
+    });
+  }
+
+  const bodyText = [payload.text, payload.link].filter(Boolean).join('\n\n');
+
+  return graphPost({
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: toDigits,
+    type: 'text',
+    text: {
+      preview_url: Boolean(payload.link),
+      body: bodyText || '',
+    },
+  });
+}
+
+/**
+ * Send an approved message template (required outside the 24h customer-care window).
+ */
+async function cloudApiSendTemplate(to, { name, language = 'en_US', components } = {}) {
+  requireCredentials();
+  if (!name) {
+    const err = new Error('template name required');
+    err.code = 'WHATSAPP_TEMPLATE_NAME_MISSING';
+    throw err;
+  }
+
+  const template = {
+    name,
+    language: { code: language },
+  };
+  if (Array.isArray(components) && components.length) {
+    template.components = components;
+  }
+
+  return graphPost({
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: digitsOnly(to),
+    type: 'template',
+    template,
+  });
+}
+
+async function graphGet(path, fields) {
+  const { token } = requireCredentials();
+  const { graphBaseUrl, apiVersion } = config.whatsapp;
+  const url = new URL(`${graphBaseUrl}/${apiVersion}/${path}`);
+  if (fields) url.searchParams.set('fields', fields);
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(`WhatsApp Graph GET failed: ${res.status}`);
+    err.status = res.status;
+    err.response = data;
+    throw err;
+  }
+  return data;
+}
+
+let activeSender = cloudApiSendMessage;
+
+function setSendMessage(fn) {
+  if (typeof fn !== 'function') {
+    throw new TypeError('sendMessage must be a function');
+  }
+  activeSender = fn;
+}
+
+function resetSendMessage() {
+  activeSender = cloudApiSendMessage;
+}
+
+async function sendMessage(to, payload) {
+  return activeSender(to, payload || {});
+}
+
+async function notifyAgent(event) {
+  const url = config.agent.notifyWebhookUrl;
+  // eslint-disable-next-line no-console
+  console.log('[agent-notify]', JSON.stringify(event));
+
+  if (!url) {
+    return { delivered: false, reason: 'no_webhook' };
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...event,
+        agentHandoverNumber: config.agent.handoverNumber || null,
+      }),
+    });
+    return { delivered: res.ok, status: res.status };
+  } catch (err) {
+    return { delivered: false, reason: err.message };
+  }
+}
+
+module.exports = {
+  sendMessage,
+  setSendMessage,
+  resetSendMessage,
+  cloudApiSendMessage,
+  cloudApiSendTemplate,
+  cloudApiSendInteractive,
+  buildInteractiveGraph,
+  graphGet,
+  notifyAgent,
+};
