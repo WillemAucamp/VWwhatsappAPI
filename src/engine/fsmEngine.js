@@ -869,6 +869,15 @@ class FsmEngine {
     }
 
     if (session.pendingQuestionOutbound) {
+      // Help / opt-out / stop must win over question-retry. Otherwise a crash
+      // between persist-before-send and Graph delivery (pending left set) plus
+      // a Graph outage makes every "stop" throw on retry — the quiet/handover
+      // persist from _enterState never runs, follow-ups keep firing, and the
+      // customer cannot opt out until Graph recovers.
+      if (matchesKeywordList(normalized, config.fsm.helpIntentKeywords)) {
+        session.pendingQuestionOutbound = null;
+        return this._routeToHuman(session, session.currentState);
+      }
       return this._retryQuestionOutbound(session);
     }
 

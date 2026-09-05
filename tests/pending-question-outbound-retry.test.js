@@ -273,6 +273,92 @@ async function testSendFailureRollsBackPendingFlag() {
   console.log('✓ Graph failure rolls back pendingQuestionOutbound with state');
 }
 
+async function testHelpOptOutWinsOverPendingQuestionRetry() {
+  const store = new MemorySessionStore();
+  const logger = new CapturingLogger();
+  const notifications = [];
+
+  const engine = new FsmEngine({
+    sessionStore: store,
+    leadLogger: logger,
+    sendMessage: async () => {
+      throw new Error('simulated Graph API down');
+    },
+    notifyAgent: async (event) => {
+      notifications.push(event);
+      return { delivered: true };
+    },
+    options: { stubMarker: true },
+  });
+
+  const wa = '27825551005';
+
+  // Seed: persist-before-send left AFFORDABILITY pending after a crash; Graph
+  // is still down so question retry would throw and swallow "stop".
+  await store.set(wa, {
+    waNumber: wa,
+    currentState: 'AFFORDABILITY_CHECK',
+    path: ['GREETING', 'EMPLOYMENT_CHECK', 'AFFORDABILITY_CHECK'],
+    invalidAttempts: 0,
+    status: 'active',
+    interruptedFrom: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    lastExitReason: null,
+    pendingLead: null,
+    pendingTerminalOutbound: null,
+    pendingQuestionOutbound: {
+      stateId: 'AFFORDABILITY_CHECK',
+      promptKey: 'affordability_check_prompt',
+    },
+    lastLoggedLeadKey: null,
+    lastBotMessageAt: Date.now() - 60_000,
+    lastFollowUpAt: null,
+    followUpCount: 0,
+    followUpsExhausted: false,
+  });
+
+  // Terminal handover send still fails (Graph down) but quiet must persist —
+  // without the help-first check, this would only retry AFFORDABILITY and
+  // leave status=active with follow-ups still armed.
+  await assert.rejects(
+    () => engine.handleInbound(wa, 'stop'),
+    /simulated Graph API down/,
+    'handover Graph failure still surfaces after quiet is persisted'
+  );
+
+  const persisted = await store.get(wa);
+  assert.strictEqual(
+    persisted.status,
+    'quiet',
+    'opt-out must persist quiet even when Graph is down'
+  );
+  assert.strictEqual(persisted.currentState, 'HUMAN_HANDOVER');
+  assert.strictEqual(
+    persisted.pendingQuestionOutbound,
+    null,
+    'pendingQuestionOutbound cleared on help/opt-out'
+  );
+  assert.ok(
+    notifications.some((n) => n && n.type === 'handover'),
+    'agent must be notified of help/opt-out handover'
+  );
+  assert.strictEqual(logger.leads.length, 1);
+  assert.strictEqual(logger.leads[0].exitReason, 'human_requested');
+
+  // Follow-ups must not keep firing after opt-out.
+  const due = engine.nextFollowUpDueAt(persisted, {
+    ...config.followUp,
+    enabled: true,
+  });
+  assert.strictEqual(due, null, 'quiet session must not be follow-up eligible');
+
+  // eslint-disable-next-line no-console
+  console.log(
+    '✓ help/opt-out wins over pendingQuestionOutbound even when Graph is down'
+  );
+}
+
 async function main() {
   // eslint-disable-next-line no-console
   console.log('Running pending-question-outbound retry regression tests…\n');
@@ -281,6 +367,7 @@ async function main() {
   await testSchedulerRetriesPendingQuestionOutbound();
   await testTtlSkipsPendingQuestionOutbound();
   await testSendFailureRollsBackPendingFlag();
+  await testHelpOptOutWinsOverPendingQuestionRetry();
   // eslint-disable-next-line no-console
   console.log('\nAll pending-question-outbound retry tests passed.');
 }
