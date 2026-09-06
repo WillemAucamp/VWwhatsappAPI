@@ -874,7 +874,15 @@ class FsmEngine {
       // a Graph outage makes every "stop" throw on retry — the quiet/handover
       // persist from _enterState never runs, follow-ups keep firing, and the
       // customer cannot opt out until Graph recovers.
-      if (matchesKeywordList(normalized, config.fsm.helpIntentKeywords)) {
+      // Also honor a stale GREETING Opt-Out tap (reply id `opt_out`): WhatsApp
+      // users often re-tap the earlier menu button, and title-only matching
+      // still missed `opt-out` / `unsubscribe` before those keywords were added.
+      const optOutReply =
+        replyId != null && String(replyId).toLowerCase() === 'opt_out';
+      if (
+        optOutReply ||
+        matchesKeywordList(normalized, config.fsm.helpIntentKeywords)
+      ) {
         session.pendingQuestionOutbound = null;
         return this._routeToHuman(session, session.currentState);
       }

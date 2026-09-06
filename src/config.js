@@ -51,7 +51,10 @@ const config = {
     maxInvalidAttempts: intEnv('MAX_INVALID_ATTEMPTS', 1),
     helpIntentKeywords: parseList(
       process.env.HELP_INTENT_KEYWORDS,
-      'help,agent,human,stop,opt out,optout'
+      // Include hyphenated opt-out + unsubscribe — GREETING optionLabels and
+      // common WhatsApp opt-out phrasing. pendingQuestionOutbound must honor
+      // these or a Graph-down retry swallows Opt-Out and keeps the funnel active.
+      'help,agent,human,stop,opt out,optout,opt-out,unsubscribe'
     ),
     reopenKeywords: parseList(
       process.env.REOPEN_KEYWORDS,

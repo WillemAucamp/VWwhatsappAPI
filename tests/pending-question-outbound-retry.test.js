@@ -359,6 +359,109 @@ async function testHelpOptOutWinsOverPendingQuestionRetry() {
   );
 }
 
+/**
+ * PR24 checked helpIntentKeywords only. GREETING ships an Opt-Out button
+ * (reply id `opt_out`, title "Opt-Out") and optionLabels include
+ * "unsubscribe" — none of which matched the old default keyword list, so a
+ * customer re-tapping Opt-Out while pendingQuestionOutbound was set still hit
+ * question-retry and could not leave while Graph was down.
+ */
+async function testGreetingOptOutButtonAndUnsubscribeWinOverPendingRetry() {
+  async function seedPendingAffordability(store, wa) {
+    await store.set(wa, {
+      waNumber: wa,
+      currentState: 'AFFORDABILITY_CHECK',
+      path: ['GREETING', 'EMPLOYMENT_CHECK', 'AFFORDABILITY_CHECK'],
+      invalidAttempts: 0,
+      status: 'active',
+      interruptedFrom: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      lastExitReason: null,
+      pendingLead: null,
+      pendingTerminalOutbound: null,
+      pendingQuestionOutbound: {
+        stateId: 'AFFORDABILITY_CHECK',
+        promptKey: 'affordability_check_prompt',
+      },
+      lastLoggedLeadKey: null,
+      lastBotMessageAt: Date.now() - 60_000,
+      lastFollowUpAt: null,
+      followUpCount: 0,
+      followUpsExhausted: false,
+    });
+  }
+
+  // Stale GREETING Opt-Out button (interactive reply id).
+  {
+    const store = new MemorySessionStore();
+    const logger = new CapturingLogger();
+    const engine = new FsmEngine({
+      sessionStore: store,
+      leadLogger: logger,
+      sendMessage: async () => {
+        throw new Error('simulated Graph API down');
+      },
+      notifyAgent: async () => ({ delivered: true }),
+      options: { stubMarker: true },
+    });
+    const wa = '27825551006';
+    await seedPendingAffordability(store, wa);
+
+    await assert.rejects(
+      () =>
+        engine.handleInbound(wa, 'Opt-Out', { replyId: 'opt_out' }),
+      /simulated Graph API down/
+    );
+
+    const persisted = await store.get(wa);
+    assert.strictEqual(
+      persisted.status,
+      'quiet',
+      'stale Opt-Out button must persist quiet while Graph is down'
+    );
+    assert.strictEqual(persisted.currentState, 'HUMAN_HANDOVER');
+    assert.strictEqual(persisted.pendingQuestionOutbound, null);
+    assert.strictEqual(logger.leads[0].exitReason, 'human_requested');
+  }
+
+  // Free-text synonyms the GREETING opt_out labels already advertise.
+  for (const phrase of ['unsubscribe', 'opt-out']) {
+    const store = new MemorySessionStore();
+    const logger = new CapturingLogger();
+    const engine = new FsmEngine({
+      sessionStore: store,
+      leadLogger: logger,
+      sendMessage: async () => {
+        throw new Error('simulated Graph API down');
+      },
+      notifyAgent: async () => ({ delivered: true }),
+      options: { stubMarker: true },
+    });
+    const wa = `27825551007-${phrase}`;
+    await seedPendingAffordability(store, wa);
+
+    await assert.rejects(
+      () => engine.handleInbound(wa, phrase),
+      /simulated Graph API down/,
+      `${phrase} must interrupt pending question retry`
+    );
+
+    const persisted = await store.get(wa);
+    assert.strictEqual(
+      persisted.status,
+      'quiet',
+      `${phrase} must persist quiet while Graph is down`
+    );
+    assert.strictEqual(persisted.pendingQuestionOutbound, null);
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(
+    '✓ GREETING Opt-Out button + unsubscribe/opt-out win over pendingQuestionOutbound'
+  );
+}
+
 async function main() {
   // eslint-disable-next-line no-console
   console.log('Running pending-question-outbound retry regression tests…\n');
@@ -368,6 +471,7 @@ async function main() {
   await testTtlSkipsPendingQuestionOutbound();
   await testSendFailureRollsBackPendingFlag();
   await testHelpOptOutWinsOverPendingQuestionRetry();
+  await testGreetingOptOutButtonAndUnsubscribeWinOverPendingRetry();
   // eslint-disable-next-line no-console
   console.log('\nAll pending-question-outbound retry tests passed.');
 }
