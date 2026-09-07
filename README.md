@@ -51,4 +51,12 @@ Staff browser inbox (Cloud API chats, no Coexistence required):
 2. Open `https://your-host/agent`
 3. Sign in → pick a chat → **Take over** / reply / **Release to bot**
 
-Transcripts are stored under `data/transcripts/`.
+### Shortcuts (type `/`)
+
+Create canned replies under **⋮ → Manage shortcuts**. In the composer, type `/` then a shortcut name (e.g. `/greeting`) and pick from the list — same idea as WhatsApp Business quick replies.
+
+### Labels
+
+Create labels under **⋮ → Manage labels**. Open a chat → **Labels** to tag it (VIP, Follow-up, etc.). Filter the chat list with the chips above the inbox.
+
+Transcripts: `data/transcripts/`. Shortcuts & labels: `data/agent/`.

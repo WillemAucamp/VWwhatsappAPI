@@ -11,12 +11,16 @@ const { sendMessage } = require('./transport/whatsapp');
 const { getMetaReadiness } = require('./meta/readiness');
 const webhookDiagnostics = require('./webhook/diagnostics');
 const { createMessageStore } = require('./agent/messageStore');
+const { createShortcutStore } = require('./agent/shortcutStore');
+const { createLabelStore } = require('./agent/labelStore');
 const { createAgentRouter } = require('./agent/routes');
 
 function createApp(overrides = {}) {
   const sessionStore = overrides.sessionStore || createSessionStore();
   const leadLogger = overrides.leadLogger || createLeadLogger();
   const messageStore = overrides.messageStore || createMessageStore();
+  const shortcutStore = overrides.shortcutStore || createShortcutStore();
+  const labelStore = overrides.labelStore || createLabelStore();
 
   const baseSend = overrides.sendMessage || sendMessage;
   const loggingSend = async (to, payload = {}) => {
@@ -105,6 +109,8 @@ function createApp(overrides = {}) {
       engine,
       sessionStore,
       messageStore,
+      shortcutStore,
+      labelStore,
       sendMessage: loggingSend,
     })
   );
@@ -115,6 +121,8 @@ function createApp(overrides = {}) {
   app.locals.sessionStore = sessionStore;
   app.locals.leadLogger = leadLogger;
   app.locals.messageStore = messageStore;
+  app.locals.shortcutStore = shortcutStore;
+  app.locals.labelStore = labelStore;
   app.locals.config = config;
 
   if (overrides.followUpScheduler) {

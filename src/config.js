@@ -42,6 +42,9 @@ const config = {
       String(process.env.AGENT_DESK_ENABLED || 'true').toLowerCase() !== 'false',
     deskPassword: process.env.AGENT_DESK_PASSWORD || '',
     transcriptPath: process.env.AGENT_TRANSCRIPT_PATH || './data/transcripts',
+    shortcutsPath:
+      process.env.AGENT_SHORTCUTS_PATH || './data/agent/shortcuts.json',
+    labelsPath: process.env.AGENT_LABELS_PATH || './data/agent/labels.json',
   },
 
   session: {
