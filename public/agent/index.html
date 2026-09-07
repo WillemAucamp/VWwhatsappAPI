@@ -173,7 +173,7 @@
       border-radius: 8px;
       box-shadow: 0 2px 16px rgba(11, 20, 26, 0.12);
       padding: 6px 0;
-      z-index: 20;
+      z-index: 40;
     }
     .menu button {
       width: 100%;
@@ -691,11 +691,11 @@
       return data;
     }
 
-    function showApp() {
+    async function showApp() {
       el('login').classList.add('hidden');
       el('app').classList.remove('hidden');
-      loadDeskMeta();
-      loadChats();
+      await loadDeskMeta();
+      await loadChats();
       if (state.poll) clearInterval(state.poll);
       state.poll = setInterval(() => {
         loadChats(true);
@@ -724,7 +724,12 @@
       el('sideMenu').classList.add('hidden');
       el('threadMenu').classList.toggle('hidden');
     });
-    document.addEventListener('click', closeMenus);
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.menu') || e.target.closest('.head-actions')) return;
+      closeMenus();
+    });
+    el('sideMenu').addEventListener('click', (e) => e.stopPropagation());
+    el('threadMenu').addEventListener('click', (e) => e.stopPropagation());
 
     el('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -792,19 +797,27 @@
         );
       }).join('');
       bar.querySelectorAll('.filter-chip').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          state.filterLabelId = btn.getAttribute('data-label');
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          state.filterLabelId = btn.getAttribute('data-label') || 'all';
           renderLabelFilters();
           renderChatList();
         });
       });
     }
 
+    function chatHasLabel(chat, labelId) {
+      if (!labelId || labelId === 'all') return true;
+      if ((chat.labelIds || []).includes(labelId)) return true;
+      return (chat.labels || []).some((l) => l.id === labelId);
+    }
+
     function renderChatList() {
       const list = el('chatList');
       let chats = state.chats.slice();
       if (state.filterLabelId !== 'all') {
-        chats = chats.filter((c) => (c.labelIds || []).includes(state.filterLabelId));
+        chats = chats.filter((c) => chatHasLabel(c, state.filterLabelId));
       }
       if (!state.chats.length) {
         list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats yet. When a customer messages WhatsApp, they appear here.</div>';
@@ -943,6 +956,8 @@
       }
     });
     el('replyBox').addEventListener('input', onComposerInput);
+    el('replyBox').addEventListener('keyup', onComposerInput);
+    el('replyBox').addEventListener('click', onComposerInput);
 
     async function sendReply() {
       const text = el('replyBox').value.trim();
@@ -1317,10 +1332,20 @@
       if (!state.selected) return;
       el('assignLabelsError').textContent = '';
       try {
-        await api('/api/chats/' + encodeURIComponent(state.selected) + '/labels', {
+        const saved = await api('/api/chats/' + encodeURIComponent(state.selected) + '/labels', {
           method: 'PUT',
           body: JSON.stringify({ labelIds: state.assignDraft }),
         });
+        state.threadLabelIds = saved.labelIds || [];
+        state.chats = state.chats.map((c) => {
+          if (c.waNumber !== state.selected) return c;
+          return {
+            ...c,
+            labelIds: saved.labelIds || [],
+            labels: saved.labels || [],
+          };
+        });
+        renderChatList();
         closeAssignLabelsModal();
         await loadThread(state.selected);
         await loadChats(true);
