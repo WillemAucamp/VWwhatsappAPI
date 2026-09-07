@@ -87,7 +87,7 @@ async function testStaleEmploymentYesAtFinalConsent() {
   );
   assert.ok(
     sent.length > sentBefore,
-    'should reprompt / handle as invalid, not advance silently'
+    'should reprompt for stale reply, not advance silently'
   );
   const advancedToSendLink = sent.some(
     (m) => m.meta && m.meta.stateId === 'SEND_LINK'
@@ -121,12 +121,101 @@ async function testValidConsentStillWorks() {
   console.log('✓ valid consent_yes reply id still qualifies');
 }
 
+/**
+ * After PR20 rejected stale ids from title matching, they still fell through
+ * to _handleInvalid. With default maxInvalidAttempts=1, a typo plus one
+ * scroll-back Yes (or two stale taps) falsely escalated to HUMAN_HANDOVER.
+ */
+async function testStaleReplyDoesNotBurnInvalidAttempts() {
+  const store = new MemorySessionStore();
+  const logger = new CapturingLogger();
+
+  const engine = new FsmEngine({
+    sessionStore: store,
+    leadLogger: logger,
+    sendMessage: async () => ({ ok: true }),
+    notifyAgent: async () => ({ delivered: true }),
+  });
+
+  const wa = '27822220003';
+  await driveToFinalConsent(engine, wa);
+
+  // Free-text typo burns one attempt (max default is 1).
+  await engine.handleInbound(wa, 'asdfgh');
+  let session = await store.get(wa);
+  assert.strictEqual(session.currentState, 'FINAL_CONSENT');
+  assert.strictEqual(session.invalidAttempts, 1);
+  assert.strictEqual(session.status, 'active');
+
+  // Stale employment Yes must NOT escalate (would have with invalid burn).
+  await engine.handleInbound(wa, 'Yes', { replyId: 'employed_yes' });
+  session = await store.get(wa);
+  assert.strictEqual(
+    session.currentState,
+    'FINAL_CONSENT',
+    'stale reply must not escalate after a prior free-text invalid'
+  );
+  assert.strictEqual(session.status, 'active');
+  assert.strictEqual(
+    session.invalidAttempts,
+    1,
+    'stale interactive reply must not increment invalidAttempts'
+  );
+  assert.strictEqual(logger.leads.length, 0);
+
+  // A second stale tap still must not handover.
+  await engine.handleInbound(wa, 'Yes', { replyId: 'license_yes' });
+  session = await store.get(wa);
+  assert.strictEqual(session.currentState, 'FINAL_CONSENT');
+  assert.strictEqual(session.status, 'active');
+  assert.strictEqual(session.invalidAttempts, 1);
+  assert.strictEqual(logger.leads.length, 0);
+
+  // Real consent still works afterward.
+  await engine.handleInbound(wa, 'Yes, send it', { replyId: 'consent_yes' });
+  session = await store.get(wa);
+  assert.strictEqual(session.status, 'soft_closed');
+  assert.strictEqual(logger.leads[0].exitReason, 'qualified_self_serve');
+
+  // eslint-disable-next-line no-console
+  console.log(
+    '✓ stale interactive replies do not burn invalidAttempts or false-handover'
+  );
+}
+
+async function testFreeTextInvalidStillEscalates() {
+  const store = new MemorySessionStore();
+  const logger = new CapturingLogger();
+
+  const engine = new FsmEngine({
+    sessionStore: store,
+    leadLogger: logger,
+    sendMessage: async () => ({ ok: true }),
+    notifyAgent: async () => ({ delivered: true }),
+  });
+
+  const wa = '27822220004';
+  await driveToFinalConsent(engine, wa);
+  await engine.handleInbound(wa, 'nope');
+  await engine.handleInbound(wa, 'still nope');
+
+  const session = await store.get(wa);
+  assert.strictEqual(session.status, 'quiet');
+  assert.strictEqual(session.currentState, 'HUMAN_HANDOVER');
+  assert.strictEqual(logger.leads[0].exitReason, 'human_requested');
+
+  // eslint-disable-next-line no-console
+  console.log('✓ free-text invalids still escalate after max attempts');
+}
+
 async function main() {
   // eslint-disable-next-line no-console
   console.log('Running stale interactive reply tests…\n');
   testResolveOptionKeyUnit();
   await testStaleEmploymentYesAtFinalConsent();
   await testValidConsentStillWorks();
+  await testStaleReplyDoesNotBurnInvalidAttempts();
+  await testFreeTextInvalidStillEscalates();
   // eslint-disable-next-line no-console
   console.log('\nAll stale interactive reply tests passed.');
 }

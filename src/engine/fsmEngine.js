@@ -775,6 +775,14 @@ class FsmEngine {
       return this._routeToHuman(session, state.id);
     }
 
+    return this._repromptCurrent(session, state, { invalid: true });
+  }
+
+  /**
+   * Re-send the current question (optional invalid hint) without advancing.
+   * Used for free-text invalids and for stale interactive reply ids.
+   */
+  async _repromptCurrent(session, state, flags = {}) {
     const hints = listValidOptionHints(state);
     const reprompt = resolveCopy('invalid_input_reprompt', {
       stubMarker: this.stubMarker,
@@ -785,7 +793,7 @@ class FsmEngine {
     await this._send(session.waNumber, state.promptKey, state, extra);
     this._armWaitingFollowUp(session);
     await this.sessionStore.set(session.waNumber, session);
-    return { session, state, invalid: true };
+    return { session, state, ...flags };
   }
 
   async _restart(session) {
@@ -932,6 +940,16 @@ class FsmEngine {
         (!state.options || !Object.keys(state.options).length)
       ) {
         return this._enterState(session, state.next);
+      }
+      // Stale interactive reply (chat-history Yes/No from an earlier state):
+      // resolveOptionKey already refused title fallback so we do not skip
+      // consent — but counting it as invalid burns the default
+      // maxInvalidAttempts=1 budget. Two stale taps (or a typo + one stale
+      // tap at FINAL_CONSENT) falsely quieted customers into HUMAN_HANDOVER
+      // and logged a fake human_requested lead. Free-text mistakes still
+      // go through _handleInvalid.
+      if (replyId != null && replyId !== '') {
+        return this._repromptCurrent(session, state, { staleReply: true });
       }
       return this._handleInvalid(session, state);
     }
