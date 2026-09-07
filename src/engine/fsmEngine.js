@@ -618,6 +618,7 @@ class FsmEngine {
     session.pendingLead = null;
     session.pendingTerminalOutbound = null;
     session.lastLoggedLeadKey = null;
+    session.agentTakenOver = false;
     this._clearFollowUp(session);
 
     if (notice || footer) {
@@ -628,6 +629,59 @@ class FsmEngine {
     }
 
     return this._enterState(session, ENTRY_STATE);
+  }
+
+  /**
+   * Staff takeover: bot goes quiet until release / customer restart.
+   * @param {{silent?: boolean}} [options] skip optional notice
+   */
+  async takeOver(waNumber, options = {}) {
+    return this._withSessionLock(waNumber, async () => {
+      const session = await this.getOrCreateSession(waNumber);
+      session.agentTakenOver = true;
+      session.status = 'quiet';
+      session.updatedAt = this._now();
+      this._clearFollowUp(session);
+      await this.sessionStore.set(waNumber, session);
+
+      if (!options.silent) {
+        const notice = resolveCopy('human_handover_body', {
+          stubMarker: this.stubMarker,
+        });
+        if (notice) {
+          try {
+            await this.sendMessage(waNumber, {
+              text: notice,
+              meta: { stateId: 'HUMAN_HANDOVER', source: 'agent_takeover' },
+            });
+          } catch (err) {
+            // Keep takeover even if notice fails.
+            // eslint-disable-next-line no-console
+            console.error('[fsm] takeover notice send failed', err.message);
+          }
+        }
+      }
+
+      return {
+        session: {
+          waNumber: session.waNumber,
+          status: session.status,
+          agentTakenOver: true,
+          currentState: session.currentState,
+        },
+      };
+    });
+  }
+
+  /**
+   * Staff release: clear takeover and restart Melrose greeting for the customer.
+   */
+  async releaseToBot(waNumber) {
+    return this._withSessionLock(waNumber, async () => {
+      const session = await this.getOrCreateSession(waNumber);
+      session.agentTakenOver = false;
+      return this._restart(session);
+    });
   }
 
   async handleInbound(waNumber, text, extras = {}) {

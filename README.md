@@ -43,6 +43,12 @@ npm run check:meta
 npm run send:test -- --to 2782XXXXXXXX --template hello_world
 ```
 
-Set `APPLICATION_LINK` to the Melrose Google Form URL before go-live.
+## Agent desk
 
-This repo is **not** whatsapp-web.js. Outbound is official Graph `/messages` only.
+Staff browser inbox (Cloud API chats, no Coexistence required):
+
+1. Set on Render: `AGENT_DESK_PASSWORD=…` (and `AGENT_DESK_ENABLED=true`)
+2. Open `https://your-host/agent`
+3. Sign in → pick a chat → **Take over** / reply / **Release to bot**
+
+Transcripts are stored under `data/transcripts/`.

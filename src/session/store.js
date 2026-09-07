@@ -61,6 +61,7 @@ function createEmptySession(waNumber) {
     // Durable lead-log fingerprint so a successful logLead + failed pendingLead
     // clear cannot double-write after process restart (in-memory set is lost).
     lastLoggedLeadKey: null,
+    agentTakenOver: false,
     lastBotMessageAt: null,
     lastFollowUpAt: null,
     followUpCount: 0,

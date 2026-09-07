@@ -38,6 +38,10 @@ const config = {
   agent: {
     handoverNumber: process.env.AGENT_HANDOVER_NUMBER || '',
     notifyWebhookUrl: process.env.AGENT_NOTIFY_WEBHOOK_URL || '',
+    deskEnabled:
+      String(process.env.AGENT_DESK_ENABLED || 'true').toLowerCase() !== 'false',
+    deskPassword: process.env.AGENT_DESK_PASSWORD || '',
+    transcriptPath: process.env.AGENT_TRANSCRIPT_PATH || './data/transcripts',
   },
 
   session: {

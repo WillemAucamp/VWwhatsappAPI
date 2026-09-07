@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VW Melrose — Agent desk</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --panel-2: #232d3a;
+      --line: #2f3b4a;
+      --text: #e8eef5;
+      --muted: #8b9bb0;
+      --accent: #3d8bfd;
+      --in: #243042;
+      --out-bot: #1e3a2f;
+      --out-agent: #2a3348;
+      --danger: #d64545;
+      --ok: #3cb371;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+    }
+    .hidden { display: none !important; }
+    #login {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .card {
+      width: min(400px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 28px;
+    }
+    .card h1 {
+      margin: 0 0 8px;
+      font-size: 1.25rem;
+      font-weight: 650;
+    }
+    .card p { margin: 0 0 20px; color: var(--muted); font-size: 0.92rem; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+    input[type="password"], textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font: inherit;
+    }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--accent);
+      color: #fff;
+    }
+    button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+    button.danger { background: var(--danger); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error { color: #ff8e8e; font-size: 0.85rem; margin-top: 10px; min-height: 1.2em; }
+    #app {
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+    }
+    @media (max-width: 800px) {
+      #app { grid-template-columns: 1fr; grid-template-rows: 40vh 1fr; }
+    }
+    aside {
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .aside-head, .thread-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .aside-head h2, .thread-head h2 {
+      margin: 0;
+      font-size: 1rem;
+    }
+    #chatList {
+      overflow: auto;
+      flex: 1;
+    }
+    .chat-item {
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      color: var(--text);
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      border-radius: 0;
+      padding: 12px 14px;
+      font-weight: 500;
+    }
+    .chat-item.active { background: var(--panel-2); }
+    .chat-item .wa { font-size: 0.92rem; }
+    .chat-item .preview {
+      color: var(--muted);
+      font-size: 0.8rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 4px;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #3a4556;
+      color: var(--muted);
+      margin-left: 6px;
+    }
+    .badge.takeover { background: #5a3b1e; color: #ffd19a; }
+    .badge.quiet { background: #1f3d4d; color: #9ad7ff; }
+    main {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: #121820;
+    }
+    #messages {
+      flex: 1;
+      overflow: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .empty {
+      margin: auto;
+      color: var(--muted);
+      text-align: center;
+      padding: 24px;
+    }
+    .bubble {
+      max-width: min(560px, 92%);
+      padding: 10px 12px;
+      border-radius: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.92rem;
+      line-height: 1.4;
+    }
+    .bubble.in { align-self: flex-start; background: var(--in); }
+    .bubble.out-bot { align-self: flex-end; background: var(--out-bot); }
+    .bubble.out-agent { align-self: flex-end; background: var(--out-agent); }
+    .meta {
+      display: block;
+      margin-top: 6px;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .composer {
+      border-top: 1px solid var(--line);
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+      background: var(--panel);
+    }
+    .composer-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .composer-actions .grow { margin-left: auto; }
+  </style>
+</head>
+<body>
+  <section id="login">
+    <form class="card" id="loginForm">
+      <h1>VW Melrose agent desk</h1>
+      <p>Staff access to Cloud API chats. Bot pauses when you take over or reply.</p>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required />
+      <div style="margin-top:16px; display:flex; gap:8px;">
+        <button type="submit">Sign in</button>
+      </div>
+      <div class="error" id="loginError"></div>
+    </form>
+  </section>
+
+  <section id="app" class="hidden">
+    <aside>
+      <div class="aside-head">
+        <h2>Chats</h2>
+        <button type="button" class="secondary" id="refreshBtn">Refresh</button>
+      </div>
+      <div id="chatList"></div>
+    </aside>
+    <main>
+      <div class="thread-head">
+        <div>
+          <h2 id="threadTitle">Select a chat</h2>
+          <div id="threadStatus" style="color:var(--muted);font-size:0.8rem;margin-top:4px;"></div>
+        </div>
+        <button type="button" class="secondary" id="logoutBtn">Log out</button>
+      </div>
+      <div id="messages"><div class="empty">Choose a conversation on the left.</div></div>
+      <div class="composer">
+        <textarea id="replyBox" rows="3" placeholder="Type a reply to the customer…" disabled></textarea>
+        <div class="composer-actions">
+          <button type="button" class="secondary" id="takeoverBtn" disabled>Take over</button>
+          <button type="button" class="secondary" id="releaseBtn" disabled>Release to bot</button>
+          <button type="button" class="grow" id="sendBtn" disabled>Send</button>
+        </div>
+        <div class="error" id="threadError"></div>
+      </div>
+    </main>
+  </section>
+
+  <script>
+    const state = {
+      token: sessionStorage.getItem('agentToken') || '',
+      selected: null,
+      poll: null,
+    };
+
+    const el = (id) => document.getElementById(id);
+
+    async function api(path, options = {}) {
+      const headers = Object.assign(
+        { 'Content-Type': 'application/json' },
+        options.headers || {}
+      );
+      if (state.token) headers.Authorization = 'Bearer ' + state.token;
+      const res = await fetch('/agent' + path, { ...options, headers, credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.error || res.statusText);
+        err.status = res.status;
+        err.data = data;
+        throw err;
+      }
+      return data;
+    }
+
+    function showApp() {
+      el('login').classList.add('hidden');
+      el('app').classList.remove('hidden');
+      loadChats();
+      if (state.poll) clearInterval(state.poll);
+      state.poll = setInterval(() => {
+        loadChats(true);
+        if (state.selected) loadThread(state.selected, true);
+      }, 5000);
+    }
+
+    function showLogin() {
+      el('app').classList.add('hidden');
+      el('login').classList.remove('hidden');
+      if (state.poll) clearInterval(state.poll);
+    }
+
+    el('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      el('loginError').textContent = '';
+      const password = el('password').value;
+      try {
+        await api('/api/login', { method: 'POST', body: JSON.stringify({ password }) });
+        state.token = password;
+        sessionStorage.setItem('agentToken', password);
+        showApp();
+      } catch (err) {
+        el('loginError').textContent = err.status === 401 ? 'Wrong password' : (err.message || 'Login failed');
+      }
+    });
+
+    el('logoutBtn').addEventListener('click', async () => {
+      try { await api('/api/logout', { method: 'POST', body: '{}' }); } catch (_) {}
+      state.token = '';
+      sessionStorage.removeItem('agentToken');
+      showLogin();
+    });
+
+    el('refreshBtn').addEventListener('click', () => loadChats());
+
+    async function loadChats(silent) {
+      try {
+        const data = await api('/api/chats');
+        const list = el('chatList');
+        if (!data.chats.length) {
+          list.innerHTML = '<div class="empty">No chats yet. When a customer messages WhatsApp, they appear here.</div>';
+          return;
+        }
+        list.innerHTML = data.chats.map((c) => {
+          const active = state.selected === c.waNumber ? 'active' : '';
+          const badges = [];
+          if (c.agentTakenOver) badges.push('<span class="badge takeover">agent</span>');
+          else if (c.status === 'quiet') badges.push('<span class="badge quiet">quiet</span>');
+          else if (c.status) badges.push('<span class="badge">' + c.status + '</span>');
+          return (
+            '<button type="button" class="chat-item ' + active + '" data-wa="' + c.waNumber + '">' +
+              '<div class="wa">+' + c.waNumber + badges.join('') + '</div>' +
+              '<div class="preview">' + escapeHtml(c.lastText || '') + '</div>' +
+            '</button>'
+          );
+        }).join('');
+        list.querySelectorAll('.chat-item').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            state.selected = btn.getAttribute('data-wa');
+            loadChats(true);
+            loadThread(state.selected);
+          });
+        });
+      } catch (err) {
+        if (!silent) el('threadError').textContent = err.message;
+        if (err.status === 401) showLogin();
+      }
+    }
+
+    async function loadThread(wa, silent) {
+      el('threadError').textContent = '';
+      try {
+        const data = await api('/api/chats/' + encodeURIComponent(wa));
+        el('threadTitle').textContent = '+' + wa;
+        const s = data.session;
+        el('threadStatus').textContent = s
+          ? ('Status: ' + s.status + (s.agentTakenOver ? ' · agent takeover' : '') + (s.currentState ? ' · ' + s.currentState : ''))
+          : 'No bot session yet';
+        el('replyBox').disabled = false;
+        el('sendBtn').disabled = false;
+        el('takeoverBtn').disabled = false;
+        el('releaseBtn').disabled = false;
+
+        const box = el('messages');
+        if (!data.messages.length) {
+          box.innerHTML = '<div class="empty">No messages stored for this number yet.</div>';
+          return;
+        }
+        const stickBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+        box.innerHTML = data.messages.map((m) => {
+          const cls = m.direction === 'in' ? 'in' : (m.source === 'agent' ? 'out-agent' : 'out-bot');
+          const who = m.direction === 'in' ? 'Customer' : (m.source === 'agent' ? 'Agent' : 'Bot');
+          return (
+            '<div class="bubble ' + cls + '">' +
+              escapeHtml(m.text || '') +
+              '<span class="meta">' + who + ' · ' + escapeHtml(m.at || '') + '</span>' +
+            '</div>'
+          );
+        }).join('');
+        if (!silent || stickBottom) box.scrollTop = box.scrollHeight;
+      } catch (err) {
+        if (!silent) el('threadError').textContent = err.message;
+        if (err.status === 401) showLogin();
+      }
+    }
+
+    el('sendBtn').addEventListener('click', async () => {
+      const text = el('replyBox').value.trim();
+      if (!state.selected || !text) return;
+      el('threadError').textContent = '';
+      el('sendBtn').disabled = true;
+      try {
+        await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply', {
+          method: 'POST',
+          body: JSON.stringify({ text }),
+        });
+        el('replyBox').value = '';
+        await loadThread(state.selected);
+        await loadChats(true);
+      } catch (err) {
+        el('threadError').textContent = err.data && err.data.error ? err.data.error : err.message;
+      } finally {
+        el('sendBtn').disabled = false;
+      }
+    });
+
+    el('takeoverBtn').addEventListener('click', async () => {
+      if (!state.selected) return;
+      try {
+        await api('/api/chats/' + encodeURIComponent(state.selected) + '/takeover', {
+          method: 'POST',
+          body: '{}',
+        });
+        await loadThread(state.selected);
+        await loadChats(true);
+      } catch (err) {
+        el('threadError').textContent = err.message;
+      }
+    });
+
+    el('releaseBtn').addEventListener('click', async () => {
+      if (!state.selected) return;
+      try {
+        await api('/api/chats/' + encodeURIComponent(state.selected) + '/release', {
+          method: 'POST',
+          body: '{}',
+        });
+        await loadThread(state.selected);
+        await loadChats(true);
+      } catch (err) {
+        el('threadError').textContent = err.message;
+      }
+    });
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    (async function boot() {
+      try {
+        const status = await api('/api/status');
+        if (!status.enabled) {
+          el('loginError').textContent = 'Agent desk disabled. Set AGENT_DESK_PASSWORD on Render.';
+        }
+      } catch (_) {}
+      if (state.token) {
+        try {
+          await api('/api/chats');
+          showApp();
+          return;
+        } catch (_) {
+          sessionStorage.removeItem('agentToken');
+          state.token = '';
+        }
+      }
+      showLogin();
+    })();
+  </script>
+</body>
+</html>

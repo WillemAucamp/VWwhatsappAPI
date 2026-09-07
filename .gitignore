@@ -4,5 +4,7 @@ data/sessions/*
 !data/sessions/.gitkeep
 data/logs/*
 !data/logs/.gitkeep
+data/transcripts/*
+!data/transcripts/.gitkeep
 *.log
 .DS_Store

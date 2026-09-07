@@ -16,7 +16,7 @@ app.locals.followUpScheduler = followUpScheduler;
 const server = app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(
-    `[wa-prequal] listening on :${config.port}  GET /health  GET|POST /webhook`
+    `[wa-prequal] listening on :${config.port}  GET /health  GET|POST /webhook  GET /agent`
   );
   // eslint-disable-next-line no-console
   console.log(formatReadinessReport(getMetaReadiness()));

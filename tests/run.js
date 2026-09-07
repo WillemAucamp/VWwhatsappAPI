@@ -20,6 +20,7 @@ const files = [
   'followup-tick-isolation.test.js',
   'meta-readiness.test.js',
   'transport-graph.test.js',
+  'agent-desk.test.js',
 ];
 
 let failed = 0;

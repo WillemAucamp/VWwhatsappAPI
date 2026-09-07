@@ -61,6 +61,7 @@ function createWebhookRouter({
   appSecret,
   inboundDedupe,
   requireSignature,
+  messageStore,
 } = {}) {
   const router = express.Router();
   const token = verifyToken || config.whatsapp.verifyToken;
@@ -126,6 +127,23 @@ function createWebhookRouter({
               from: inbound.from,
               type: message.type,
             });
+            if (messageStore) {
+              try {
+                await messageStore.append({
+                  waNumber: inbound.from,
+                  direction: 'in',
+                  source: 'customer',
+                  text: inbound.replyId
+                    ? `${inbound.text}${inbound.text ? ' ' : ''}[${inbound.replyId}]`
+                    : inbound.text,
+                  replyId: inbound.replyId,
+                  wamid: message.id || null,
+                });
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('[webhook] transcript append failed', err.message);
+              }
+            }
             if (!dedupe.begin(message.id)) continue;
             try {
               await engine.handleInbound(inbound.from, inbound.text, {
