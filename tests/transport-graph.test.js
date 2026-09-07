@@ -134,11 +134,47 @@ async function testInteractiveListGraphBody() {
   });
 }
 
+async function testAuthErrorIncludesTokenHint() {
+  const snap = { ...config.whatsapp };
+  config.whatsapp.token = 'bad-token';
+  config.whatsapp.phoneNumberId = '123456';
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: false,
+    status: 401,
+    json: async () => ({
+      error: {
+        message: 'Authentication Error',
+        code: 190,
+        type: 'OAuthException',
+      },
+    }),
+  });
+  try {
+    let thrown = null;
+    try {
+      await cloudApiSendMessage('27821234567', { text: 'hi' });
+    } catch (err) {
+      thrown = err;
+    }
+    assert.ok(thrown, 'expected send to throw');
+    assert.match(thrown.message, /401/);
+    assert.match(thrown.message, /190/);
+    assert.match(thrown.message, /WHATSAPP_TOKEN/);
+    // eslint-disable-next-line no-console
+    console.log('✓ 401 Graph auth error includes token hint');
+  } finally {
+    global.fetch = originalFetch;
+    restore(snap);
+  }
+}
+
 async function main() {
   await testTemplateGraphBody();
   await testTextViaTemplateNameOnSendMessage();
   await testInteractiveButtonGraphBody();
   await testInteractiveListGraphBody();
+  await testAuthErrorIncludesTokenHint();
   // eslint-disable-next-line no-console
   console.log('\ntransport graph tests passed.');
 }

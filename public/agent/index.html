@@ -93,16 +93,32 @@
     button.danger:hover:not(:disabled) { filter: brightness(0.95); }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     .error { color: var(--danger); font-size: 0.85rem; margin-top: 10px; min-height: 1.2em; }
+    .banner {
+      margin: 0;
+      padding: 10px 14px;
+      background: #fff4e5;
+      color: #7a4b00;
+      border-bottom: 1px solid #f0d9a8;
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+    .banner.danger {
+      background: #fdecea;
+      color: #8a1f11;
+      border-bottom-color: #f5c6c0;
+    }
 
     /* —— App shell —— */
     #app {
       height: 100vh;
+      height: 100dvh;
       display: grid;
       grid-template-columns: 360px 1fr;
       background: var(--bg);
+      overflow: hidden;
     }
     @media (max-width: 800px) {
-      #app { grid-template-columns: 1fr; grid-template-rows: 42vh 1fr; }
+      #app { grid-template-columns: 1fr; grid-template-rows: 38vh 1fr; }
     }
 
     aside {
@@ -111,6 +127,8 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
+      max-height: 100%;
+      overflow: hidden;
     }
 
     /* Header modeled on screenshot: Chats | ⋮ | green + */
@@ -205,7 +223,7 @@
       display: block;
     }
     .chat-item:hover { background: #f5f6f6; }
-    .chat-item.active { background: #f0f2f5; }
+    .chat-item.active { background: #e7f8ef; }
     .chat-item .wa {
       font-size: 0.95rem;
       display: flex;
@@ -239,6 +257,8 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
+      max-height: 100%;
+      overflow: hidden;
       background: var(--bg-chat);
       background-image:
         linear-gradient(rgba(255,255,255,0.72), rgba(255,255,255,0.72)),
@@ -247,6 +267,7 @@
     }
     .thread-head {
       background: #fff;
+      flex-shrink: 0;
     }
     .thread-head .sub {
       color: var(--muted);
@@ -314,6 +335,7 @@
       display: grid;
       gap: 8px;
       background: #f0f2f5;
+      flex-shrink: 0;
     }
     .composer textarea {
       border-radius: 22px;
@@ -358,6 +380,7 @@
           </div>
         </div>
       </div>
+      <div id="authBanner" class="banner danger hidden"></div>
       <div id="chatList"></div>
     </aside>
     <main>
@@ -418,12 +441,35 @@
     function showApp() {
       el('login').classList.add('hidden');
       el('app').classList.remove('hidden');
+      refreshAuthBanner();
       loadChats();
       if (state.poll) clearInterval(state.poll);
       state.poll = setInterval(() => {
         loadChats(true);
         if (state.selected) loadThread(state.selected, true);
+        refreshAuthBanner();
       }, 5000);
+    }
+
+    async function refreshAuthBanner() {
+      const banner = el('authBanner');
+      if (!banner) return;
+      try {
+        const status = await api('/api/status');
+        if (status.lastSendError && /401|190|TOKEN|expired|Authentication/i.test(status.lastSendError)) {
+          banner.textContent =
+            'WhatsApp token auth failed — bot and agent replies cannot send. Update WHATSAPP_TOKEN (and App Secret if signatures fail) on Render, then redeploy.';
+          banner.classList.remove('hidden');
+        } else if (status.webhookSignatureRejects > 0 && status.lastSendError) {
+          banner.textContent = status.lastSendError;
+          banner.classList.remove('hidden');
+        } else {
+          banner.classList.add('hidden');
+          banner.textContent = '';
+        }
+      } catch (_) {
+        /* ignore */
+      }
     }
 
     function showLogin() {
