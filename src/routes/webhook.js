@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const express = require('express');
 const config = require('../config');
 const { createInboundDedupe } = require('../webhook/inboundDedupe');
+const diagnostics = require('../webhook/diagnostics');
 
 /**
  * Verify Meta X-Hub-Signature-256 against the raw request body.
@@ -83,21 +84,29 @@ function createWebhookRouter({
   });
 
   router.post('/', async (req, res) => {
+    diagnostics.touchPost();
     if (mustVerify) {
       if (!secret) {
         // eslint-disable-next-line no-console
         console.error(
           '[webhook] WHATSAPP_APP_SECRET required in production; rejecting POST'
         );
+        diagnostics.rejectNoSecret();
         return res.sendStatus(503);
       }
       const signature = req.get('x-hub-signature-256');
       const rawBody = req.rawBody;
       if (!verifyWhatsAppSignature(rawBody, signature, secret)) {
+        // eslint-disable-next-line no-console
+        console.error(
+          '[webhook] signature mismatch — WHATSAPP_APP_SECRET does not match this Meta app'
+        );
+        diagnostics.rejectSignature();
         return res.sendStatus(403);
       }
     }
 
+    diagnostics.acceptPost();
     res.sendStatus(200);
 
     try {
@@ -113,25 +122,36 @@ function createWebhookRouter({
           for (const message of messages) {
             const inbound = extractInboundMessage(message);
             if (!inbound) continue;
+            diagnostics.recordInbound({
+              from: inbound.from,
+              type: message.type,
+            });
             if (!dedupe.begin(message.id)) continue;
             try {
               await engine.handleInbound(inbound.from, inbound.text, {
                 replyId: inbound.replyId,
               });
+              diagnostics.recordHandled();
               dedupe.commit(message.id);
             } catch (err) {
+              diagnostics.recordHandleError(err);
+              if (err && (err.status || err.response)) {
+                diagnostics.recordSendError(err);
+              }
               dedupe.release(message.id);
               // eslint-disable-next-line no-console
               console.error('[webhook] message processing error', {
                 messageId: message.id,
                 from: inbound.from,
                 message: err && err.message ? err.message : String(err),
+                response: err && err.response ? err.response : undefined,
               });
             }
           }
         }
       }
     } catch (err) {
+      diagnostics.recordHandleError(err);
       // eslint-disable-next-line no-console
       console.error('[webhook] processing error', err);
     }

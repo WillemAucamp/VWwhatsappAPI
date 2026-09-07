@@ -8,6 +8,7 @@ const { FsmEngine } = require('./engine/fsmEngine');
 const { createWebhookRouter } = require('./routes/webhook');
 const { sendMessage } = require('./transport/whatsapp');
 const { getMetaReadiness } = require('./meta/readiness');
+const webhookDiagnostics = require('./webhook/diagnostics');
 
 function createApp(overrides = {}) {
   const sessionStore = overrides.sessionStore || createSessionStore();
@@ -46,6 +47,7 @@ function createApp(overrides = {}) {
         readyToPlugIn: meta.readyToPlugIn,
         missing: meta.missing,
       },
+      webhook: webhookDiagnostics.snapshot(),
     });
   });
 
