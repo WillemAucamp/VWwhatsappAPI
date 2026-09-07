@@ -50,6 +50,7 @@ Staff browser inbox (Cloud API chats, no Coexistence required):
 1. Set on Render: `AGENT_DESK_PASSWORD=…` (and `AGENT_DESK_ENABLED=true`)
 2. Open `https://your-host/agent`
 3. Sign in → pick a chat → **Take over** / reply / **Release to bot**
+4. Tap the green **+** to start a chat with a new number (optional first message, or an approved template for cold outreach outside the 24h window)
 
 ### Where chats are stored
 

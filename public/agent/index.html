@@ -58,7 +58,7 @@
     }
     .card p { margin: 0 0 20px; color: var(--muted); font-size: 0.92rem; line-height: 1.4; }
     label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
-    input[type="password"], textarea {
+    input[type="password"], input[type="tel"], input[type="text"], textarea {
       width: 100%;
       border: 1px solid var(--line);
       background: #fff;
@@ -68,9 +68,53 @@
       font: inherit;
       outline: none;
     }
-    input[type="password"]:focus, textarea:focus {
+    input[type="password"]:focus, input[type="tel"]:focus, input[type="text"]:focus, textarea:focus {
       border-color: var(--green);
       box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.2);
+    }
+    .field { margin-bottom: 14px; }
+    .hint { margin: 4px 0 0; color: var(--muted); font-size: 0.78rem; line-height: 1.35; }
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 4px 0 12px;
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+    .check-row input { width: auto; accent-color: var(--green); }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(11, 20, 26, 0.45);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      z-index: 50;
+    }
+    .modal {
+      width: min(420px, 100%);
+      background: #fff;
+      border-radius: 12px;
+      padding: 22px 22px 18px;
+      box-shadow: 0 8px 32px rgba(11, 20, 26, 0.18);
+    }
+    .modal h3 {
+      margin: 0 0 6px;
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
+    .modal .lead {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.4;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 8px;
     }
     button {
       border: 0;
@@ -371,10 +415,11 @@
           <button type="button" class="icon-btn" id="menuBtn" aria-label="Menu" title="Menu">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
           </button>
-          <button type="button" class="fab" id="refreshBtn" aria-label="Refresh chats" title="Refresh">
+          <button type="button" class="fab" id="newChatBtn" aria-label="New chat" title="New chat">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
           </button>
           <div id="sideMenu" class="menu hidden" role="menu">
+            <button type="button" id="menuNewChat" role="menuitem">New chat</button>
             <button type="button" id="menuRefresh" role="menuitem">Refresh</button>
             <button type="button" id="logoutBtn" role="menuitem">Log out</button>
           </div>
@@ -412,11 +457,48 @@
     </main>
   </section>
 
+  <div id="newChatModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="newChatTitle">
+    <form class="modal" id="newChatForm">
+      <h3 id="newChatTitle">New chat</h3>
+      <p class="lead">Enter a WhatsApp number to open a conversation, like starting a chat on WhatsApp.</p>
+      <div class="field">
+        <label for="newChatPhone">Phone number</label>
+        <input id="newChatPhone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+27 67 731 7705" required />
+        <p class="hint">Use country code (e.g. +27…). Local SA numbers starting with 0 are converted automatically.</p>
+      </div>
+      <div class="field">
+        <label for="newChatMessage">First message <span style="font-weight:400">(optional)</span></label>
+        <textarea id="newChatMessage" name="message" rows="2" placeholder="Hi, this is VW Melrose…"></textarea>
+      </div>
+      <label class="check-row">
+        <input type="checkbox" id="newChatUseTemplate" />
+        Use approved template (needed if they have not messaged recently)
+      </label>
+      <div id="templateFields" class="hidden">
+        <div class="field">
+          <label for="newChatTemplate">Template name</label>
+          <input id="newChatTemplate" type="text" placeholder="hello_world" value="hello_world" />
+        </div>
+        <div class="field">
+          <label for="newChatTemplateLang">Language</label>
+          <input id="newChatTemplateLang" type="text" placeholder="en_US" value="en_US" />
+        </div>
+      </div>
+      <div class="error" id="newChatError"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="newChatCancel">Cancel</button>
+        <button type="submit" id="newChatSubmit">Start chat</button>
+      </div>
+    </form>
+  </div>
+
   <script>
     const state = {
       token: sessionStorage.getItem('agentToken') || '',
       selected: null,
       poll: null,
+      /** Numbers opened via + that may not have a transcript yet */
+      draftChats: {},
     };
 
     const el = (id) => document.getElementById(id);
@@ -518,17 +600,133 @@
     }
     el('logoutBtn').addEventListener('click', doLogout);
     el('menuRefresh').addEventListener('click', () => { closeMenus(); loadChats(); });
-    el('refreshBtn').addEventListener('click', () => loadChats());
+    el('menuNewChat').addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeMenus();
+      openNewChatModal();
+    });
+    el('newChatBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openNewChatModal();
+    });
+
+    function normalizeWaNumber(input) {
+      let digits = String(input || '').replace(/\D/g, '');
+      if (digits.startsWith('00')) digits = digits.slice(2);
+      if (digits.length === 10 && digits.startsWith('0')) {
+        digits = '27' + digits.slice(1);
+      }
+      return digits;
+    }
+
+    function openNewChatModal() {
+      closeMenus();
+      el('newChatError').textContent = '';
+      el('newChatPhone').value = '';
+      el('newChatMessage').value = '';
+      el('newChatUseTemplate').checked = false;
+      el('templateFields').classList.add('hidden');
+      el('newChatModal').classList.remove('hidden');
+      setTimeout(() => el('newChatPhone').focus(), 0);
+    }
+
+    function closeNewChatModal() {
+      el('newChatModal').classList.add('hidden');
+    }
+
+    el('newChatCancel').addEventListener('click', closeNewChatModal);
+    el('newChatModal').addEventListener('click', (e) => {
+      if (e.target === el('newChatModal')) closeNewChatModal();
+    });
+    el('newChatUseTemplate').addEventListener('change', () => {
+      el('templateFields').classList.toggle('hidden', !el('newChatUseTemplate').checked);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !el('newChatModal').classList.contains('hidden')) {
+        closeNewChatModal();
+      }
+    });
+
+    el('newChatForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      el('newChatError').textContent = '';
+      const wa = normalizeWaNumber(el('newChatPhone').value);
+      if (!wa || wa.length < 8) {
+        el('newChatError').textContent = 'Enter a valid phone number with country code.';
+        return;
+      }
+
+      const useTemplate = el('newChatUseTemplate').checked;
+      const text = el('newChatMessage').value.trim();
+      const templateName = el('newChatTemplate').value.trim();
+      const templateLanguage = el('newChatTemplateLang').value.trim() || 'en_US';
+      const body = { waNumber: wa };
+
+      if (useTemplate) {
+        if (!templateName) {
+          el('newChatError').textContent = 'Enter an approved template name.';
+          return;
+        }
+        body.templateName = templateName;
+        body.templateLanguage = templateLanguage;
+      } else if (text) {
+        body.text = text;
+      }
+
+      el('newChatSubmit').disabled = true;
+      try {
+        const result = await api('/api/chats', {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+        const opened = result.waNumber || wa;
+        state.selected = opened;
+        state.draftChats[opened] = {
+          waNumber: opened,
+          lastText: result.message ? result.message.text : 'New chat',
+          lastAt: new Date().toISOString(),
+        };
+        closeNewChatModal();
+        await loadChats(true);
+        await loadThread(opened);
+        el('replyBox').focus();
+      } catch (err) {
+        const detail =
+          err.data && err.data.response && err.data.response.error
+            ? err.data.response.error.message
+            : null;
+        let msg = detail || (err.data && err.data.error) || err.message || 'Could not start chat';
+        if (/131047/.test(msg) || /outside.*window/i.test(msg)) {
+          msg += ' Tip: tick “Use approved template” for numbers that have not messaged recently.';
+        }
+        el('newChatError').textContent = msg;
+      } finally {
+        el('newChatSubmit').disabled = false;
+      }
+    });
 
     async function loadChats(silent) {
       try {
         const data = await api('/api/chats');
         const list = el('chatList');
-        if (!data.chats.length) {
-          list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats yet. When a customer messages WhatsApp, they appear here.</div>';
+        const byWa = {};
+        (data.chats || []).forEach((c) => {
+          byWa[c.waNumber] = c;
+          if (state.draftChats[c.waNumber]) delete state.draftChats[c.waNumber];
+        });
+        Object.keys(state.draftChats).forEach((wa) => {
+          if (!byWa[wa]) byWa[wa] = state.draftChats[wa];
+        });
+        const chats = Object.values(byWa).sort((a, b) =>
+          String(b.lastAt || '').localeCompare(String(a.lastAt || ''))
+        );
+
+        if (!chats.length) {
+          list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats yet. Tap + to message a new number, or wait for a customer to write in.</div>';
           return;
         }
-        list.innerHTML = data.chats.map((c) => {
+        list.innerHTML = chats.map((c) => {
           const active = state.selected === c.waNumber ? 'active' : '';
           const badges = [];
           if (c.agentTakenOver) badges.push('<span class="badge takeover">agent</span>');
@@ -576,7 +774,7 @@
 
         const box = el('messages');
         if (!data.messages.length) {
-          box.innerHTML = '<div class="empty">No messages stored for this number yet.</div>';
+          box.innerHTML = '<div class="empty">No messages yet. Type below to reach out — or start with an approved template via + if they have not messaged recently.</div>';
           return;
         }
         const stickBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
@@ -611,7 +809,16 @@
         await loadThread(state.selected);
         await loadChats(true);
       } catch (err) {
-        el('threadError').textContent = err.data && err.data.error ? err.data.error : err.message;
+        let msg = err.data && err.data.error ? err.data.error : err.message;
+        const detail =
+          err.data && err.data.response && err.data.response.error
+            ? err.data.response.error.message
+            : null;
+        if (detail) msg = detail;
+        if (/131047/.test(String(msg)) || /outside.*window/i.test(String(msg))) {
+          msg += ' Use New chat (+) with an approved template to reach this number.';
+        }
+        el('threadError').textContent = msg;
       } finally {
         el('sendBtn').disabled = false;
       }

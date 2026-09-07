@@ -23,7 +23,10 @@ function createApp(overrides = {}) {
     const result = await baseSend(to, payload);
     if (messageStore) {
       try {
-        const text = [payload.text, payload.link].filter(Boolean).join('\n\n');
+        const templateName = payload.templateName || payload.template;
+        const text = templateName
+          ? `[template: ${templateName}]`
+          : [payload.text, payload.link].filter(Boolean).join('\n\n');
         const source =
           (payload.meta && payload.meta.source) ||
           (payload.meta && payload.meta.quiet ? 'bot' : 'bot');
