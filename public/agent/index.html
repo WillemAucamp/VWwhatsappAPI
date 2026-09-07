@@ -6,33 +6,41 @@
   <title>VW Melrose — Agent desk</title>
   <style>
     :root {
-      --bg: #0f1419;
-      --panel: #1a222c;
-      --panel-2: #232d3a;
-      --line: #2f3b4a;
-      --text: #e8eef5;
-      --muted: #8b9bb0;
-      --accent: #3d8bfd;
-      --in: #243042;
-      --out-bot: #1e3a2f;
-      --out-agent: #2a3348;
-      --danger: #d64545;
-      --ok: #3cb371;
+      --bg: #ffffff;
+      --bg-chat: #efeae2;
+      --panel: #ffffff;
+      --line: #e9edef;
+      --line-soft: #f0f2f5;
+      --text: #111b21;
+      --muted: #667781;
+      --green: #25d366;
+      --green-dark: #1da851;
+      --green-deep: #128c7e;
+      --bubble-in: #ffffff;
+      --bubble-out: #d9fdd3;
+      --bubble-bot: #fff8c5;
+      --danger: #ea4335;
+      --shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Segoe UI", system-ui, sans-serif;
+      font-family: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
       background: var(--bg);
       color: var(--text);
       height: 100vh;
     }
     .hidden { display: none !important; }
+
+    /* —— Login —— */
     #login {
       min-height: 100vh;
       display: grid;
       place-items: center;
       padding: 24px;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(37, 211, 102, 0.12), transparent 55%),
+        #ffffff;
     }
     .card {
       width: min(400px, 100%);
@@ -40,22 +48,29 @@
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 28px;
+      box-shadow: 0 2px 12px rgba(11, 20, 26, 0.06);
     }
     .card h1 {
       margin: 0 0 8px;
-      font-size: 1.25rem;
-      font-weight: 650;
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
     }
-    .card p { margin: 0 0 20px; color: var(--muted); font-size: 0.92rem; }
+    .card p { margin: 0 0 20px; color: var(--muted); font-size: 0.92rem; line-height: 1.4; }
     label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
     input[type="password"], textarea {
       width: 100%;
       border: 1px solid var(--line);
-      background: var(--panel-2);
+      background: #fff;
       color: var(--text);
       border-radius: 8px;
       padding: 12px 14px;
       font: inherit;
+      outline: none;
+    }
+    input[type="password"]:focus, textarea:focus {
+      border-color: var(--green);
+      box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.2);
     }
     button {
       border: 0;
@@ -64,21 +79,32 @@
       font: inherit;
       font-weight: 600;
       cursor: pointer;
-      background: var(--accent);
+      background: var(--green);
       color: #fff;
     }
-    button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+    button:hover:not(:disabled) { background: var(--green-dark); }
+    button.secondary {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    button.secondary:hover:not(:disabled) { background: var(--line-soft); }
     button.danger { background: var(--danger); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .error { color: #ff8e8e; font-size: 0.85rem; margin-top: 10px; min-height: 1.2em; }
+    button.danger:hover:not(:disabled) { filter: brightness(0.95); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .error { color: var(--danger); font-size: 0.85rem; margin-top: 10px; min-height: 1.2em; }
+
+    /* —— App shell —— */
     #app {
       height: 100vh;
       display: grid;
-      grid-template-columns: 320px 1fr;
+      grid-template-columns: 360px 1fr;
+      background: var(--bg);
     }
     @media (max-width: 800px) {
-      #app { grid-template-columns: 1fr; grid-template-rows: 40vh 1fr; }
+      #app { grid-template-columns: 1fr; grid-template-rows: 42vh 1fr; }
     }
+
     aside {
       border-right: 1px solid var(--line);
       background: var(--panel);
@@ -86,21 +112,85 @@
       flex-direction: column;
       min-height: 0;
     }
+
+    /* Header modeled on screenshot: Chats | ⋮ | green + */
     .aside-head, .thread-head {
-      padding: 14px 16px;
+      padding: 12px 14px 12px 16px;
       border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
+      gap: 10px;
+      background: #fff;
+      min-height: 60px;
     }
     .aside-head h2, .thread-head h2 {
       margin: 0;
-      font-size: 1rem;
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text);
     }
+    .head-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+    }
+    .icon-btn {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: #54656f;
+      display: inline-grid;
+      place-items: center;
+      border: 0;
+    }
+    .icon-btn:hover:not(:disabled) { background: var(--line-soft); }
+    .icon-btn svg { width: 22px; height: 22px; fill: currentColor; }
+    .fab {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border-radius: 50%;
+      background: var(--green);
+      color: #fff;
+      display: inline-grid;
+      place-items: center;
+      box-shadow: none;
+    }
+    .fab:hover:not(:disabled) { background: var(--green-dark); }
+    .fab svg { width: 22px; height: 22px; fill: currentColor; }
+
+    .menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0;
+      min-width: 160px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 2px 16px rgba(11, 20, 26, 0.12);
+      padding: 6px 0;
+      z-index: 20;
+    }
+    .menu button {
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      color: var(--text);
+      font-weight: 500;
+      border-radius: 0;
+      padding: 10px 16px;
+    }
+    .menu button:hover:not(:disabled) { background: var(--line-soft); }
+
     #chatList {
       overflow: auto;
       flex: 1;
+      background: #fff;
     }
     .chat-item {
       width: 100%;
@@ -108,79 +198,133 @@
       background: transparent;
       color: var(--text);
       border: 0;
-      border-bottom: 1px solid var(--line);
+      border-bottom: 1px solid var(--line-soft);
       border-radius: 0;
-      padding: 12px 14px;
+      padding: 12px 16px;
       font-weight: 500;
+      display: block;
     }
-    .chat-item.active { background: var(--panel-2); }
-    .chat-item .wa { font-size: 0.92rem; }
+    .chat-item:hover { background: #f5f6f6; }
+    .chat-item.active { background: #f0f2f5; }
+    .chat-item .wa {
+      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
     .chat-item .preview {
       color: var(--muted);
-      font-size: 0.8rem;
+      font-size: 0.82rem;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       margin-top: 4px;
+      font-weight: 400;
     }
     .badge {
       display: inline-block;
-      font-size: 0.7rem;
-      padding: 2px 6px;
+      font-size: 0.68rem;
+      padding: 2px 7px;
       border-radius: 999px;
-      background: #3a4556;
+      background: #e9edef;
       color: var(--muted);
-      margin-left: 6px;
+      font-weight: 600;
+      text-transform: lowercase;
     }
-    .badge.takeover { background: #5a3b1e; color: #ffd19a; }
-    .badge.quiet { background: #1f3d4d; color: #9ad7ff; }
+    .badge.takeover { background: rgba(37, 211, 102, 0.18); color: var(--green-deep); }
+    .badge.quiet { background: #e7f3ff; color: #027eb5; }
+
     main {
       display: flex;
       flex-direction: column;
       min-height: 0;
-      background: #121820;
+      background: var(--bg-chat);
+      background-image:
+        linear-gradient(rgba(255,255,255,0.72), rgba(255,255,255,0.72)),
+        radial-gradient(circle at 20% 20%, rgba(37, 211, 102, 0.05) 0, transparent 40%),
+        radial-gradient(circle at 80% 60%, rgba(18, 140, 126, 0.06) 0, transparent 45%);
+    }
+    .thread-head {
+      background: #fff;
+    }
+    .thread-head .sub {
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-top: 2px;
+      font-weight: 400;
     }
     #messages {
       flex: 1;
       overflow: auto;
-      padding: 16px;
+      padding: 16px 5%;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 6px;
     }
     .empty {
       margin: auto;
       color: var(--muted);
       text-align: center;
       padding: 24px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      max-width: 320px;
+      font-size: 0.9rem;
+      line-height: 1.45;
     }
     .bubble {
-      max-width: min(560px, 92%);
-      padding: 10px 12px;
-      border-radius: 12px;
+      max-width: min(520px, 85%);
+      padding: 8px 10px 6px;
+      border-radius: 8px;
       white-space: pre-wrap;
       word-break: break-word;
-      font-size: 0.92rem;
+      font-size: 0.9rem;
       line-height: 1.4;
+      box-shadow: var(--shadow);
+      position: relative;
     }
-    .bubble.in { align-self: flex-start; background: var(--in); }
-    .bubble.out-bot { align-self: flex-end; background: var(--out-bot); }
-    .bubble.out-agent { align-self: flex-end; background: var(--out-agent); }
+    .bubble.in {
+      align-self: flex-start;
+      background: var(--bubble-in);
+      border-top-left-radius: 0;
+    }
+    .bubble.out-bot {
+      align-self: flex-end;
+      background: var(--bubble-bot);
+      border-top-right-radius: 0;
+    }
+    .bubble.out-agent {
+      align-self: flex-end;
+      background: var(--bubble-out);
+      border-top-right-radius: 0;
+    }
     .meta {
       display: block;
-      margin-top: 6px;
-      font-size: 0.72rem;
+      margin-top: 4px;
+      font-size: 0.68rem;
       color: var(--muted);
+      text-align: right;
     }
+
     .composer {
       border-top: 1px solid var(--line);
-      padding: 12px;
+      padding: 10px 12px;
       display: grid;
       gap: 8px;
-      background: var(--panel);
+      background: #f0f2f5;
     }
-    .composer-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .composer-actions .grow { margin-left: auto; }
+    .composer textarea {
+      border-radius: 22px;
+      border-color: transparent;
+      padding: 12px 16px;
+      resize: none;
+      min-height: 44px;
+      max-height: 120px;
+    }
+    .composer-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .composer-actions .grow { margin-left: auto; border-radius: 22px; padding: 10px 20px; }
   </style>
 </head>
 <body>
@@ -201,7 +345,18 @@
     <aside>
       <div class="aside-head">
         <h2>Chats</h2>
-        <button type="button" class="secondary" id="refreshBtn">Refresh</button>
+        <div class="head-actions">
+          <button type="button" class="icon-btn" id="menuBtn" aria-label="Menu" title="Menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+          </button>
+          <button type="button" class="fab" id="refreshBtn" aria-label="Refresh chats" title="Refresh">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+          </button>
+          <div id="sideMenu" class="menu hidden" role="menu">
+            <button type="button" id="menuRefresh" role="menuitem">Refresh</button>
+            <button type="button" id="logoutBtn" role="menuitem">Log out</button>
+          </div>
+        </div>
       </div>
       <div id="chatList"></div>
     </aside>
@@ -209,16 +364,24 @@
       <div class="thread-head">
         <div>
           <h2 id="threadTitle">Select a chat</h2>
-          <div id="threadStatus" style="color:var(--muted);font-size:0.8rem;margin-top:4px;"></div>
+          <div id="threadStatus" class="sub"></div>
         </div>
-        <button type="button" class="secondary" id="logoutBtn">Log out</button>
+        <div class="head-actions">
+          <button type="button" class="icon-btn" id="threadMenuBtn" aria-label="Chat actions" title="Chat actions">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+          </button>
+          <div id="threadMenu" class="menu hidden" role="menu">
+            <button type="button" id="takeoverBtn" role="menuitem" disabled>Take over</button>
+            <button type="button" id="releaseBtn" role="menuitem" disabled>Release to bot</button>
+          </div>
+        </div>
       </div>
       <div id="messages"><div class="empty">Choose a conversation on the left.</div></div>
       <div class="composer">
-        <textarea id="replyBox" rows="3" placeholder="Type a reply to the customer…" disabled></textarea>
+        <textarea id="replyBox" rows="2" placeholder="Type a message" disabled></textarea>
         <div class="composer-actions">
-          <button type="button" class="secondary" id="takeoverBtn" disabled>Take over</button>
-          <button type="button" class="secondary" id="releaseBtn" disabled>Release to bot</button>
+          <button type="button" class="secondary" id="takeoverBtnBar" disabled>Take over</button>
+          <button type="button" class="secondary" id="releaseBtnBar" disabled>Release to bot</button>
           <button type="button" class="grow" id="sendBtn" disabled>Send</button>
         </div>
         <div class="error" id="threadError"></div>
@@ -269,6 +432,23 @@
       if (state.poll) clearInterval(state.poll);
     }
 
+    function closeMenus() {
+      el('sideMenu').classList.add('hidden');
+      el('threadMenu').classList.add('hidden');
+    }
+
+    el('menuBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      el('threadMenu').classList.add('hidden');
+      el('sideMenu').classList.toggle('hidden');
+    });
+    el('threadMenuBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      el('sideMenu').classList.add('hidden');
+      el('threadMenu').classList.toggle('hidden');
+    });
+    document.addEventListener('click', closeMenus);
+
     el('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       el('loginError').textContent = '';
@@ -283,13 +463,15 @@
       }
     });
 
-    el('logoutBtn').addEventListener('click', async () => {
+    async function doLogout() {
+      closeMenus();
       try { await api('/api/logout', { method: 'POST', body: '{}' }); } catch (_) {}
       state.token = '';
       sessionStorage.removeItem('agentToken');
       showLogin();
-    });
-
+    }
+    el('logoutBtn').addEventListener('click', doLogout);
+    el('menuRefresh').addEventListener('click', () => { closeMenus(); loadChats(); });
     el('refreshBtn').addEventListener('click', () => loadChats());
 
     async function loadChats(silent) {
@@ -297,7 +479,7 @@
         const data = await api('/api/chats');
         const list = el('chatList');
         if (!data.chats.length) {
-          list.innerHTML = '<div class="empty">No chats yet. When a customer messages WhatsApp, they appear here.</div>';
+          list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats yet. When a customer messages WhatsApp, they appear here.</div>';
           return;
         }
         list.innerHTML = data.chats.map((c) => {
@@ -326,6 +508,15 @@
       }
     }
 
+    function setThreadActionsEnabled(on) {
+      el('replyBox').disabled = !on;
+      el('sendBtn').disabled = !on;
+      el('takeoverBtn').disabled = !on;
+      el('releaseBtn').disabled = !on;
+      el('takeoverBtnBar').disabled = !on;
+      el('releaseBtnBar').disabled = !on;
+    }
+
     async function loadThread(wa, silent) {
       el('threadError').textContent = '';
       try {
@@ -335,10 +526,7 @@
         el('threadStatus').textContent = s
           ? ('Status: ' + s.status + (s.agentTakenOver ? ' · agent takeover' : '') + (s.currentState ? ' · ' + s.currentState : ''))
           : 'No bot session yet';
-        el('replyBox').disabled = false;
-        el('sendBtn').disabled = false;
-        el('takeoverBtn').disabled = false;
-        el('releaseBtn').disabled = false;
+        setThreadActionsEnabled(true);
 
         const box = el('messages');
         if (!data.messages.length) {
@@ -383,7 +571,8 @@
       }
     });
 
-    el('takeoverBtn').addEventListener('click', async () => {
+    async function doTakeover() {
+      closeMenus();
       if (!state.selected) return;
       try {
         await api('/api/chats/' + encodeURIComponent(state.selected) + '/takeover', {
@@ -395,9 +584,9 @@
       } catch (err) {
         el('threadError').textContent = err.message;
       }
-    });
-
-    el('releaseBtn').addEventListener('click', async () => {
+    }
+    async function doRelease() {
+      closeMenus();
       if (!state.selected) return;
       try {
         await api('/api/chats/' + encodeURIComponent(state.selected) + '/release', {
@@ -409,7 +598,11 @@
       } catch (err) {
         el('threadError').textContent = err.message;
       }
-    });
+    }
+    el('takeoverBtn').addEventListener('click', doTakeover);
+    el('takeoverBtnBar').addEventListener('click', doTakeover);
+    el('releaseBtn').addEventListener('click', doRelease);
+    el('releaseBtnBar').addEventListener('click', doRelease);
 
     function escapeHtml(s) {
       return String(s)
