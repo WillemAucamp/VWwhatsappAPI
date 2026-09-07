@@ -90,7 +90,17 @@ function truncateTitle(title, max = BUTTON_TITLE_MAX) {
  */
 function buildInteractiveFromState(state) {
   if (!state || !state.options) return null;
-  const keys = Object.keys(state.options);
+  const allKeys = Object.keys(state.options);
+  if (!allKeys.length) return null;
+
+  // Prefer explicit interactiveOptions (keeps extra options text-matchable
+  // without forcing a WhatsApp list message when >3 keys exist).
+  const keys =
+    Array.isArray(state.interactiveOptions) && state.interactiveOptions.length
+      ? state.interactiveOptions.filter((k) =>
+          Object.prototype.hasOwnProperty.call(state.options, k)
+        )
+      : allKeys;
   if (!keys.length) return null;
 
   const rows = keys.map((key) => {
@@ -101,28 +111,45 @@ function buildInteractiveFromState(state) {
     const labels = state.optionLabels && state.optionLabels[key];
     const fallback =
       Array.isArray(labels) && labels.length ? labels[0] : key;
+    const description =
+      state.optionDescriptions && state.optionDescriptions[key]
+        ? String(state.optionDescriptions[key]).slice(0, 72)
+        : undefined;
     return {
       id: String(key),
       title: truncateTitle(titled || fallback),
+      description,
     };
   });
+
+  const headerText =
+    state.interactiveHeader != null
+      ? String(state.interactiveHeader).slice(0, 60)
+      : null;
 
   if (rows.length <= REPLY_BUTTON_MAX) {
     return {
       type: 'button',
-      buttons: rows,
+      header: headerText || undefined,
+      buttons: rows.map((r) => ({ id: r.id, title: r.title })),
     };
   }
 
   return {
     type: 'list',
-    button: 'Choose',
+    header: headerText || undefined,
+    button: state.listButtonTitle
+      ? String(state.listButtonTitle).slice(0, 20)
+      : 'View options',
     sections: [
       {
-        title: 'Options',
+        title: state.listSectionTitle
+          ? String(state.listSectionTitle).slice(0, 24)
+          : 'Options',
         rows: rows.map((r) => ({
           id: r.id,
           title: truncateTitle(r.title, 24),
+          description: r.description,
         })),
       },
     ],

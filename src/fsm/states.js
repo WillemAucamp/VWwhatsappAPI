@@ -8,9 +8,8 @@
  *   options       reply id (option key) → next state
  *   optionLabels  free-text fallback synonyms
  *
- * Greeting has 4 options → list message (reply buttons max out at 3).
- * Stocklist: any selection → employment_check (dynamic car_id list TBD;
- *   Continue stands in until live vehicle rows are wired).
+ * Greeting shows 3 reply buttons (WhatsApp max). Promotions stays text-matchable.
+ * Stocklist: any selection → employment_check (dynamic car_id list TBD).
  */
 
 /** @type {Record<string, object>} */
@@ -19,6 +18,10 @@ const STATES = {
     id: 'GREETING',
     promptKey: 'greeting_prompt',
     type: 'choice',
+    interactiveHeader: 'VW Melrose',
+    // WhatsApp allows max 3 reply buttons. Promotions stays text-matchable
+    // ("promotions" / "specials") without forcing a clunky list menu.
+    interactiveOptions: ['see_cars', 'qualify_me', 'opt_out'],
     options: {
       see_cars: 'STOCKLIST_CAROUSEL',
       qualify_me: 'EMPLOYMENT_CHECK',
@@ -43,15 +46,14 @@ const STATES = {
     id: 'STOCKLIST_CAROUSEL',
     promptKey: 'stocklist_body',
     type: 'choice',
+    interactiveHeader: 'VW Melrose',
     sendLink: 'stock',
     mediaSlot: 'stock_list',
-    // PDF: any car_id → employment_check. Until dynamic stock is wired,
-    // Continue (and future car_* ids) all route there.
     options: {
       any_car: 'EMPLOYMENT_CHECK',
     },
     optionTitles: {
-      any_car: 'Continue',
+      any_car: 'Check if I qualify',
     },
     optionLabels: {
       any_car: [
@@ -62,6 +64,8 @@ const STATES = {
         '1',
         'any_car',
         'select',
+        'check if i qualify',
+        'qualify',
       ],
     },
   },
@@ -70,6 +74,7 @@ const STATES = {
     id: 'PROMOTIONS',
     promptKey: 'promotions_body',
     type: 'choice',
+    interactiveHeader: 'VW Melrose',
     options: {
       back: 'GREETING',
     },
@@ -85,6 +90,7 @@ const STATES = {
     id: 'EMPLOYMENT_CHECK',
     promptKey: 'employment_check_prompt',
     type: 'choice',
+    interactiveHeader: 'Quick check',
     options: {
       employed_yes: 'AFFORDABILITY_CHECK',
       employed_no: 'END_CHAT_EMPLOYED_NO',
@@ -113,6 +119,7 @@ const STATES = {
     id: 'AFFORDABILITY_CHECK',
     promptKey: 'affordability_check_prompt',
     type: 'choice',
+    interactiveHeader: 'Income',
     options: {
       income_over_15k: 'LICENSE_CHECK',
       income_over_9k: 'LICENSE_CHECK',
@@ -162,6 +169,7 @@ const STATES = {
     id: 'LICENSE_CHECK',
     promptKey: 'license_check_prompt',
     type: 'choice',
+    interactiveHeader: 'Licence',
     options: {
       license_yes: 'CREDIT_CHECK',
       license_no: 'LICENSE_NO_HANDOVER',
@@ -191,6 +199,7 @@ const STATES = {
     id: 'CREDIT_CHECK',
     promptKey: 'credit_check_prompt',
     type: 'choice',
+    interactiveHeader: 'Credit',
     options: {
       credit_good: 'FINAL_CONSENT',
       credit_bad: 'CREDIT_BAD_HANDOVER',
@@ -220,6 +229,7 @@ const STATES = {
     id: 'FINAL_CONSENT',
     promptKey: 'final_consent_prompt',
     type: 'choice',
+    interactiveHeader: 'Next step',
     options: {
       consent_yes: 'SEND_LINK',
       consent_no: 'CONSENT_NO_HANDOVER',

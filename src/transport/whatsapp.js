@@ -75,11 +75,21 @@ function buildInteractiveGraph(interactive, bodyText) {
       err.code = 'WHATSAPP_INTERACTIVE_INVALID';
       throw err;
     }
-    return {
+    const payload = {
       type: 'button',
       body: { text: bodyText || ' ' },
       action: { buttons },
     };
+    if (interactive.header) {
+      payload.header = {
+        type: 'text',
+        text: String(interactive.header).slice(0, 60),
+      };
+    }
+    if (interactive.footer) {
+      payload.footer = { text: String(interactive.footer).slice(0, 60) };
+    }
+    return payload;
   }
 
   if (interactive.type === 'list') {
@@ -93,14 +103,24 @@ function buildInteractiveGraph(interactive, bodyText) {
           : undefined,
       })),
     }));
-    return {
+    const payload = {
       type: 'list',
       body: { text: bodyText || ' ' },
       action: {
-        button: String(interactive.button || 'Choose').slice(0, 20),
+        button: String(interactive.button || 'View options').slice(0, 20),
         sections,
       },
     };
+    if (interactive.header) {
+      payload.header = {
+        type: 'text',
+        text: String(interactive.header).slice(0, 60),
+      };
+    }
+    if (interactive.footer) {
+      payload.footer = { text: String(interactive.footer).slice(0, 60) };
+    }
+    return payload;
   }
 
   const err = new Error(`Unsupported interactive type: ${interactive.type}`);

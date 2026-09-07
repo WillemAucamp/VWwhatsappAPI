@@ -86,7 +86,8 @@ function assertGreetingCopy(h) {
   const first = h.messages[0];
   assert.ok(first && first.text, `${h.label}: expected greeting outbound`);
   assert.ok(
-    String(first.text).includes('Willem Aucamp from VW Melrose'),
+    String(first.text).includes('Willem Aucamp') &&
+      String(first.text).includes('VW Melrose'),
     `${h.label}: greeting must use Melrose script`
   );
 }
@@ -95,8 +96,12 @@ function assertInteractiveMenu(h) {
   const interactive = h.messages.filter((m) => m.interactive);
   assert.ok(interactive.length >= 1, `${h.label}: expected interactive menu`);
   const greet = interactive[0];
-  assert.strictEqual(greet.interactive.type, 'list');
-  assert.ok(greet.interactive.sections[0].rows.length === 4);
+  assert.strictEqual(greet.interactive.type, 'button');
+  assert.strictEqual(greet.interactive.buttons.length, 3);
+  assert.deepStrictEqual(
+    greet.interactive.buttons.map((b) => b.id),
+    ['see_cars', 'qualify_me', 'opt_out']
+  );
 }
 
 async function testFullQualifyPath() {
@@ -344,7 +349,7 @@ async function testFollowUpCadence() {
   const firstFu = h.messages[h.messages.length - 1];
   assert.ok(String(firstFu.text).includes(copy.follow_up_first));
   assert.ok(String(firstFu.text).includes(copy.greeting_prompt));
-  assert.ok(firstFu.interactive && firstFu.interactive.type === 'list');
+  assert.ok(firstFu.interactive && firstFu.interactive.type === 'button');
 
   h.advance(FOUR_HOURS - 1000);
   result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
