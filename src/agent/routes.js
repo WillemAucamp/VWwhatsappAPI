@@ -12,6 +12,28 @@ function timingSafeEqualStr(a, b) {
   return crypto.timingSafeEqual(left, right);
 }
 
+/**
+ * Normalize a phone for WhatsApp Cloud API (digits only, E.164 without +).
+ * Accepts +27…, 27…, or SA local 0XXXXXXXXX → 27XXXXXXXXX.
+ */
+function normalizeWaNumber(input) {
+  let digits = String(input || '').replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.length === 10 && digits.startsWith('0')) {
+    digits = `27${digits.slice(1)}`;
+  }
+  return digits;
+}
+
+function graphMessageId(result) {
+  return result &&
+    result.messages &&
+    result.messages[0] &&
+    result.messages[0].id
+    ? result.messages[0].id
+    : null;
+}
+
 function createAgentRouter({
   engine,
   sessionStore,
@@ -99,7 +121,7 @@ function createAgentRouter({
 
   router.get('/api/chats/:wa', requireAuth, async (req, res) => {
     try {
-      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      const wa = normalizeWaNumber(req.params.wa);
       const [messages, session] = await Promise.all([
         messageStore.listMessages(wa),
         sessionStore.get(wa),
@@ -123,12 +145,87 @@ function createAgentRouter({
     }
   });
 
+  /**
+   * Start or open a chat by phone number (WhatsApp-style "new chat").
+   * Optional first message: free-form text (24h window) or approved template (cold outreach).
+   */
+  router.post('/api/chats', requireAuth, express.json(), async (req, res) => {
+    try {
+      const body = req.body || {};
+      const wa = normalizeWaNumber(body.waNumber || body.to || body.phone);
+      const text = body.text != null ? String(body.text).trim() : '';
+      const templateName = body.templateName
+        ? String(body.templateName).trim()
+        : body.template
+          ? String(body.template).trim()
+          : '';
+      const templateLanguage = body.templateLanguage || body.language || 'en_US';
+
+      if (!wa || wa.length < 8) {
+        return res.status(400).json({ error: 'valid_wa_number_required' });
+      }
+
+      // Put session under agent control so the bot stays quiet while staff message.
+      if (engine && typeof engine.takeOver === 'function') {
+        await engine.takeOver(wa, { silent: true });
+      }
+
+      let message = null;
+      let graph = null;
+
+      if (templateName || text) {
+        const payload = templateName
+          ? {
+              templateName,
+              templateLanguage,
+              meta: { source: 'agent', stateId: null },
+            }
+          : {
+              text,
+              meta: { source: 'agent', stateId: null },
+            };
+        graph = await sendMessage(wa, payload);
+        const displayText = templateName
+          ? `[template: ${templateName}]`
+          : text;
+        message = {
+          waNumber: wa,
+          direction: 'out',
+          source: 'agent',
+          text: displayText,
+          wamid: graphMessageId(graph),
+          at: new Date().toISOString(),
+        };
+      }
+
+      res.json({
+        ok: true,
+        waNumber: wa,
+        message,
+        graph,
+      });
+    } catch (err) {
+      res.status(502).json({
+        error: err.message || String(err),
+        response: err.response || undefined,
+      });
+    }
+  });
+
   router.post('/api/chats/:wa/reply', requireAuth, async (req, res) => {
     try {
-      const wa = String(req.params.wa || '').replace(/\D/g, '');
-      const text = req.body && req.body.text != null ? String(req.body.text).trim() : '';
-      if (!wa || !text) {
-        return res.status(400).json({ error: 'wa_and_text_required' });
+      const wa = normalizeWaNumber(req.params.wa);
+      const body = req.body || {};
+      const text = body.text != null ? String(body.text).trim() : '';
+      const templateName = body.templateName
+        ? String(body.templateName).trim()
+        : body.template
+          ? String(body.template).trim()
+          : '';
+      const templateLanguage = body.templateLanguage || body.language || 'en_US';
+
+      if (!wa || (!text && !templateName)) {
+        return res.status(400).json({ error: 'wa_and_text_or_template_required' });
       }
 
       // Ensure chat is under agent control so the bot stays quiet.
@@ -136,17 +233,18 @@ function createAgentRouter({
         await engine.takeOver(wa, { silent: true });
       }
 
-      const result = await sendMessage(wa, {
-        text,
-        meta: { source: 'agent', stateId: null },
-      });
-      const wamid =
-        result &&
-        result.messages &&
-        result.messages[0] &&
-        result.messages[0].id
-          ? result.messages[0].id
-          : null;
+      const payload = templateName
+        ? {
+            templateName,
+            templateLanguage,
+            meta: { source: 'agent', stateId: null },
+          }
+        : {
+            text,
+            meta: { source: 'agent', stateId: null },
+          };
+      const result = await sendMessage(wa, payload);
+      const displayText = templateName ? `[template: ${templateName}]` : text;
 
       res.json({
         ok: true,
@@ -154,8 +252,8 @@ function createAgentRouter({
           waNumber: wa,
           direction: 'out',
           source: 'agent',
-          text,
-          wamid,
+          text: displayText,
+          wamid: graphMessageId(result),
           at: new Date().toISOString(),
         },
         graph: result,
@@ -170,7 +268,7 @@ function createAgentRouter({
 
   router.post('/api/chats/:wa/takeover', requireAuth, async (req, res) => {
     try {
-      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      const wa = normalizeWaNumber(req.params.wa);
       const result = await engine.takeOver(wa);
       res.json({ ok: true, ...result });
     } catch (err) {
@@ -180,7 +278,7 @@ function createAgentRouter({
 
   router.post('/api/chats/:wa/release', requireAuth, async (req, res) => {
     try {
-      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      const wa = normalizeWaNumber(req.params.wa);
       const result = await engine.releaseToBot(wa);
       res.json({ ok: true, ...result });
     } catch (err) {
@@ -203,4 +301,4 @@ function parseCookie(header) {
   return out;
 }
 
-module.exports = { createAgentRouter };
+module.exports = { createAgentRouter, normalizeWaNumber };
