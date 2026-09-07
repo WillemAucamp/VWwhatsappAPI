@@ -554,8 +554,16 @@
     }
     el('logoutBtn').addEventListener('click', doLogout);
     el('menuRefresh').addEventListener('click', () => { closeMenus(); loadChats(); });
-    el('menuNewChat').addEventListener('click', () => { closeMenus(); openNewChatModal(); });
-    el('newChatBtn').addEventListener('click', () => openNewChatModal());
+    el('menuNewChat').addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeMenus();
+      openNewChatModal();
+    });
+    el('newChatBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openNewChatModal();
+    });
 
     function normalizeWaNumber(input) {
       let digits = String(input || '').replace(/\D/g, '');
