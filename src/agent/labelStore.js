@@ -35,8 +35,18 @@ function normalizeColor(color, fallback = LABEL_COLORS[0]) {
 function createLabelStore(filePath = config.agent.labelsPath) {
   const file = path.resolve(filePath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  let chain = Promise.resolve();
 
-  async function readAll() {
+  function withLock(fn) {
+    const run = chain.then(fn, fn);
+    chain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  async function readAllUnlocked() {
     if (!fs.existsSync(file)) {
       const seeded = {
         labels: DEFAULT_LABELS.map((l) => ({
@@ -45,7 +55,7 @@ function createLabelStore(filePath = config.agent.labelsPath) {
         })),
         chatLabels: {},
       };
-      await writeAll(seeded);
+      await writeAllUnlocked(seeded);
       return seeded;
     }
     try {
@@ -66,146 +76,162 @@ function createLabelStore(filePath = config.agent.labelsPath) {
     }
   }
 
-  async function writeAll(data) {
-    const tmp = `${file}.${process.pid}.tmp`;
+  async function writeAllUnlocked(data) {
+    const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random()
+      .toString(36)
+      .slice(2, 8)}.tmp`;
     await fs.promises.writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
     await fs.promises.rename(tmp, file);
   }
 
   async function listLabels() {
-    const data = await readAll();
-    return data.labels
-      .slice()
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return withLock(async () => {
+      const data = await readAllUnlocked();
+      return data.labels
+        .slice()
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    });
   }
 
   async function createLabel({ name, color } = {}) {
-    const labelName = normalizeName(name);
-    if (!labelName) {
-      const err = new Error('label_name_required');
-      err.status = 400;
-      throw err;
-    }
-    const data = await readAll();
-    if (
-      data.labels.some(
-        (l) => l.name.toLowerCase() === labelName.toLowerCase()
-      )
-    ) {
-      const err = new Error('label_name_exists');
-      err.status = 409;
-      throw err;
-    }
-    const used = data.labels.length % LABEL_COLORS.length;
-    const row = {
-      id: `lb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-      name: labelName,
-      color: normalizeColor(color, LABEL_COLORS[used]),
-      updatedAt: new Date().toISOString(),
-    };
-    data.labels.push(row);
-    await writeAll(data);
-    return row;
+    return withLock(async () => {
+      const labelName = normalizeName(name);
+      if (!labelName) {
+        const err = new Error('label_name_required');
+        err.status = 400;
+        throw err;
+      }
+      const data = await readAllUnlocked();
+      if (
+        data.labels.some(
+          (l) => l.name.toLowerCase() === labelName.toLowerCase()
+        )
+      ) {
+        const err = new Error('label_name_exists');
+        err.status = 409;
+        throw err;
+      }
+      const used = data.labels.length % LABEL_COLORS.length;
+      const row = {
+        id: `lb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        name: labelName,
+        color: normalizeColor(color, LABEL_COLORS[used]),
+        updatedAt: new Date().toISOString(),
+      };
+      data.labels.push(row);
+      await writeAllUnlocked(data);
+      return row;
+    });
   }
 
   async function updateLabel(id, { name, color } = {}) {
-    const data = await readAll();
-    const idx = data.labels.findIndex((l) => l.id === id);
-    if (idx < 0) {
-      const err = new Error('label_not_found');
-      err.status = 404;
-      throw err;
-    }
-    const current = data.labels[idx];
-    const nextName =
-      name != null && String(name).trim() !== ''
-        ? normalizeName(name)
-        : current.name;
-    if (!nextName) {
-      const err = new Error('label_name_required');
-      err.status = 400;
-      throw err;
-    }
-    if (
-      data.labels.some(
-        (l, i) =>
-          i !== idx && l.name.toLowerCase() === nextName.toLowerCase()
-      )
-    ) {
-      const err = new Error('label_name_exists');
-      err.status = 409;
-      throw err;
-    }
-    const row = {
-      ...current,
-      name: nextName,
-      color:
-        color != null
-          ? normalizeColor(color, current.color)
-          : current.color,
-      updatedAt: new Date().toISOString(),
-    };
-    data.labels[idx] = row;
-    await writeAll(data);
-    return row;
+    return withLock(async () => {
+      const data = await readAllUnlocked();
+      const idx = data.labels.findIndex((l) => l.id === id);
+      if (idx < 0) {
+        const err = new Error('label_not_found');
+        err.status = 404;
+        throw err;
+      }
+      const current = data.labels[idx];
+      const nextName =
+        name != null && String(name).trim() !== ''
+          ? normalizeName(name)
+          : current.name;
+      if (!nextName) {
+        const err = new Error('label_name_required');
+        err.status = 400;
+        throw err;
+      }
+      if (
+        data.labels.some(
+          (l, i) =>
+            i !== idx && l.name.toLowerCase() === nextName.toLowerCase()
+        )
+      ) {
+        const err = new Error('label_name_exists');
+        err.status = 409;
+        throw err;
+      }
+      const row = {
+        ...current,
+        name: nextName,
+        color:
+          color != null
+            ? normalizeColor(color, current.color)
+            : current.color,
+        updatedAt: new Date().toISOString(),
+      };
+      data.labels[idx] = row;
+      await writeAllUnlocked(data);
+      return row;
+    });
   }
 
   async function removeLabel(id) {
-    const data = await readAll();
-    const next = data.labels.filter((l) => l.id !== id);
-    if (next.length === data.labels.length) {
-      const err = new Error('label_not_found');
-      err.status = 404;
-      throw err;
-    }
-    data.labels = next;
-    for (const wa of Object.keys(data.chatLabels)) {
-      data.chatLabels[wa] = (data.chatLabels[wa] || []).filter(
-        (lid) => lid !== id
-      );
-      if (!data.chatLabels[wa].length) delete data.chatLabels[wa];
-    }
-    await writeAll(data);
-    return { ok: true };
+    return withLock(async () => {
+      const data = await readAllUnlocked();
+      const next = data.labels.filter((l) => l.id !== id);
+      if (next.length === data.labels.length) {
+        const err = new Error('label_not_found');
+        err.status = 404;
+        throw err;
+      }
+      data.labels = next;
+      for (const wa of Object.keys(data.chatLabels)) {
+        data.chatLabels[wa] = (data.chatLabels[wa] || []).filter(
+          (lid) => lid !== id
+        );
+        if (!data.chatLabels[wa].length) delete data.chatLabels[wa];
+      }
+      await writeAllUnlocked(data);
+      return { ok: true };
+    });
   }
 
   async function getChatLabelIds(waNumber) {
-    const wa = String(waNumber || '').replace(/\D/g, '');
-    const data = await readAll();
-    const known = new Set(data.labels.map((l) => l.id));
-    return (data.chatLabels[wa] || []).filter((id) => known.has(id));
+    return withLock(async () => {
+      const wa = String(waNumber || '').replace(/\D/g, '');
+      const data = await readAllUnlocked();
+      const known = new Set(data.labels.map((l) => l.id));
+      return (data.chatLabels[wa] || []).filter((id) => known.has(id));
+    });
   }
 
   async function getChatLabelsMap() {
-    const data = await readAll();
-    const known = new Set(data.labels.map((l) => l.id));
-    const out = {};
-    for (const [wa, ids] of Object.entries(data.chatLabels || {})) {
-      const clean = (ids || []).filter((id) => known.has(id));
-      if (clean.length) out[wa] = clean;
-    }
-    return { labels: data.labels, chatLabels: out };
+    return withLock(async () => {
+      const data = await readAllUnlocked();
+      const known = new Set(data.labels.map((l) => l.id));
+      const out = {};
+      for (const [wa, ids] of Object.entries(data.chatLabels || {})) {
+        const clean = (ids || []).filter((id) => known.has(id));
+        if (clean.length) out[wa] = clean;
+      }
+      return { labels: data.labels, chatLabels: out };
+    });
   }
 
   async function setChatLabels(waNumber, labelIds = []) {
-    const wa = String(waNumber || '').replace(/\D/g, '');
-    if (!wa) {
-      const err = new Error('wa_required');
-      err.status = 400;
-      throw err;
-    }
-    const data = await readAll();
-    const known = new Set(data.labels.map((l) => l.id));
-    const unique = [];
-    for (const id of Array.isArray(labelIds) ? labelIds : []) {
-      const lid = String(id || '');
-      if (!lid || !known.has(lid) || unique.includes(lid)) continue;
-      unique.push(lid);
-    }
-    if (unique.length) data.chatLabels[wa] = unique;
-    else delete data.chatLabels[wa];
-    await writeAll(data);
-    return { waNumber: wa, labelIds: unique };
+    return withLock(async () => {
+      const wa = String(waNumber || '').replace(/\D/g, '');
+      if (!wa) {
+        const err = new Error('wa_required');
+        err.status = 400;
+        throw err;
+      }
+      const data = await readAllUnlocked();
+      const known = new Set(data.labels.map((l) => l.id));
+      const unique = [];
+      for (const id of Array.isArray(labelIds) ? labelIds : []) {
+        const lid = String(id || '');
+        if (!lid || !known.has(lid) || unique.includes(lid)) continue;
+        unique.push(lid);
+      }
+      if (unique.length) data.chatLabels[wa] = unique;
+      else delete data.chatLabels[wa];
+      await writeAllUnlocked(data);
+      return { waNumber: wa, labelIds: unique };
+    });
   }
 
   return {
