@@ -28,7 +28,7 @@ const config = {
   whatsapp: {
     token: process.env.WHATSAPP_TOKEN || '',
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
-    wabaId: process.env.WHATSAPP_WABA_ID || '',
+    wabaId: process.env.WHATSAPP_WABA_ID || '1777270766733626',
     // Meta Commerce catalog linked to this WABA (VW Melrose stock).
     catalogId:
       process.env.WHATSAPP_CATALOG_ID || '1067415159340072',

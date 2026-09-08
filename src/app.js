@@ -96,7 +96,7 @@ function createApp(overrides = {}) {
       service: 'vw-whatsapp-prequal',
       build: {
         // Bumped when See our cars must use live Meta catalog product_list.
-        fsm: 'catalog-link-waba-2026-09-08',
+        fsm: 'waba-1777270766733626-2026-09-08',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||
@@ -109,6 +109,7 @@ function createApp(overrides = {}) {
         canVerifyWebhook: meta.canVerifyWebhook,
         webhookSignatureRequired: meta.webhookSignatureRequired,
         webhookUrl: meta.webhookUrl,
+        wabaId: config.whatsapp.wabaId || null,
         catalogId: meta.catalogId,
         copyFilled: `${meta.copy.filled}/${meta.copy.total}`,
         readyToPlugIn: meta.readyToPlugIn,
