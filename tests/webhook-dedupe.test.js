@@ -231,12 +231,12 @@ async function testDuplicateDoesNotDoubleAdvanceInfoState() {
     })
   );
 
-  // Simulate Meta delivering the same "see our cars" twice (retry).
-  // Without dedupe the second delivery would advance past STOCKLIST.
+  // Simulate Meta delivering the same "I saw a special" twice (retry).
+  // Without dedupe the second delivery would advance past SPECIALS_MENU.
   const payload = buildTextWebhook({
     from: wa,
-    text: 'see our cars',
-    id: 'wamid.stock-choice',
+    text: 'i saw a special',
+    id: 'wamid.specials-choice',
   });
 
   const { server, port } = await listen(app);
@@ -249,15 +249,15 @@ async function testDuplicateDoesNotDoubleAdvanceInfoState() {
     session = await store.get(wa);
     assert.strictEqual(
       session.currentState,
-      'STOCKLIST_CAROUSEL',
-      'retry of GREETING "see our cars" must not advance past stocklist'
+      'SPECIALS_MENU',
+      'retry of GREETING "i saw a special" must not advance past specials'
     );
-    assert.deepStrictEqual(session.path, ['GREETING', 'STOCKLIST_CAROUSEL']);
+    assert.deepStrictEqual(session.path, ['GREETING', 'SPECIALS_MENU']);
   } finally {
     server.close();
   }
   // eslint-disable-next-line no-console
-  console.log('✓ duplicate GREETING choice does not skip STOCKLIST_CAROUSEL');
+  console.log('✓ duplicate GREETING choice does not skip SPECIALS_MENU');
 }
 
 async function testFailedHandleInboundReleasesClaimForRetry() {

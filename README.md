@@ -14,7 +14,6 @@ Start here:
 
 ```
 greeting
-  → See our cars → live Meta catalog product list → (message about a car) → employed_income_check
   → Qualify Me → employed_income_check
   → I saw a special → Payment Holiday / Lower Interest Rate / Discount
        → (brief description) → employed_income_check
@@ -26,7 +25,7 @@ credit_check → Good → final_consent | Bad → human_handover
 final_consent → Yes, send it → send_link | Not right now → human_handover
 ```
 
-Greeting uses **3 reply buttons** (WhatsApp max). Opt-Out stays text-matchable.
+Greeting uses **2 reply buttons** for now (See our cars temporarily hidden). Opt-Out stays text-matchable.
 
 ## Run
 
