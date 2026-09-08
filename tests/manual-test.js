@@ -97,14 +97,15 @@ function assertInteractiveMenu(h) {
   assert.ok(interactive.length >= 1, `${h.label}: expected interactive menu`);
   const greet = interactive[0];
   assert.strictEqual(greet.interactive.type, 'button');
-  assert.strictEqual(greet.interactive.buttons.length, 3);
+  // See our cars temporarily hidden from the greeting menu.
+  assert.strictEqual(greet.interactive.buttons.length, 2);
   assert.deepStrictEqual(
     greet.interactive.buttons.map((b) => b.id),
-    ['see_cars', 'qualify_me', 'saw_special']
+    ['qualify_me', 'saw_special']
   );
   assert.deepStrictEqual(
     greet.interactive.buttons.map((b) => b.title),
-    ['See our cars', 'Qualify Me', 'I saw a special']
+    ['Qualify Me', 'I saw a special']
   );
 }
 
@@ -192,34 +193,6 @@ async function testQualifyMeAfterSoftClose() {
   // eslint-disable-next-line no-console
   console.log('✓ Qualify Me after soft_closed → employed+income check');
 }
-
-async function testSeeCarsThenQualify() {
-  const h = createHarness('see_cars');
-  const wa = '27000000002';
-
-  await h.say(wa, 'hello');
-  await h.say(wa, 'see our cars');
-  const stockMsg = h.messages.find(
-    (m) =>
-      m.interactive &&
-      (m.interactive.type === 'catalog_message' ||
-        m.interactive.type === 'product_list' ||
-        m.mediaSlot === 'stock_list')
-  );
-  assert.ok(stockMsg, 'stock catalog/product message present');
-  assert.ok(String(stockMsg.text).includes('Here is our current stock'));
-  await h.say(wa, 'continue');
-  const session = await h.store.get(wa);
-  assert.strictEqual(session.currentState, 'EMPLOYED_INCOME_CHECK');
-  assert.deepStrictEqual(session.path, [
-    'GREETING',
-    'STOCKLIST_CAROUSEL',
-    'EMPLOYED_INCOME_CHECK',
-  ]);
-  // eslint-disable-next-line no-console
-  console.log('✓ See our cars → stocklist → employed+income check');
-}
-
 
 async function testNotReadyEndChat() {
   const h = createHarness('not_ready');
@@ -581,7 +554,6 @@ async function main() {
   await testInteractiveQualifyPath();
   await testQualifyMeWithoutPriorGreetingSession();
   await testQualifyMeAfterSoftClose();
-  await testSeeCarsThenQualify();
   await testNotReadyEndChat();
   await testLicenseNoHandover();
   await testCreditBadHandover();

@@ -8,8 +8,8 @@
  *   options       reply id (option key) → next state
  *   optionLabels  free-text fallback synonyms
  *
- * Greeting shows 3 reply buttons (WhatsApp max). Opt-Out stays text-matchable.
- * Stocklist: live Meta catalog product_list; product inquiry → employment+income check.
+ * Greeting shows Qualify Me + I saw a special (See our cars temporarily hidden).
+ * Opt-Out stays text-matchable. Stocklist state kept for later catalogue work.
  */
 
 /** @type {Record<string, object>} */
@@ -21,34 +21,37 @@ const STATES = {
     // No interactiveHeader — main menu should not show "VW Melrose" above the buttons.
     // WhatsApp allows max 3 reply buttons. Opt-Out stays text-matchable
     // ("opt out" / "unsubscribe") without forcing a list menu.
-    interactiveOptions: ['see_cars', 'qualify_me', 'saw_special'],
+    // See our cars temporarily removed from the menu (catalogue work paused).
+    // Routing + STOCKLIST_CAROUSEL remain so we can re-enable later without a rewrite.
+    interactiveOptions: ['qualify_me', 'saw_special'],
     options: {
-      see_cars: 'STOCKLIST_CAROUSEL',
       qualify_me: 'EMPLOYED_INCOME_CHECK',
       saw_special: 'SPECIALS_MENU',
       promotions: 'SPECIALS_MENU',
+      see_cars: 'STOCKLIST_CAROUSEL',
       opt_out: 'HUMAN_HANDOVER',
     },
     optionTitles: {
-      see_cars: 'See our cars',
       qualify_me: 'Qualify Me',
       saw_special: 'I saw a special',
       promotions: 'I saw a special',
+      see_cars: 'See our cars',
       opt_out: 'Opt-Out',
     },
     optionLabels: {
-      see_cars: ['see our cars', 'cars', 'stock', 'see_cars', '1'],
-      qualify_me: ['qualify me', 'qualify', 'qualify_me', '2'],
+      qualify_me: ['qualify me', 'qualify', 'qualify_me', '1'],
       saw_special: [
         'i saw a special',
         'saw a special',
         'special',
         'specials',
         'saw_special',
-        '3',
+        '2',
       ],
       promotions: ['promotions', 'promo'],
-      opt_out: ['opt-out', 'opt out', 'optout', 'unsubscribe', '4'],
+      // Not shown on the menu; kept for leftover old buttons / later re-enable.
+      see_cars: ['see our cars', 'see cars', 'cars', 'stock', 'see_cars'],
+      opt_out: ['opt-out', 'opt out', 'optout', 'unsubscribe', '3'],
     },
   },
 
