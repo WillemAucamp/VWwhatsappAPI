@@ -9,6 +9,7 @@ const { FsmEngine } = require('./engine/fsmEngine');
 const { createWebhookRouter } = require('./routes/webhook');
 const { sendMessage } = require('./transport/whatsapp');
 const { getMetaReadiness } = require('./meta/readiness');
+const { getCatalogHealth } = require('./catalog/health');
 const webhookDiagnostics = require('./webhook/diagnostics');
 const { createMessageStore } = require('./agent/messageStore');
 const { createShortcutStore } = require('./agent/shortcutStore');
@@ -72,14 +73,30 @@ function createApp(overrides = {}) {
     })
   );
 
-  app.get('/health', (_req, res) => {
+  app.get('/health', async (_req, res) => {
     const meta = getMetaReadiness();
+    let catalog = {
+      ok: false,
+      catalogId: meta.catalogId,
+      productCount: 0,
+      error: 'not_checked',
+    };
+    try {
+      catalog = await getCatalogHealth();
+    } catch (err) {
+      catalog = {
+        ok: false,
+        catalogId: meta.catalogId,
+        productCount: 0,
+        error: err && err.message ? err.message : String(err),
+      };
+    }
     res.json({
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
         // Bumped when See our cars must use live Meta catalog product_list.
-        fsm: 'live-catalog-product-list-2026-09-08',
+        fsm: 'live-catalog-health-probe-2026-09-08',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||
@@ -97,6 +114,7 @@ function createApp(overrides = {}) {
         readyToPlugIn: meta.readyToPlugIn,
         missing: meta.missing,
       },
+      catalog,
       webhook: webhookDiagnostics.snapshot(),
       agentDesk: {
         enabled: Boolean(config.agent.deskEnabled && config.agent.deskPassword),
