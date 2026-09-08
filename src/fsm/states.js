@@ -409,13 +409,14 @@ const STATES = {
 
   CREDIT_BAD_HANDOVER: {
     id: 'CREDIT_BAD_HANDOVER',
-    promptKey: 'human_handover_body',
+    promptKey: 'credit_bad_plan',
     type: 'terminal',
     terminal: true,
     exitReason: 'credit_bad',
     softDecline: false,
     quiet: true,
     notifyAgent: true,
+    agentTakeover: true,
   },
 
   FINAL_CONSENT: {
