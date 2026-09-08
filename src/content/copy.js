@@ -62,16 +62,14 @@ module.exports = {
     'Tap an option below and I’ll explain it, then we’ll do a quick finance check.',
   ].join('\n'),
 
+  // Dead prompts kept so older sessions / health copy counts stay stable.
+  // Qualify Me no longer routes here — see EMPLOYED_INCOME_CHECK.
   employment_check_prompt: [
-    "Cool, let's do this!",
-    '',
-    'Just to make sure we get everything 100% right for you, do you mind if I ask a few quick questions?',
+    'First up: Are you currently employed full-time, and is your monthly income above R9,500?',
   ].join('\n'),
 
   qualify_consent_prompt: [
-    "Cool, let's do this!",
-    '',
-    'Just to make sure we get everything 100% right for you, do you mind if I ask a few quick questions?',
+    'First up: Are you currently employed full-time, and is your monthly income above R9,500?',
   ].join('\n'),
 
   qualify_consent_no_prompt: [

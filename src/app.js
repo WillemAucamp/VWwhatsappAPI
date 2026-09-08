@@ -77,6 +77,16 @@ function createApp(overrides = {}) {
     res.json({
       ok: true,
       service: 'vw-whatsapp-prequal',
+      build: {
+        // Bumped when Qualify Me must skip the consent Quick check.
+        fsm: 'no-consent-quickcheck-2026-09-08',
+        copyKeys: meta.copy.total,
+        commit:
+          process.env.RENDER_GIT_COMMIT ||
+          process.env.GIT_COMMIT ||
+          process.env.COMMIT_SHA ||
+          null,
+      },
       meta: {
         canSend: meta.canSend,
         canVerifyWebhook: meta.canVerifyWebhook,
