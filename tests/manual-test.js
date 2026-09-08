@@ -199,8 +199,14 @@ async function testSeeCarsThenQualify() {
 
   await h.say(wa, 'hello');
   await h.say(wa, 'see our cars');
-  const stockMsg = h.messages.find((m) => m.mediaSlot === 'stock_list');
-  assert.ok(stockMsg, 'stock mediaSlot present');
+  const stockMsg = h.messages.find(
+    (m) =>
+      m.interactive &&
+      (m.interactive.type === 'catalog_message' ||
+        m.interactive.type === 'product_list' ||
+        m.mediaSlot === 'stock_list')
+  );
+  assert.ok(stockMsg, 'stock catalog/product message present');
   assert.ok(String(stockMsg.text).includes('Here is our current stock'));
   await h.say(wa, 'continue');
   const session = await h.store.get(wa);

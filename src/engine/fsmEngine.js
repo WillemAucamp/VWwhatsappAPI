@@ -11,6 +11,7 @@ const {
 const {
   listProductsForProductList,
   buildProductListInteractive,
+  buildCatalogMessageInteractive,
 } = require('../catalog/products');
 const { buildRecord } = require('../logger/leadLogger');
 const transport = require('../transport/whatsapp');
@@ -371,19 +372,24 @@ class FsmEngine {
       extras.stockLink = appLink;
     }
 
-    // Live Meta catalog product_list for "See our cars".
+    // Live Meta catalog for "See our cars":
+    // 1) product_list when token can read catalog products
+    // 2) catalog_message (View catalog) when linked catalog works without product-read
+    // 3) stock link button as last resort
     if (state && state.catalogProductList && config.whatsapp.catalogId) {
+      const body = buildOutboundText(promptKey, {
+        includeFooter: true,
+        stubMarker: this.stubMarker,
+        extras,
+      });
+      const parts = [body, extraText].filter(Boolean);
+      const text = parts.join('\n\n');
+
       try {
         const products = await listProductsForProductList({
           catalogId: config.whatsapp.catalogId,
         });
         if (products.length) {
-          const body = buildOutboundText(promptKey, {
-            includeFooter: true,
-            stubMarker: this.stubMarker,
-            extras,
-          });
-          const parts = [body, extraText].filter(Boolean);
           const interactive = buildProductListInteractive({
             catalogId: config.whatsapp.catalogId,
             products,
@@ -392,7 +398,7 @@ class FsmEngine {
           });
           try {
             return await this.sendMessage(waNumber, {
-              text: parts.join('\n\n'),
+              text,
               type: 'interactive',
               interactive,
               meta: {
@@ -400,12 +406,13 @@ class FsmEngine {
                 promptKey,
                 catalogId: config.whatsapp.catalogId,
                 productCount: products.length,
+                catalogMode: 'product_list',
               },
             });
           } catch (sendErr) {
             // eslint-disable-next-line no-console
             console.error(
-              '[fsm] product_list send failed; falling back to stock link',
+              '[fsm] product_list send failed; trying catalog_message',
               {
                 catalogId: config.whatsapp.catalogId,
                 productCount: products.length,
@@ -418,18 +425,48 @@ class FsmEngine {
         } else {
           // eslint-disable-next-line no-console
           console.warn(
-            '[fsm] catalog returned no sellable products; falling back to stock link',
+            '[fsm] catalog product read empty; trying catalog_message',
             { catalogId: config.whatsapp.catalogId }
           );
         }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error(
-          '[fsm] catalog product_list failed; falling back to stock link',
+          '[fsm] catalog product read failed; trying catalog_message',
           {
             catalogId: config.whatsapp.catalogId,
             message: err && err.message ? err.message : String(err),
             response: err && err.response ? err.response : undefined,
+          }
+        );
+      }
+
+      try {
+        return await this.sendMessage(waNumber, {
+          text,
+          type: 'interactive',
+          interactive: buildCatalogMessageInteractive(),
+          meta: {
+            stateId: state.id,
+            promptKey,
+            catalogId: config.whatsapp.catalogId,
+            catalogMode: 'catalog_message',
+          },
+        });
+      } catch (catalogMsgErr) {
+        // eslint-disable-next-line no-console
+        console.error(
+          '[fsm] catalog_message send failed; falling back to stock link',
+          {
+            catalogId: config.whatsapp.catalogId,
+            message:
+              catalogMsgErr && catalogMsgErr.message
+                ? catalogMsgErr.message
+                : String(catalogMsgErr),
+            response:
+              catalogMsgErr && catalogMsgErr.response
+                ? catalogMsgErr.response
+                : undefined,
           }
         );
       }

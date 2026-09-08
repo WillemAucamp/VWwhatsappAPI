@@ -109,9 +109,23 @@ function buildProductListInteractive({
   };
 }
 
+/**
+ * Interactive that opens the WABA-linked catalog inside WhatsApp.
+ * Does not require Catalog API product-read permission on the token.
+ * @param {{thumbnailProductRetailerId?: string, footer?: string}} [opts]
+ */
+function buildCatalogMessageInteractive(opts = {}) {
+  return {
+    type: 'catalog_message',
+    thumbnailProductRetailerId: opts.thumbnailProductRetailerId || undefined,
+    footer: opts.footer ? String(opts.footer).slice(0, 60) : undefined,
+  };
+}
+
 module.exports = {
   PRODUCT_LIST_MAX,
   isSellableProduct,
   listProductsForProductList,
   buildProductListInteractive,
+  buildCatalogMessageInteractive,
 };

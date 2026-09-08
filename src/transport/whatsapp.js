@@ -185,6 +185,29 @@ function buildInteractiveGraph(interactive, bodyText) {
     return payload;
   }
 
+  // Opens the WABA-linked Meta catalog inside WhatsApp (View catalog).
+  if (interactive.type === 'catalog_message') {
+    const payload = {
+      type: 'catalog_message',
+      body: { text: bodyText || ' ' },
+      action: {
+        name: 'catalog_message',
+      },
+    };
+    const thumb =
+      interactive.thumbnailProductRetailerId ||
+      interactive.thumbnail_product_retailer_id;
+    if (thumb) {
+      payload.action.parameters = {
+        thumbnail_product_retailer_id: String(thumb),
+      };
+    }
+    if (interactive.footer) {
+      payload.footer = { text: String(interactive.footer).slice(0, 60) };
+    }
+    return payload;
+  }
+
   const err = new Error(`Unsupported interactive type: ${interactive.type}`);
   err.code = 'WHATSAPP_INTERACTIVE_INVALID';
   throw err;

@@ -246,7 +246,85 @@ async function testSeeCarsSendsProductListAndSelectionAdvances() {
   }
 }
 
-async function testEmptyCatalogFallsBackToButton() {
+async function testCatalogMessageFallbackWhenProductReadDenied() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vw-catalog-msg-'));
+  const snap = { ...config.whatsapp };
+  config.whatsapp.token = 'test-token';
+  config.whatsapp.phoneNumberId = '123456';
+  config.whatsapp.catalogId = '1067415159340072';
+
+  const sent = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes('/products')) {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: {
+            message:
+              '(#100) This application has not been approved to use this api.',
+            code: 100,
+          },
+        }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ messages: [{ id: 'wamid.test' }] }),
+    };
+  };
+
+  try {
+    const store = new FileSessionStore(dir);
+    const engine = new FsmEngine({
+      sessionStore: store,
+      leadLogger: createLeadLogger('console'),
+      sendMessage: async (to, payload) => {
+        sent.push({ to, payload });
+        return { messages: [{ id: `wamid.${sent.length}` }] };
+      },
+    });
+
+    await engine.handleInbound('27829990003', 'hi');
+    await engine.handleInbound('27829990003', 'see_cars', {
+      replyId: 'see_cars',
+    });
+
+    const stockSend = sent[sent.length - 1];
+    assert.ok(stockSend.payload.interactive);
+    assert.strictEqual(stockSend.payload.interactive.type, 'catalog_message');
+    assert.strictEqual(
+      stockSend.payload.meta.catalogMode,
+      'catalog_message'
+    );
+    // eslint-disable-next-line no-console
+    console.log('✓ catalog read denied → catalog_message View catalog');
+  } finally {
+    global.fetch = originalFetch;
+    restoreWhatsapp(snap);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function testCatalogMessageGraphBody() {
+  await withFakeFetch(async (calls) => {
+    await cloudApiSendMessage('27821234567', {
+      text: 'Here is our current stock.',
+      interactive: { type: 'catalog_message' },
+    });
+    const body = calls[0].body;
+    assert.strictEqual(body.type, 'interactive');
+    assert.strictEqual(body.interactive.type, 'catalog_message');
+    assert.strictEqual(body.interactive.action.name, 'catalog_message');
+    assert.strictEqual(body.interactive.body.text, 'Here is our current stock.');
+    // eslint-disable-next-line no-console
+    console.log('✓ catalog_message Graph body');
+  });
+}
+
+async function testEmptyCatalogUsesCatalogMessage() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vw-catalog-empty-'));
   const snap = { ...config.whatsapp };
   const linksSnap = { ...config.links };
@@ -290,13 +368,9 @@ async function testEmptyCatalogFallsBackToButton() {
 
     const stockSend = sent[sent.length - 1];
     assert.ok(stockSend.payload.interactive);
-    assert.strictEqual(stockSend.payload.interactive.type, 'button');
-    assert.ok(
-      String(stockSend.payload.text || '').includes('https://example.com/stock') ||
-        stockSend.payload.link === 'https://example.com/stock'
-    );
+    assert.strictEqual(stockSend.payload.interactive.type, 'catalog_message');
     // eslint-disable-next-line no-console
-    console.log('✓ empty catalog falls back to stock link + button');
+    console.log('✓ empty product read still sends catalog_message');
   } finally {
     global.fetch = originalFetch;
     restoreWhatsapp(snap);
@@ -307,12 +381,14 @@ async function testEmptyCatalogFallsBackToButton() {
 
 async function main() {
   await testProductListGraphBody();
+  await testCatalogMessageGraphBody();
   testBuildProductListInteractive();
   testExtractProductInquiry();
   testExtractOrder();
   await testListProductsForProductList();
   await testSeeCarsSendsProductListAndSelectionAdvances();
-  await testEmptyCatalogFallsBackToButton();
+  await testCatalogMessageFallbackWhenProductReadDenied();
+  await testEmptyCatalogUsesCatalogMessage();
   // eslint-disable-next-line no-console
   console.log('\ncatalog product list tests passed.');
 }
