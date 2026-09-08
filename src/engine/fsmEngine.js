@@ -69,6 +69,19 @@ function resolveOptionKey(state, normalized, replyId) {
   return matchOption(state, normalized);
 }
 
+/**
+ * If the inbound matches a main-menu (GREETING) option — e.g. customer tapped
+ * Qualify Me on an older greeting after a redeploy wiped the session — return
+ * the destination state id. Otherwise null.
+ */
+function resolveGreetingDestination(normalized, replyId) {
+  const greeting = STATES[ENTRY_STATE];
+  if (!greeting) return null;
+  const optionKey = resolveOptionKey(greeting, normalized, replyId);
+  if (!optionKey) return null;
+  return greeting.options[optionKey] || null;
+}
+
 function linkForState(state) {
   if (!state || !state.sendLink) return undefined;
   if (state.sendLink === 'application') return config.links.applicationLink || undefined;
@@ -600,6 +613,19 @@ class FsmEngine {
     });
     const footer = resolveCopy('help_footer', { stubMarker: this.stubMarker });
 
+    this._resetSessionForFreshStart(session);
+
+    if (notice || footer) {
+      await this.sendMessage(session.waNumber, {
+        text: [notice, footer].filter(Boolean).join('\n\n'),
+        meta: { stateId: null, promptKey: 'session_restart_notice' },
+      });
+    }
+
+    return this._enterState(session, ENTRY_STATE);
+  }
+
+  _resetSessionForFreshStart(session) {
     session.currentState = null;
     session.path = [];
     session.invalidAttempts = 0;
@@ -611,14 +637,19 @@ class FsmEngine {
     session.lastLoggedLeadKey = null;
     session.agentTakenOver = false;
     this._clearFollowUp(session);
+  }
 
-    if (notice || footer) {
-      await this.sendMessage(session.waNumber, {
-        text: [notice, footer].filter(Boolean).join('\n\n'),
-        meta: { stateId: null, promptKey: 'session_restart_notice' },
-      });
+  /**
+   * Start from a wiped/soft-closed session. Honour main-menu button taps
+   * (Qualify Me, See our cars, Opt-Out) so they don't bounce back to GREETING.
+   */
+  async _beginFromMainMenuIntent(session, normalized, replyId) {
+    this._resetSessionForFreshStart(session);
+    const destination = resolveGreetingDestination(normalized, replyId);
+    if (destination) {
+      session.path = [ENTRY_STATE];
+      return this._enterState(session, destination);
     }
-
     return this._enterState(session, ENTRY_STATE);
   }
 
@@ -711,6 +742,11 @@ class FsmEngine {
       if (session.pendingTerminalOutbound) {
         return this._retryTerminalOutbound(session);
       }
+      // Honour Qualify Me / See our cars / Opt-Out taps instead of only
+      // re-showing the main menu (common after Render session wipe).
+      if (resolveGreetingDestination(normalized, replyId)) {
+        return this._beginFromMainMenuIntent(session, normalized, replyId);
+      }
       return this._restart(session);
     }
 
@@ -721,8 +757,7 @@ class FsmEngine {
         return this._routeToHuman(session, null);
       }
 
-      session.status = 'active';
-      return this._enterState(session, ENTRY_STATE);
+      return this._beginFromMainMenuIntent(session, normalized, replyId);
     }
 
     if (matchesKeywordList(normalized, config.fsm.helpIntentKeywords)) {
@@ -731,7 +766,7 @@ class FsmEngine {
 
     const state = STATES[session.currentState];
     if (!state) {
-      return this._enterState(session, ENTRY_STATE);
+      return this._beginFromMainMenuIntent(session, normalized, replyId);
     }
 
     if (state.terminal) {
@@ -744,6 +779,9 @@ class FsmEngine {
         return { session, quiet: true };
       }
       session.status = 'soft_closed';
+      if (resolveGreetingDestination(normalized, replyId)) {
+        return this._beginFromMainMenuIntent(session, normalized, replyId);
+      }
       return this._restart(session);
     }
 
@@ -776,4 +814,5 @@ module.exports = {
   matchesKeywordList,
   matchOption,
   resolveOptionKey,
+  resolveGreetingDestination,
 };
