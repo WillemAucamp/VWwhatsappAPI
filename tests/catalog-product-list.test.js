@@ -171,6 +171,12 @@ async function testSeeCarsSendsProductListAndSelectionAdvances() {
 
   const sent = [];
   const originalFetch = global.fetch;
+  const transport = require('../src/transport/whatsapp');
+  const originalEnsure = transport.ensureCatalogVisible;
+  transport.ensureCatalogVisible = async () => ({
+    is_catalog_visible: true,
+    is_cart_enabled: false,
+  });
   global.fetch = async (url) => {
     const u = String(url);
     if (u.includes('/products')) {
@@ -202,6 +208,16 @@ async function testSeeCarsSendsProductListAndSelectionAdvances() {
       sessionStore: store,
       leadLogger: createLeadLogger('console'),
       sendMessage: async (to, payload) => {
+        // Force catalog_message to fail once so product_list path is exercised.
+        if (
+          payload &&
+          payload.interactive &&
+          payload.interactive.type === 'catalog_message'
+        ) {
+          const err = new Error('simulated catalog_message failure');
+          err.response = { error: { message: 'catalog_message blocked', code: 100 } };
+          throw err;
+        }
         sent.push({ to, payload });
         return { messages: [{ id: `wamid.${sent.length}` }] };
       },
@@ -218,7 +234,7 @@ async function testSeeCarsSendsProductListAndSelectionAdvances() {
         s.payload.interactive &&
         s.payload.interactive.type === 'product_list'
     );
-    assert.ok(stockSend, 'expected product_list after See our cars');
+    assert.ok(stockSend, 'expected product_list after catalog_message failed');
     assert.strictEqual(
       stockSend.payload.interactive.catalogId,
       '1067415159340072'
@@ -238,9 +254,10 @@ async function testSeeCarsSendsProductListAndSelectionAdvances() {
     assert.strictEqual(session.selectedProductRetailerId, 'polo-2022');
     assert.strictEqual(session.selectedCatalogId, '1067415159340072');
     // eslint-disable-next-line no-console
-    console.log('✓ See our cars → product_list → product pick → qualify');
+    console.log('✓ product_list fallback → product pick → qualify');
   } finally {
     global.fetch = originalFetch;
+    transport.ensureCatalogVisible = originalEnsure;
     restoreWhatsapp(snap);
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -255,6 +272,12 @@ async function testCatalogMessageFallbackWhenProductReadDenied() {
 
   const sent = [];
   const originalFetch = global.fetch;
+  const transport = require('../src/transport/whatsapp');
+  const originalEnsure = transport.ensureCatalogVisible;
+  transport.ensureCatalogVisible = async () => ({
+    is_catalog_visible: true,
+    is_cart_enabled: false,
+  });
   global.fetch = async (url) => {
     if (String(url).includes('/products')) {
       return {
@@ -300,9 +323,10 @@ async function testCatalogMessageFallbackWhenProductReadDenied() {
       'catalog_message'
     );
     // eslint-disable-next-line no-console
-    console.log('✓ catalog read denied → catalog_message View catalog');
+    console.log('✓ See our cars prefers catalog_message View catalog');
   } finally {
     global.fetch = originalFetch;
+    transport.ensureCatalogVisible = originalEnsure;
     restoreWhatsapp(snap);
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -335,6 +359,12 @@ async function testEmptyCatalogUsesCatalogMessage() {
 
   const sent = [];
   const originalFetch = global.fetch;
+  const transport = require('../src/transport/whatsapp');
+  const originalEnsure = transport.ensureCatalogVisible;
+  transport.ensureCatalogVisible = async () => ({
+    is_catalog_visible: true,
+    is_cart_enabled: false,
+  });
   global.fetch = async (url) => {
     if (String(url).includes('/products')) {
       return {
@@ -373,6 +403,7 @@ async function testEmptyCatalogUsesCatalogMessage() {
     console.log('✓ empty product read still sends catalog_message');
   } finally {
     global.fetch = originalFetch;
+    transport.ensureCatalogVisible = originalEnsure;
     restoreWhatsapp(snap);
     Object.assign(config.links, linksSnap);
     fs.rmSync(dir, { recursive: true, force: true });

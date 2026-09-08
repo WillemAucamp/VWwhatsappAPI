@@ -40,6 +40,30 @@ const server = app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(formatReadinessReport(getMetaReadiness()));
   followUpScheduler.start();
+
+  // Show linked Meta catalog on this WhatsApp number (View catalog / storefront).
+  if (config.whatsapp.token && config.whatsapp.phoneNumberId) {
+    const { ensureCatalogVisible } = require('./transport/whatsapp');
+    ensureCatalogVisible()
+      .then((settings) => {
+        // eslint-disable-next-line no-console
+        console.log(
+          '[wa-prequal] commerce settings:',
+          JSON.stringify({
+            is_catalog_visible: settings.is_catalog_visible,
+            is_cart_enabled: settings.is_cart_enabled,
+          })
+        );
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error(
+          '[wa-prequal] ensureCatalogVisible FAILED — See our cars may fall back until catalog is visible on this number:',
+          err.message,
+          err.response ? JSON.stringify(err.response) : ''
+        );
+      });
+  }
 });
 
 function shutdown(signal) {

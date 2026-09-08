@@ -306,12 +306,79 @@ async function graphGet(path, fields) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(`WhatsApp Graph GET failed: ${res.status}`);
+    const graph = (data && data.error) || {};
+    const detail = graph.message ? ` (${graph.message})` : '';
+    const err = new Error(`WhatsApp Graph GET failed: ${res.status}${detail}`);
     err.status = res.status;
+    err.code = graph.code != null ? graph.code : null;
     err.response = data;
     throw err;
   }
   return data;
+}
+
+/**
+ * Low-level Graph POST to an arbitrary path (not only /messages).
+ * @param {string} path e.g. "{phoneNumberId}/whatsapp_commerce_settings"
+ * @param {object|null} body JSON body (null → query-only POST)
+ * @param {Record<string,string|boolean|number>} [query]
+ */
+async function graphPostPath(path, body = null, query = {}) {
+  const { token } = requireCredentials();
+  const { graphBaseUrl, apiVersion } = config.whatsapp;
+  const url = new URL(`${graphBaseUrl}/${apiVersion}/${path}`);
+  for (const [key, value] of Object.entries(query || {})) {
+    if (value == null) continue;
+    url.searchParams.set(key, String(value));
+  }
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body != null ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const graph = (data && data.error) || {};
+    const detail = graph.message ? ` (${graph.message})` : '';
+    const err = new Error(`WhatsApp Graph POST failed: ${res.status}${detail}`);
+    err.status = res.status;
+    err.code = graph.code != null ? graph.code : null;
+    err.response = data;
+    throw err;
+  }
+  return data;
+}
+
+/**
+ * Read catalog/cart visibility for this business phone number.
+ */
+async function getCommerceSettings() {
+  const { phoneNumberId } = requireCredentials();
+  const data = await graphGet(`${phoneNumberId}/whatsapp_commerce_settings`);
+  const row =
+    data && Array.isArray(data.data) && data.data.length ? data.data[0] : data;
+  return {
+    is_catalog_visible: Boolean(row && row.is_catalog_visible),
+    is_cart_enabled: row && row.is_cart_enabled != null ? Boolean(row.is_cart_enabled) : null,
+    id: row && row.id != null ? String(row.id) : null,
+    raw: data,
+  };
+}
+
+/**
+ * Show the linked catalog on this WhatsApp number (required for View catalog).
+ * Cart stays off for Melrose — stock browse, not checkout.
+ */
+async function ensureCatalogVisible() {
+  const { phoneNumberId } = requireCredentials();
+  await graphPostPath(`${phoneNumberId}/whatsapp_commerce_settings`, null, {
+    is_catalog_visible: true,
+    is_cart_enabled: false,
+  });
+  return getCommerceSettings();
 }
 
 let activeSender = cloudApiSendMessage;
@@ -364,5 +431,8 @@ module.exports = {
   cloudApiSendInteractive,
   buildInteractiveGraph,
   graphGet,
+  graphPostPath,
+  getCommerceSettings,
+  ensureCatalogVisible,
   notifyAgent,
 };

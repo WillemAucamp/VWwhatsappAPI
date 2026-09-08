@@ -1,7 +1,13 @@
 'use strict';
 
 const config = require('../config');
-const { listProductsForProductList } = require('./products');
+const {
+  listProductsForProductList,
+} = require('./products');
+const {
+  getCommerceSettings,
+  ensureCatalogVisible,
+} = require('../transport/whatsapp');
 
 const CACHE_MS = 60 * 1000;
 let cache = null;
@@ -23,6 +29,7 @@ async function getCatalogHealth(options = {}) {
       ok: false,
       catalogId: null,
       productCount: 0,
+      commerce: null,
       error: 'WHATSAPP_CATALOG_ID unset',
     };
     cache = { at: now, value };
@@ -34,10 +41,23 @@ async function getCatalogHealth(options = {}) {
       ok: false,
       catalogId,
       productCount: 0,
+      commerce: null,
       error: 'WhatsApp credentials missing',
     };
     cache = { at: now, value };
     return { ...value, cached: false };
+  }
+
+  let commerce = null;
+  let commerceError = null;
+  try {
+    if (options.ensureVisible) {
+      commerce = await ensureCatalogVisible();
+    } else {
+      commerce = await getCommerceSettings();
+    }
+  } catch (err) {
+    commerceError = err && err.message ? String(err.message) : String(err);
   }
 
   try {
@@ -50,7 +70,13 @@ async function getCatalogHealth(options = {}) {
         retailer_id: p.retailer_id,
         name: p.name || null,
       })),
+      commerce,
+      commerceError,
       error: null,
+      // Catalog browse can work via catalog_message even when product read fails.
+      canBrowseViaCatalogMessage: Boolean(
+        commerce && commerce.is_catalog_visible
+      ),
     };
     cache = { at: now, value };
     return { ...value, cached: false };
@@ -62,9 +88,14 @@ async function getCatalogHealth(options = {}) {
       catalogId,
       productCount: 0,
       sample: [],
+      commerce,
+      commerceError,
       error: err && err.message ? String(err.message) : String(err),
       graphCode: graph && graph.code != null ? graph.code : null,
       graphMessage: graph && graph.message ? String(graph.message) : null,
+      canBrowseViaCatalogMessage: Boolean(
+        commerce && commerce.is_catalog_visible
+      ),
     };
     cache = { at: now, value };
     return { ...value, cached: false };

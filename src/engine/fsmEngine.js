@@ -15,6 +15,7 @@ const {
 } = require('../catalog/products');
 const { buildRecord } = require('../logger/leadLogger');
 const transport = require('../transport/whatsapp');
+const diagnostics = require('../webhook/diagnostics');
 
 function normalizeInput(text) {
   return String(text || '')
@@ -373,9 +374,9 @@ class FsmEngine {
     }
 
     // Live Meta catalog for "See our cars":
-    // 1) product_list when token can read catalog products
-    // 2) catalog_message (View catalog) when linked catalog works without product-read
-    // 3) stock link button as last resort
+    // Prefer catalog_message (View catalog) — works with a linked WABA catalog
+    // even when the token cannot read Commerce Manager products.
+    // Then product_list if product-read works. Stock-link button last.
     if (state && state.catalogProductList && config.whatsapp.catalogId) {
       const body = buildOutboundText(promptKey, {
         includeFooter: true,
@@ -384,6 +385,45 @@ class FsmEngine {
       });
       const parts = [body, extraText].filter(Boolean);
       const text = parts.join('\n\n');
+
+      try {
+        await transport.ensureCatalogVisible();
+      } catch (visErr) {
+        diagnostics.recordCatalogError(visErr, 'ensure_catalog_visible');
+        // eslint-disable-next-line no-console
+        console.error('[fsm] ensureCatalogVisible failed', {
+          message: visErr && visErr.message ? visErr.message : String(visErr),
+          response: visErr && visErr.response ? visErr.response : undefined,
+        });
+      }
+
+      try {
+        return await this.sendMessage(waNumber, {
+          text,
+          type: 'interactive',
+          interactive: buildCatalogMessageInteractive(),
+          meta: {
+            stateId: state.id,
+            promptKey,
+            catalogId: config.whatsapp.catalogId,
+            catalogMode: 'catalog_message',
+          },
+        });
+      } catch (catalogMsgErr) {
+        diagnostics.recordCatalogError(catalogMsgErr, 'catalog_message');
+        // eslint-disable-next-line no-console
+        console.error('[fsm] catalog_message send failed; trying product_list', {
+          catalogId: config.whatsapp.catalogId,
+          message:
+            catalogMsgErr && catalogMsgErr.message
+              ? catalogMsgErr.message
+              : String(catalogMsgErr),
+          response:
+            catalogMsgErr && catalogMsgErr.response
+              ? catalogMsgErr.response
+              : undefined,
+        });
+      }
 
       try {
         const products = await listProductsForProductList({
@@ -410,9 +450,10 @@ class FsmEngine {
               },
             });
           } catch (sendErr) {
+            diagnostics.recordCatalogError(sendErr, 'product_list');
             // eslint-disable-next-line no-console
             console.error(
-              '[fsm] product_list send failed; trying catalog_message',
+              '[fsm] product_list send failed; falling back to stock link',
               {
                 catalogId: config.whatsapp.catalogId,
                 productCount: products.length,
@@ -424,49 +465,19 @@ class FsmEngine {
           }
         } else {
           // eslint-disable-next-line no-console
-          console.warn(
-            '[fsm] catalog product read empty; trying catalog_message',
-            { catalogId: config.whatsapp.catalogId }
-          );
+          console.warn('[fsm] catalog product read empty; falling back to stock link', {
+            catalogId: config.whatsapp.catalogId,
+          });
         }
       } catch (err) {
+        diagnostics.recordCatalogError(err, 'product_read');
         // eslint-disable-next-line no-console
         console.error(
-          '[fsm] catalog product read failed; trying catalog_message',
+          '[fsm] catalog product read failed; falling back to stock link',
           {
             catalogId: config.whatsapp.catalogId,
             message: err && err.message ? err.message : String(err),
             response: err && err.response ? err.response : undefined,
-          }
-        );
-      }
-
-      try {
-        return await this.sendMessage(waNumber, {
-          text,
-          type: 'interactive',
-          interactive: buildCatalogMessageInteractive(),
-          meta: {
-            stateId: state.id,
-            promptKey,
-            catalogId: config.whatsapp.catalogId,
-            catalogMode: 'catalog_message',
-          },
-        });
-      } catch (catalogMsgErr) {
-        // eslint-disable-next-line no-console
-        console.error(
-          '[fsm] catalog_message send failed; falling back to stock link',
-          {
-            catalogId: config.whatsapp.catalogId,
-            message:
-              catalogMsgErr && catalogMsgErr.message
-                ? catalogMsgErr.message
-                : String(catalogMsgErr),
-            response:
-              catalogMsgErr && catalogMsgErr.response
-                ? catalogMsgErr.response
-                : undefined,
           }
         );
       }

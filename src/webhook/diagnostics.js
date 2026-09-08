@@ -20,6 +20,8 @@ const stats = {
   lastInboundType: null,
   lastError: null,
   lastSendError: null,
+  lastCatalogError: null,
+  lastCatalogMode: null,
 };
 
 function touchPost() {
@@ -71,6 +73,14 @@ function recordSendError(err) {
   stats.lastError = stats.lastSendError;
 }
 
+function recordCatalogError(err, mode) {
+  const msg = err && err.message ? String(err.message) : String(err);
+  const responseDetail =
+    err && err.response ? ` ${JSON.stringify(err.response).slice(0, 220)}` : '';
+  stats.lastCatalogError = `${msg}${responseDetail}`.slice(0, 500);
+  stats.lastCatalogMode = mode || null;
+}
+
 function snapshot() {
   return { ...stats };
 }
@@ -84,5 +94,6 @@ module.exports = {
   recordHandled,
   recordHandleError,
   recordSendError,
+  recordCatalogError,
   snapshot,
 };
