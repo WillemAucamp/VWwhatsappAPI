@@ -8,7 +8,7 @@
  *   options       reply id (option key) → next state
  *   optionLabels  free-text fallback synonyms
  *
- * Greeting shows 3 reply buttons (WhatsApp max). Promotions stays text-matchable.
+ * Greeting shows 3 reply buttons (WhatsApp max). Opt-Out stays text-matchable.
  * Stocklist: any selection → employment_check (dynamic car_id list TBD).
  */
 
@@ -19,25 +19,35 @@ const STATES = {
     promptKey: 'greeting_prompt',
     type: 'choice',
     interactiveHeader: 'VW Melrose',
-    // WhatsApp allows max 3 reply buttons. Promotions stays text-matchable
-    // ("promotions" / "specials") without forcing a clunky list menu.
-    interactiveOptions: ['see_cars', 'qualify_me', 'opt_out'],
+    // WhatsApp allows max 3 reply buttons. Opt-Out stays text-matchable
+    // ("opt out" / "unsubscribe") without forcing a list menu.
+    interactiveOptions: ['see_cars', 'qualify_me', 'saw_special'],
     options: {
       see_cars: 'STOCKLIST_CAROUSEL',
       qualify_me: 'EMPLOYMENT_CHECK',
-      promotions: 'PROMOTIONS',
+      saw_special: 'SPECIALS_MENU',
+      promotions: 'SPECIALS_MENU',
       opt_out: 'HUMAN_HANDOVER',
     },
     optionTitles: {
       see_cars: 'See our cars',
       qualify_me: 'Qualify Me',
-      promotions: 'Promotions',
+      saw_special: 'I saw a special',
+      promotions: 'I saw a special',
       opt_out: 'Opt-Out',
     },
     optionLabels: {
       see_cars: ['see our cars', 'cars', 'stock', 'see_cars', '1'],
       qualify_me: ['qualify me', 'qualify', 'qualify_me', '2'],
-      promotions: ['promotions', 'specials', 'promo', '3'],
+      saw_special: [
+        'i saw a special',
+        'saw a special',
+        'special',
+        'specials',
+        'saw_special',
+        '3',
+      ],
+      promotions: ['promotions', 'promo'],
       opt_out: ['opt-out', 'opt out', 'optout', 'unsubscribe', '4'],
     },
   },
@@ -70,20 +80,107 @@ const STATES = {
     },
   },
 
+  SPECIALS_MENU: {
+    id: 'SPECIALS_MENU',
+    promptKey: 'specials_menu_prompt',
+    type: 'choice',
+    interactiveHeader: 'Specials',
+    interactiveOptions: ['payment_holiday', 'lower_rate', 'discount'],
+    options: {
+      payment_holiday: 'PAYMENT_HOLIDAY_INFO',
+      lower_rate: 'LOWER_RATE_INFO',
+      discount: 'DISCOUNT_INFO',
+    },
+    optionTitles: {
+      payment_holiday: 'Payment Holiday',
+      lower_rate: 'Lower Interest Rate',
+      discount: 'Discount',
+    },
+    optionLabels: {
+      payment_holiday: [
+        'payment holiday',
+        'holiday',
+        'payment_holiday',
+        '1',
+      ],
+      lower_rate: [
+        'lower interest rate',
+        'lower rate',
+        'interest',
+        'lower_rate',
+        '2',
+      ],
+      discount: [
+        'discount',
+        'deposit',
+        'deposit assistance',
+        '3',
+      ],
+    },
+  },
+
+  // Kept as an alias id for older sessions still pointing at PROMOTIONS.
   PROMOTIONS: {
     id: 'PROMOTIONS',
-    promptKey: 'promotions_body',
+    promptKey: 'specials_menu_prompt',
     type: 'choice',
-    interactiveHeader: 'VW Melrose',
+    interactiveHeader: 'Specials',
+    interactiveOptions: ['payment_holiday', 'lower_rate', 'discount'],
     options: {
+      payment_holiday: 'PAYMENT_HOLIDAY_INFO',
+      lower_rate: 'LOWER_RATE_INFO',
+      discount: 'DISCOUNT_INFO',
       back: 'GREETING',
     },
     optionTitles: {
+      payment_holiday: 'Payment Holiday',
+      lower_rate: 'Lower Interest Rate',
+      discount: 'Discount',
       back: 'Main menu',
     },
     optionLabels: {
-      back: ['back', 'main menu', 'menu', '1'],
+      payment_holiday: [
+        'payment holiday',
+        'holiday',
+        'payment_holiday',
+        '1',
+      ],
+      lower_rate: [
+        'lower interest rate',
+        'lower rate',
+        'interest',
+        'lower_rate',
+        '2',
+      ],
+      discount: [
+        'discount',
+        'deposit',
+        'deposit assistance',
+        '3',
+      ],
+      back: ['back', 'main menu', 'menu'],
     },
+  },
+
+  PAYMENT_HOLIDAY_INFO: {
+    id: 'PAYMENT_HOLIDAY_INFO',
+    promptKey: 'payment_holiday_body',
+    type: 'info',
+    autoAdvanceTo: 'EMPLOYMENT_CHECK',
+  },
+
+  LOWER_RATE_INFO: {
+    id: 'LOWER_RATE_INFO',
+    promptKey: 'lower_rate_body',
+    type: 'info',
+    autoAdvanceTo: 'EMPLOYMENT_CHECK',
+  },
+
+  DISCOUNT_INFO: {
+    id: 'DISCOUNT_INFO',
+    promptKey: 'discount_body',
+    type: 'info',
+    autoAdvanceTo: 'EMPLOYMENT_CHECK',
   },
 
   EMPLOYMENT_CHECK: {

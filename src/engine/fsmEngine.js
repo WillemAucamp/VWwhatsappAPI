@@ -416,6 +416,12 @@ class FsmEngine {
         ? { stateId: state.id, promptKey: state.promptKey }
         : null;
       await this._finalizeTerminal(session, state);
+    } else if (state.autoAdvanceTo && !sendError) {
+      // Info slides (e.g. special descriptions) → continue into the next step
+      // in the same turn so the customer lands on Quick check immediately.
+      this._clearFollowUp(session);
+      await this.sessionStore.set(session.waNumber, session);
+      return this._enterState(session, state.autoAdvanceTo);
     } else {
       this._armWaitingFollowUp(session);
       await this.sessionStore.set(session.waNumber, session);

@@ -100,7 +100,11 @@ function assertInteractiveMenu(h) {
   assert.strictEqual(greet.interactive.buttons.length, 3);
   assert.deepStrictEqual(
     greet.interactive.buttons.map((b) => b.id),
-    ['see_cars', 'qualify_me', 'opt_out']
+    ['see_cars', 'qualify_me', 'saw_special']
+  );
+  assert.deepStrictEqual(
+    greet.interactive.buttons.map((b) => b.title),
+    ['See our cars', 'Qualify Me', 'I saw a special']
   );
 }
 
@@ -302,7 +306,8 @@ async function testOptOutFromGreeting() {
   const h = createHarness('opt_out');
   const wa = '27000000009';
   await h.say(wa, 'hi');
-  await h.tap(wa, 'opt_out', 'Opt-Out');
+  // Opt-Out is text-matchable (not a main-menu button anymore).
+  await h.say(wa, 'opt out');
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'human_requested');
   assert.strictEqual((await h.store.get(wa)).status, 'quiet');
@@ -386,18 +391,57 @@ async function testHelpIntentFromTwoStates() {
   console.log('✓ help-intent interrupt from EMPLOYMENT_CHECK and CREDIT_CHECK');
 }
 
-async function testPromotionsTbd() {
-  const h = createHarness('promotions');
+async function testSpecialsMenuThenQualify() {
+  const h = createHarness('specials');
   const wa = '27000000013';
   await h.say(wa, 'hi');
-  await h.say(wa, 'promotions');
+  await h.tap(wa, 'saw_special', 'I saw a special');
   let session = await h.store.get(wa);
-  assert.strictEqual(session.currentState, 'PROMOTIONS');
-  await h.say(wa, 'main menu');
+  assert.strictEqual(session.currentState, 'SPECIALS_MENU');
+  const menu = h.messages.filter((m) => m.meta && m.meta.stateId === 'SPECIALS_MENU').pop();
+  assert.ok(menu && menu.interactive);
+  assert.deepStrictEqual(
+    menu.interactive.buttons.map((b) => b.id),
+    ['payment_holiday', 'lower_rate', 'discount']
+  );
+
+  await h.tap(wa, 'payment_holiday', 'Payment Holiday');
   session = await h.store.get(wa);
-  assert.strictEqual(session.currentState, 'GREETING');
+  assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
+  assert.ok(session.path.includes('PAYMENT_HOLIDAY_INFO'));
+  assert.ok(
+    h.messages.some(
+      (m) => m.text && m.text.includes('Payment Holiday promotion') && m.text.includes('*R15,000*')
+    )
+  );
+  assert.ok(
+    h.messages.some((m) => m.meta && m.meta.stateId === 'EMPLOYMENT_CHECK'),
+    'should auto-advance into Quick check'
+  );
+
+  // Lower rate path from a fresh chat
+  const h2 = createHarness('specials_rate');
+  const wa2 = '27000000023';
+  await h2.say(wa2, 'hi');
+  await h2.tap(wa2, 'saw_special', 'I saw a special');
+  await h2.tap(wa2, 'lower_rate', 'Lower Interest Rate');
+  assert.strictEqual((await h2.store.get(wa2)).currentState, 'EMPLOYMENT_CHECK');
+  assert.ok(
+    h2.messages.some((m) => m.text && m.text.includes('Lower Interest Rate Promotion'))
+  );
+
+  const h3 = createHarness('specials_discount');
+  const wa3 = '27000000033';
+  await h3.say(wa3, 'hi');
+  await h3.say(wa3, 'i saw a special');
+  await h3.tap(wa3, 'discount', 'Discount');
+  assert.strictEqual((await h3.store.get(wa3)).currentState, 'EMPLOYMENT_CHECK');
+  assert.ok(
+    h3.messages.some((m) => m.text && m.text.includes('Deposit Assistance Special'))
+  );
+
   // eslint-disable-next-line no-console
-  console.log('✓ Promotions TBD → main menu');
+  console.log('✓ I saw a special → description → employment check');
 }
 
 async function testFollowUpCadence() {
@@ -495,7 +539,7 @@ async function main() {
   await testOptOutFromGreeting();
   await testInvalidRetryThenEscalate();
   await testHelpIntentFromTwoStates();
-  await testPromotionsTbd();
+  await testSpecialsMenuThenQualify();
   await testFollowUpCadence();
   await testFollowUpSkippedOnTerminalAndScheduler();
 
