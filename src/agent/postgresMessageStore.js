@@ -7,7 +7,7 @@ const { Pool } = require('pg');
  * Same shape as the file JSONL store: append / listMessages / listChats.
  */
 
-const SCHEMA_SQL = `
+const CREATE_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS chat_messages (
   id TEXT PRIMARY KEY,
   wa_number TEXT NOT NULL,
@@ -17,10 +17,11 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   reply_id TEXT,
   wamid TEXT,
   at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+)`;
+
+const CREATE_INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS chat_messages_wa_at_idx
-  ON chat_messages (wa_number, at DESC);
-`;
+  ON chat_messages (wa_number, at DESC)`;
 
 function mapRow(row) {
   return {
@@ -51,7 +52,11 @@ function createPostgresMessageStore(connectionString) {
   let ready = null;
   function ensureSchema() {
     if (!ready) {
-      ready = pool.query(SCHEMA_SQL).then(() => undefined);
+      // Separate statements: some poolers reject multi-statement queries.
+      ready = pool
+        .query(CREATE_TABLE_SQL)
+        .then(() => pool.query(CREATE_INDEX_SQL))
+        .then(() => undefined);
     }
     return ready;
   }
