@@ -67,7 +67,9 @@ const config = {
   },
 
   links: {
-    applicationLink: process.env.APPLICATION_LINK || '',
+    applicationLink:
+      process.env.APPLICATION_LINK ||
+      'https://forms.gle/eZq13HF91GpGqivU9',
     stockLink: process.env.STOCK_LINK || '',
   },
 

@@ -155,8 +155,7 @@ module.exports = {
     'Here is the link:',
     '{{APPLICATION_LINK}}',
     '',
-    'Complete it at your convenience.',
-    "I'll review it personally.",
+    'Complete it at your convenience — we should have feedback for you almost immediately.',
   ].join('\n'),
 
   human_handover_body: [

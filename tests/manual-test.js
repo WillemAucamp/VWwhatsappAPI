@@ -151,6 +151,9 @@ async function testInteractiveQualifyPath() {
 
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'qualified_self_serve');
+  const lastText = String(h.messages[h.messages.length - 1].text);
+  assert.ok(lastText.includes('https://forms.gle/eZq13HF91GpGqivU9'));
+  assert.ok(lastText.includes('almost immediately'));
   assert.ok(String(h.messages[h.messages.length - 1].text).includes(copy.send_link_body.split('\n')[0].replace('{{APPLICATION_LINK}}', '') || 'Here is the link'));
   // eslint-disable-next-line no-console
   console.log('✓ interactive qualify path');
