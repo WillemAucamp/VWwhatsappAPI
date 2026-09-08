@@ -221,7 +221,7 @@ async function testLicenseNoHandover() {
   assert.ok(h.agentEvents.some((e) => e.type === 'handover'));
   assert.ok(
     String(h.messages[h.messages.length - 1].text).includes(
-      'I see you need my help'
+      "I'm taking over from here"
     )
   );
   // eslint-disable-next-line no-console

@@ -96,8 +96,9 @@ module.exports = {
   ].join('\n'),
 
   human_handover_body: [
-    'I see you need my help.',
-    'Could you please summarise what you need and I will be with you ASAP!',
+    "I've got you — I'm taking over from here.",
+    '',
+    'Please share a short summary of what you need, and I\'ll be with you as soon as I can.',
   ].join('\n'),
 
   off_menu_recovery_prompt: [
