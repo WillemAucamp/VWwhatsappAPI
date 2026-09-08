@@ -379,13 +379,14 @@ const STATES = {
 
   LICENSE_NO_HANDOVER: {
     id: 'LICENSE_NO_HANDOVER',
-    promptKey: 'human_handover_body',
+    promptKey: 'license_no_plan',
     type: 'terminal',
     terminal: true,
     exitReason: 'no_license',
     softDecline: false,
     quiet: true,
     notifyAgent: true,
+    agentTakeover: true,
   },
 
   CREDIT_CHECK: {
