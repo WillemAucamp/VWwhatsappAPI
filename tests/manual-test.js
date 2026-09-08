@@ -438,6 +438,21 @@ async function testReleaseResumesWhereLeftOff() {
   await h3.engine.releaseToBot(wa3);
   assert.strictEqual((await h3.store.get(wa3)).currentState, 'GREETING');
 
+  // Completed soft_closed must restart — not re-ask FINAL_CONSENT from path.
+  const h4 = createHarness('release_after_qualify');
+  const wa4 = '27000000043';
+  await h4.say(wa4, 'hi');
+  await h4.say(wa4, 'qualify me');
+  await h4.say(wa4, 'yes');
+  await h4.say(wa4, 'more than r15k');
+  await h4.say(wa4, 'yes');
+  await h4.say(wa4, 'good');
+  await h4.say(wa4, 'yes');
+  assert.strictEqual((await h4.store.get(wa4)).currentState, 'SEND_LINK');
+  await h4.engine.takeOver(wa4, { silent: true });
+  await h4.engine.releaseToBot(wa4);
+  assert.strictEqual((await h4.store.get(wa4)).currentState, 'GREETING');
+
   // eslint-disable-next-line no-console
   console.log('✓ release to bot resumes prior step (or greeting if none)');
 }

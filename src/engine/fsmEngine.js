@@ -707,11 +707,46 @@ class FsmEngine {
   /**
    * Staff release: resume the step from before handover when possible;
    * otherwise restart at the Melrose greeting.
+   *
+   * Must not destroy terminal recovery: agent desk auto-takeOver on reply is
+   * common after SEND_LINK. Resuming FINAL_CONSENT from path history while
+   * clearing pendingTerminalOutbound permanently drops the application link
+   * (and can overwrite an unflushed pendingLead on the next completion).
    */
   async releaseToBot(waNumber) {
     return this._withSessionLock(waNumber, async () => {
       const session = await this.getOrCreateSession(waNumber);
       session.agentTakenOver = false;
+
+      // Prefer delivering an undelivered terminal body (application link) over
+      // CRM flush / menu resume — Graph recovery must not wait on CRM.
+      if (session.pendingTerminalOutbound) {
+        return this._retryTerminalOutbound(session);
+      }
+
+      try {
+        await this._flushPendingLead(session);
+      } catch (err) {
+        // Keep pendingLead queued for the scheduler; do not resume/restart
+        // (those paths reset the session and would drop the lead).
+        // eslint-disable-next-line no-console
+        console.error(
+          '[fsm] releaseToBot pendingLead flush failed; leaving session for retry',
+          {
+            waNumber: session.waNumber,
+            message: err && err.message ? err.message : String(err),
+          }
+        );
+        await this.sessionStore.set(waNumber, session);
+        return { session, released: true, deferred: 'pending_lead' };
+      }
+
+      const current = session.currentState ? STATES[session.currentState] : null;
+      // Soft-closed completed terminals are finished — not an in-progress menu.
+      // Path-walk resume would re-ask FINAL_CONSENT after a successful qualify.
+      if (current && current.terminal && !current.quiet) {
+        return this._restart(session);
+      }
 
       const resumeId = this._resumeStateId(session);
       if (resumeId) {
@@ -726,6 +761,11 @@ class FsmEngine {
    * have an interruptedFrom from a bot-driven human handover.
    */
   _rememberResumePoint(session) {
+    const current = session.currentState ? STATES[session.currentState] : null;
+    // Do not invent a resume point from a finished soft_closed qualification path.
+    if (current && current.terminal && !current.quiet) {
+      return;
+    }
     if (session.interruptedFrom && this._isResumableStateId(session.interruptedFrom)) {
       return;
     }
@@ -769,7 +809,6 @@ class FsmEngine {
     session.agentTakenOver = false;
     session.interruptedFrom = null;
     session.lastExitReason = null;
-    session.pendingTerminalOutbound = null;
     // Keep path history; drop a trailing human-handover terminal if present.
     if (Array.isArray(session.path) && session.path.length) {
       const last = session.path[session.path.length - 1];
