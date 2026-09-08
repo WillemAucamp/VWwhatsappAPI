@@ -59,6 +59,9 @@ async function getCatalogHealth(options = {}) {
   let wabaCatalogs = [];
   let wabaCatalogsError = null;
   let linkError = null;
+  let phones = [];
+  let phonesError = null;
+  let phoneMatchesConfig = null;
 
   if (options.ensureVisible) {
     try {
@@ -66,6 +69,9 @@ async function getCatalogHealth(options = {}) {
       commerce = prepare.commerce;
       commerceError = prepare.commerceError || null;
       linkError = prepare.linkError || null;
+      phones = prepare.phones || [];
+      phonesError = prepare.phonesError || null;
+      phoneMatchesConfig = prepare.phoneMatchesConfig;
       if (prepare.link && prepare.link.catalogs) {
         wabaCatalogs = prepare.link.catalogs;
       }
@@ -91,6 +97,18 @@ async function getCatalogHealth(options = {}) {
   const catalogLinkedToWaba = wabaCatalogs.some(
     (c) => c && String(c.id) === String(catalogId)
   );
+  // WhatsApp Manager may already show the catalog linked even when Graph
+  // product_catalogs read is denied (#100 / Manage catalogue).
+  const managerLikelyLinked = Boolean(
+    (commerce && commerce.linked) ||
+      (prepare &&
+        prepare.linkResponse &&
+        prepare.linkResponse.error &&
+        /Manage catalogue/i.test(
+          String(prepare.linkResponse.error.error_user_title || '') +
+            String(prepare.linkResponse.error.error_user_msg || '')
+        ))
+  );
 
   try {
     const products = await listProductsForProductList({ catalogId });
@@ -109,8 +127,13 @@ async function getCatalogHealth(options = {}) {
       wabaCatalogs,
       wabaCatalogsError,
       catalogLinkedToWaba,
+      managerLikelyLinked,
+      phones,
+      phonesError,
+      phoneMatchesConfig,
       canBrowseViaCatalogMessage: Boolean(
-        commerce && commerce.linked && commerce.is_catalog_visible
+        phoneMatchesConfig !== false &&
+          ((commerce && commerce.is_catalog_visible) || managerLikelyLinked)
       ),
       error: null,
       prepare,
@@ -132,8 +155,13 @@ async function getCatalogHealth(options = {}) {
       wabaCatalogs,
       wabaCatalogsError,
       catalogLinkedToWaba,
+      managerLikelyLinked,
+      phones,
+      phonesError,
+      phoneMatchesConfig,
       canBrowseViaCatalogMessage: Boolean(
-        commerce && commerce.linked && commerce.is_catalog_visible
+        phoneMatchesConfig !== false &&
+          ((commerce && commerce.is_catalog_visible) || managerLikelyLinked)
       ),
       error: err && err.message ? String(err.message) : String(err),
       graphCode: graph && graph.code != null ? graph.code : null,

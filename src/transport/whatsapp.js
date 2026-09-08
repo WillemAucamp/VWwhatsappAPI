@@ -421,19 +421,42 @@ async function ensureCatalogLinkedToWaba() {
 
 /**
  * Show the linked catalog on this WhatsApp number (required for View catalog).
- * Cart stays off for Melrose — stock browse, not checkout.
+ * Only toggles catalog visibility — leave cart settings to WhatsApp Manager.
  */
 async function ensureCatalogVisible() {
   const { phoneNumberId } = requireCredentials();
   await graphPostPath(`${phoneNumberId}/whatsapp_commerce_settings`, null, {
     is_catalog_visible: true,
-    is_cart_enabled: false,
   });
   return getCommerceSettings();
 }
 
 /**
+ * Phone numbers on this WABA — used to confirm Cloud API number matches.
+ */
+async function listWabaPhoneNumbers() {
+  const wabaId = config.whatsapp.wabaId;
+  if (!wabaId) {
+    const err = new Error('WHATSAPP_WABA_ID missing');
+    err.code = 'WABA_ID_MISSING';
+    throw err;
+  }
+  const data = await graphGet(
+    `${wabaId}/phone_numbers`,
+    'id,display_phone_number,verified_name'
+  );
+  const rows = Array.isArray(data && data.data) ? data.data : [];
+  return rows.map((row) => ({
+    id: row.id != null ? String(row.id) : null,
+    display_phone_number:
+      row.display_phone_number != null ? String(row.display_phone_number) : null,
+    verified_name: row.verified_name != null ? String(row.verified_name) : null,
+  }));
+}
+
+/**
  * Link catalog to WABA (when possible) then make it visible on the phone number.
+ * Catalog may already be linked in WhatsApp Manager; API link needs Manage catalogue.
  */
 async function prepareCatalogForMessaging() {
   const result = {
@@ -441,18 +464,42 @@ async function prepareCatalogForMessaging() {
     linkError: null,
     commerce: null,
     commerceError: null,
+    phones: [],
+    phonesError: null,
+    phoneMatchesConfig: null,
   };
+
+  try {
+    result.phones = await listWabaPhoneNumbers();
+    const configured = String(config.whatsapp.phoneNumberId || '');
+    result.phoneMatchesConfig = result.phones.some((p) => p.id === configured);
+  } catch (err) {
+    result.phonesError = err && err.message ? String(err.message) : String(err);
+  }
+
   try {
     result.link = await ensureCatalogLinkedToWaba();
   } catch (err) {
     result.linkError = err && err.message ? String(err.message) : String(err);
     result.linkResponse = err && err.response ? err.response : undefined;
+    // If Meta says Manage catalogue is required, catalogue is often already
+    // linked in WhatsApp Manager — still try visibility + catalog_message.
   }
+
   try {
     result.commerce = await ensureCatalogVisible();
   } catch (err) {
     result.commerceError = err && err.message ? String(err.message) : String(err);
     result.commerceResponse = err && err.response ? err.response : undefined;
+    // Fall back to GET so /health still shows current visibility when POST fails.
+    try {
+      result.commerce = await getCommerceSettings();
+      result.commerceError = result.commerceError
+        ? `${result.commerceError} (GET after POST failed)`
+        : null;
+    } catch (_) {
+      // keep POST error
+    }
   }
   return result;
 }
@@ -510,6 +557,7 @@ module.exports = {
   graphPostPath,
   getCommerceSettings,
   listWabaProductCatalogs,
+  listWabaPhoneNumbers,
   ensureCatalogLinkedToWaba,
   ensureCatalogVisible,
   prepareCatalogForMessaging,
