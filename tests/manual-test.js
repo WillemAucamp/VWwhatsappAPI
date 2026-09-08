@@ -152,6 +152,43 @@ async function testInteractiveQualifyPath() {
   console.log('✓ interactive qualify path');
 }
 
+async function testQualifyMeWithoutPriorGreetingSession() {
+  // After Render redeploy, session is gone but WhatsApp still shows old buttons.
+  const h = createHarness('qualify_me_cold');
+  const wa = '27000000100';
+  await h.tap(wa, 'qualify_me', 'Qualify Me');
+  const session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
+  assert.deepStrictEqual(session.path, ['GREETING', 'EMPLOYMENT_CHECK']);
+  assert.ok(
+    h.messages.some((m) => m.meta && m.meta.stateId === 'EMPLOYMENT_CHECK'),
+    'should enter qualification tree, not bounce to GREETING'
+  );
+  assert.ok(
+    !h.messages.some((m) => m.meta && m.meta.stateId === 'GREETING'),
+    'should not re-send main menu when Qualify Me was tapped'
+  );
+  // eslint-disable-next-line no-console
+  console.log('✓ Qualify Me with no session → employment check');
+}
+
+async function testQualifyMeAfterSoftClose() {
+  const h = createHarness('qualify_me_soft');
+  const wa = '27000000101';
+  await h.say(wa, 'hi');
+  await h.tap(wa, 'qualify_me', 'Qualify Me');
+  await h.tap(wa, 'employed_no', 'No');
+  let session = await h.store.get(wa);
+  assert.strictEqual(session.status, 'soft_closed');
+
+  await h.tap(wa, 'qualify_me', 'Qualify Me');
+  session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
+  assert.strictEqual(session.status, 'active');
+  // eslint-disable-next-line no-console
+  console.log('✓ Qualify Me after soft_closed → employment check');
+}
+
 async function testSeeCarsThenQualify() {
   const h = createHarness('see_cars');
   const wa = '27000000002';
@@ -447,6 +484,8 @@ async function main() {
 
   await testFullQualifyPath();
   await testInteractiveQualifyPath();
+  await testQualifyMeWithoutPriorGreetingSession();
+  await testQualifyMeAfterSoftClose();
   await testSeeCarsThenQualify();
   await testEmployedNoEndChat();
   await testIncomeUnder5kEndChat();
