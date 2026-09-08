@@ -183,10 +183,9 @@ module.exports = {
   ].join('\n'),
 
   send_link_body: [
-    'Here is the link:',
-    '{{APPLICATION_LINK}}',
+    'Click on the link below to see what you qualify for, calculate your estimated repayments, and explore the best current specials for you:',
     '',
-    'Complete it at your convenience — we should have feedback for you almost immediately.',
+    '👉 https://forms.gle/eZq13HF91GpGqivU9',
   ].join('\n'),
 
   human_handover_body: [

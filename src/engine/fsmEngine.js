@@ -38,7 +38,16 @@ function escapeRegex(s) {
 }
 
 function matchOption(state, normalized) {
-  if (!state || !state.optionLabels) return null;
+  if (!state || !normalized) return null;
+
+  // Exact match on optionTitles (button / list labels customers tap or type).
+  if (state.optionTitles) {
+    for (const [optionKey, title] of Object.entries(state.optionTitles)) {
+      if (normalizeInput(title) === normalized) return optionKey;
+    }
+  }
+
+  if (!state.optionLabels) return null;
   for (const [optionKey, labels] of Object.entries(state.optionLabels)) {
     const list = Array.isArray(labels) ? labels : [labels];
     for (const label of list) {
@@ -349,25 +358,46 @@ class FsmEngine {
   }
 
   async _send(waNumber, promptKey, state, extraText) {
+    const extras = {};
+    const appLink = linkForState(state);
+    if (state && state.sendLink === 'application' && appLink) {
+      extras.applicationLink = appLink;
+    }
+    if (state && state.sendLink === 'stock' && appLink) {
+      extras.stockLink = appLink;
+    }
+
     const body = buildOutboundText(promptKey, {
       includeFooter: true,
       stubMarker: this.stubMarker,
+      extras,
     });
     const continueKey = state && state.continuePromptKey;
     const continueText = continueKey
       ? buildOutboundText(continueKey, {
           includeFooter: false,
           stubMarker: this.stubMarker,
+          extras,
         })
       : '';
 
     const parts = [body, continueText, extraText].filter(Boolean);
-    const text = parts.join('\n\n');
+    let text = parts.join('\n\n');
+    // Always surface the application URL for SEND_LINK even if copy/env drifted.
+    if (
+      state &&
+      state.sendLink === 'application' &&
+      appLink &&
+      !String(text).includes(appLink)
+    ) {
+      text = `${text}\n\n${appLink}`;
+    }
+
     const interactive = buildInteractiveFromState(state);
 
     const payload = {
       text,
-      link: linkForState(state),
+      link: appLink,
       mediaSlot: state && state.mediaSlot ? state.mediaSlot : undefined,
       meta: { stateId: state ? state.id : null, promptKey },
     };
