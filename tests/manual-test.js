@@ -280,12 +280,49 @@ async function testInvalidRetryThenEscalate() {
   await h.say(wa, 'qualify me');
   await h.say(wa, 'zzzz');
   let session = await h.store.get(wa);
-  assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
+  assert.strictEqual(session.currentState, 'OFF_MENU_RECOVERY');
+  assert.strictEqual(session.interruptedFrom, 'EMPLOYMENT_CHECK');
+  assert.ok(
+    h.messages.some(
+      (m) =>
+        m.text &&
+        m.text.includes("haven't chosen an option") &&
+        m.text.includes('*Opt-Out*')
+    ),
+    'recovery prompt should mention off-menu + bold Opt-Out'
+  );
+  const recoverySend = h.messages.filter(
+    (m) => m.meta && m.meta.stateId === 'OFF_MENU_RECOVERY'
+  );
+  assert.ok(recoverySend.length >= 1);
+  const interactive = recoverySend[recoverySend.length - 1].interactive;
+  assert.ok(interactive, 'recovery should send interactive buttons');
+  assert.strictEqual(interactive.type, 'button');
+  assert.deepStrictEqual(
+    interactive.buttons.map((b) => b.id),
+    ['human_handover', 'main_menu']
+  );
+  assert.deepStrictEqual(
+    interactive.buttons.map((b) => b.title),
+    ['Human-Handover', 'Main-Menu']
+  );
+
+  // Main-Menu → first menu (GREETING)
+  await h.tap(wa, 'main_menu', 'Main-Menu');
+  session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'GREETING');
+
+  // Off-menu again → recovery → Human-Handover → quiet
   await h.say(wa, 'zzzz');
+  session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'OFF_MENU_RECOVERY');
+  await h.tap(wa, 'human_handover', 'Human-Handover');
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'human_requested');
+  session = await h.store.get(wa);
+  assert.strictEqual(session.status, 'quiet');
   // eslint-disable-next-line no-console
-  console.log('✓ invalid retry then escalate');
+  console.log('✓ off-menu recovery → Main-Menu / Human-Handover');
 }
 
 async function testHelpIntentFromTwoStates() {

@@ -101,6 +101,13 @@ module.exports = {
     "I'll step in directly. One moment.",
   ].join('\n'),
 
+  off_menu_recovery_prompt: [
+    "Hi I see you haven't chosen an option on the menu?",
+    'Do you want to talk to me directly, or should I take you back to the main menu?',
+    '',
+    '(Remember you can *Opt-Out* at any time)',
+  ].join('\n'),
+
   invalid_input_reprompt:
     'Please tap one of the buttons below (or type a matching answer).',
 
