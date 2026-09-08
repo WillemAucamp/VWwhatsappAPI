@@ -63,35 +63,71 @@ module.exports = {
   ].join('\n'),
 
   employment_check_prompt: [
-    'Good choice.',
+    "Cool, let's do this!",
     '',
-    'A few background questions first.',
-    'Are you currently employed?',
+    'Just to make sure we get everything 100% right for you, do you mind if I ask a few quick questions?',
+  ].join('\n'),
+
+  qualify_consent_prompt: [
+    "Cool, let's do this!",
+    '',
+    'Just to make sure we get everything 100% right for you, do you mind if I ask a few quick questions?',
+  ].join('\n'),
+
+  qualify_consent_no_prompt: [
+    'No problem at all.',
+    '',
+    'Would you like to talk to me directly, or should I take you back to the main menu?',
+  ].join('\n'),
+
+  employed_income_prompt: [
+    'First up: Are you currently employed full-time, and is your monthly income above R9,500?',
+  ].join('\n'),
+
+  not_ready_end: [
+    "Ah, unfortunately we wouldn't be able to move forward just yet, but the good news is you can definitely build towards it to get your dream car!",
+    '',
+    "Here's a quick look at what the banks require:",
+    '',
+    '*Permanently Employed:* Minimum *R9,500* net income into your account monthly.',
+    '',
+    '*Self-Employed:* Average monthly earnings of around *R25,000*.',
+    '',
+    "*Starting a New Role?* You don't have to wait! As long as it's a permanent position, you can apply right away using your signed employment contract.",
+    '',
+    "Keep pushing and working hard—you've got this, and we'd love to help you as soon as you hit that mark!",
   ].join('\n'),
 
   employed_no_end: [
-    'Understood.',
+    "Ah, unfortunately we wouldn't be able to move forward just yet, but the good news is you can definitely build towards it to get your dream car!",
     '',
-    'Our finance partners require proof of steady income.',
-    "I'm unable to proceed today.",
+    "Here's a quick look at what the banks require:",
     '',
-    'Please reach out again once this changes.',
-    'Thank you for your time.',
+    '*Permanently Employed:* Minimum *R9,500* net income into your account monthly.',
+    '',
+    '*Self-Employed:* Average monthly earnings of around *R25,000*.',
+    '',
+    "*Starting a New Role?* You don't have to wait! As long as it's a permanent position, you can apply right away using your signed employment contract.",
+    '',
+    "Keep pushing and working hard—you've got this, and we'd love to help you as soon as you hit that mark!",
   ].join('\n'),
 
   affordability_check_prompt: [
-    'Thank you.',
-    '',
-    'What is your approximate monthly income?',
+    'First up: Are you currently employed full-time, and is your monthly income above R9,500?',
   ].join('\n'),
 
   income_under_5k_end: [
-    'Thank you for the honest answer.',
+    "Ah, unfortunately we wouldn't be able to move forward just yet, but the good news is you can definitely build towards it to get your dream car!",
     '',
-    "Based on this, finance approval isn't possible on our current stock.",
-    'Please check back in future.',
+    "Here's a quick look at what the banks require:",
     '',
-    'Thank you for your time.',
+    '*Permanently Employed:* Minimum *R9,500* net income into your account monthly.',
+    '',
+    '*Self-Employed:* Average monthly earnings of around *R25,000*.',
+    '',
+    "*Starting a New Role?* You don't have to wait! As long as it's a permanent position, you can apply right away using your signed employment contract.",
+    '',
+    "Keep pushing and working hard—you've got this, and we'd love to help you as soon as you hit that mark!",
   ].join('\n'),
 
   license_check_prompt: [

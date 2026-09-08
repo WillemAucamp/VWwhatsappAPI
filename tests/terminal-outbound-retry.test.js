@@ -148,7 +148,7 @@ async function testQuietRetriesUndeliveredHandover() {
   assert.strictEqual(session.currentState, 'HUMAN_HANDOVER');
   assert.strictEqual(session.pendingTerminalOutbound, null);
   assert.ok(
-    !session.path.includes('AFFORDABILITY_CHECK'),
+    !session.path.includes('EMPLOYED_INCOME_CHECK'),
     'handover retry must not resume qualification'
   );
   const last = sent[sent.length - 1];

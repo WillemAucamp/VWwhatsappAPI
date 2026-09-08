@@ -14,14 +14,14 @@ Start here:
 
 ```
 greeting
-  → See our cars → stocklist → (any selection) → employment_check
-  → Qualify Me → employment_check
+  → See our cars → stocklist → (any selection) → qualify_consent
+  → Qualify Me → qualify_consent
   → I saw a special → Payment Holiday / Lower Interest Rate / Discount
-       → (brief description) → employment_check
+       → (brief description) → qualify_consent
   → (type Opt-Out) → human_handover
 
-employment_check → Yes → affordability_check | No → end_chat
-affordability_check → >R15k / >R9k → license_check | <R5k → end_chat
+qualify_consent → Yes → employed_income_check | No → Human-Handover / Main-Menu
+employed_income_check → Yes → license_check | No → end_chat (not ready)
 license_check → Yes → credit_check | No → human_handover
 credit_check → Good → final_consent | Bad → human_handover
 final_consent → Yes, send it → send_link | Not right now → human_handover

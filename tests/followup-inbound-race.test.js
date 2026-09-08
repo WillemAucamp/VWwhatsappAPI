@@ -72,7 +72,7 @@ async function testFollowUpDoesNotOverwriteInboundAdvance() {
   };
 
   await engine.handleInbound(wa, 'hi'); // GREETING
-  await engine.handleInbound(wa, 'qualify me'); // EMPLOYMENT_CHECK
+  await engine.handleInbound(wa, 'qualify me'); // QUALIFY_CONSENT
   clock += THIRTY_MIN;
 
   blocking = true;
@@ -81,7 +81,7 @@ async function testFollowUpDoesNotOverwriteInboundAdvance() {
   await sendStarted.promise;
 
   // Customer answers while follow-up Graph call is in flight
-  const inboundPromise = engine.handleInbound(wa, 'yes'); // → AFFORDABILITY_CHECK
+  const inboundPromise = engine.handleInbound(wa, 'yes'); // → EMPLOYED_INCOME_CHECK
   // Give inbound a turn to queue behind the session lock
   await new Promise((r) => setImmediate(r));
 
@@ -92,11 +92,11 @@ async function testFollowUpDoesNotOverwriteInboundAdvance() {
   const session = await store.get(wa);
   assert.strictEqual(
     session.currentState,
-    'AFFORDABILITY_CHECK',
+    'EMPLOYED_INCOME_CHECK',
     'inbound answer must not be rolled back by a late follow-up write'
   );
   assert.ok(
-    session.path.includes('AFFORDABILITY_CHECK'),
+    session.path.includes('EMPLOYED_INCOME_CHECK'),
     'path must retain the advanced state'
   );
   assert.strictEqual(

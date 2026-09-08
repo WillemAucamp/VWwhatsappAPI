@@ -9,7 +9,7 @@
  *   optionLabels  free-text fallback synonyms
  *
  * Greeting shows 3 reply buttons (WhatsApp max). Opt-Out stays text-matchable.
- * Stocklist: any selection → employment_check (dynamic car_id list TBD).
+ * Stocklist / specials: continue into qualify consent → combined employment+income check.
  */
 
 /** @type {Record<string, object>} */
@@ -24,7 +24,7 @@ const STATES = {
     interactiveOptions: ['see_cars', 'qualify_me', 'saw_special'],
     options: {
       see_cars: 'STOCKLIST_CAROUSEL',
-      qualify_me: 'EMPLOYMENT_CHECK',
+      qualify_me: 'QUALIFY_CONSENT',
       saw_special: 'SPECIALS_MENU',
       promotions: 'SPECIALS_MENU',
       opt_out: 'HUMAN_HANDOVER',
@@ -60,7 +60,7 @@ const STATES = {
     sendLink: 'stock',
     mediaSlot: 'stock_list',
     options: {
-      any_car: 'EMPLOYMENT_CHECK',
+      any_car: 'QUALIFY_CONSENT',
     },
     optionTitles: {
       any_car: 'Check if I qualify',
@@ -166,45 +166,137 @@ const STATES = {
     id: 'PAYMENT_HOLIDAY_INFO',
     promptKey: 'payment_holiday_body',
     type: 'info',
-    autoAdvanceTo: 'EMPLOYMENT_CHECK',
+    autoAdvanceTo: 'QUALIFY_CONSENT',
   },
 
   LOWER_RATE_INFO: {
     id: 'LOWER_RATE_INFO',
     promptKey: 'lower_rate_body',
     type: 'info',
-    autoAdvanceTo: 'EMPLOYMENT_CHECK',
+    autoAdvanceTo: 'QUALIFY_CONSENT',
   },
 
   DISCOUNT_INFO: {
     id: 'DISCOUNT_INFO',
     promptKey: 'discount_body',
     type: 'info',
-    autoAdvanceTo: 'EMPLOYMENT_CHECK',
+    autoAdvanceTo: 'QUALIFY_CONSENT',
   },
 
-  EMPLOYMENT_CHECK: {
-    id: 'EMPLOYMENT_CHECK',
-    promptKey: 'employment_check_prompt',
+  QUALIFY_CONSENT: {
+    id: 'QUALIFY_CONSENT',
+    promptKey: 'qualify_consent_prompt',
     type: 'choice',
     interactiveHeader: 'Quick check',
     options: {
-      employed_yes: 'AFFORDABILITY_CHECK',
-      employed_no: 'END_CHAT_EMPLOYED_NO',
+      consent_yes: 'EMPLOYED_INCOME_CHECK',
+      consent_no: 'QUALIFY_CONSENT_NO',
     },
     optionTitles: {
+      consent_yes: 'Yes',
+      consent_no: 'No',
+    },
+    optionLabels: {
+      consent_yes: ['yes', 'y', '1', 'consent_yes', 'ok', 'sure'],
+      consent_no: ['no', 'n', '2', 'consent_no'],
+    },
+  },
+
+  QUALIFY_CONSENT_NO: {
+    id: 'QUALIFY_CONSENT_NO',
+    promptKey: 'qualify_consent_no_prompt',
+    type: 'choice',
+    interactiveHeader: 'VW Melrose',
+    interactiveOptions: ['human_handover', 'main_menu'],
+    options: {
+      human_handover: 'HUMAN_HANDOVER',
+      main_menu: 'GREETING',
+    },
+    optionTitles: {
+      human_handover: 'Human-Handover',
+      main_menu: 'Main-Menu',
+    },
+    optionLabels: {
+      human_handover: [
+        'human-handover',
+        'human handover',
+        'handover',
+        'human',
+        'agent',
+        'speak to me',
+        'talk to me',
+        '1',
+      ],
+      main_menu: [
+        'main-menu',
+        'main menu',
+        'menu',
+        'back',
+        'start over',
+        '2',
+      ],
+    },
+  },
+
+  EMPLOYED_INCOME_CHECK: {
+    id: 'EMPLOYED_INCOME_CHECK',
+    promptKey: 'employed_income_prompt',
+    type: 'choice',
+    interactiveHeader: 'Quick check',
+    options: {
+      employed_income_yes: 'LICENSE_CHECK',
+      employed_income_no: 'END_CHAT_NOT_READY',
+    },
+    optionTitles: {
+      employed_income_yes: 'Yes',
+      employed_income_no: 'No',
+    },
+    optionLabels: {
+      employed_income_yes: ['yes', 'y', '1', 'employed_income_yes'],
+      employed_income_no: ['no', 'n', '2', 'employed_income_no'],
+    },
+  },
+
+  END_CHAT_NOT_READY: {
+    id: 'END_CHAT_NOT_READY',
+    promptKey: 'not_ready_end',
+    type: 'terminal',
+    terminal: true,
+    exitReason: 'not_ready_income_employment',
+    softDecline: true,
+    notifyAgent: false,
+  },
+
+  // Legacy aliases so older in-progress sessions can still resume after deploy.
+  EMPLOYMENT_CHECK: {
+    id: 'EMPLOYMENT_CHECK',
+    promptKey: 'qualify_consent_prompt',
+    type: 'choice',
+    interactiveHeader: 'Quick check',
+    interactiveOptions: ['consent_yes', 'consent_no'],
+    options: {
+      consent_yes: 'EMPLOYED_INCOME_CHECK',
+      consent_no: 'QUALIFY_CONSENT_NO',
+      employed_yes: 'EMPLOYED_INCOME_CHECK',
+      employed_no: 'END_CHAT_NOT_READY',
+    },
+    optionTitles: {
+      consent_yes: 'Yes',
+      consent_no: 'No',
       employed_yes: 'Yes',
       employed_no: 'No',
     },
     optionLabels: {
-      employed_yes: ['yes', 'y', '1', 'employed_yes', 'employed'],
-      employed_no: ['no', 'n', '2', 'employed_no'],
+      consent_yes: ['yes', 'y', '1', 'consent_yes', 'ok', 'sure'],
+      consent_no: ['no', 'n', '2', 'consent_no'],
+      employed_yes: ['employed_yes'],
+      employed_no: ['employed_no'],
     },
   },
 
   END_CHAT_EMPLOYED_NO: {
     id: 'END_CHAT_EMPLOYED_NO',
-    promptKey: 'employed_no_end',
+    promptKey: 'not_ready_end',
     type: 'terminal',
     terminal: true,
     exitReason: 'employed_no',
@@ -214,47 +306,36 @@ const STATES = {
 
   AFFORDABILITY_CHECK: {
     id: 'AFFORDABILITY_CHECK',
-    promptKey: 'affordability_check_prompt',
+    promptKey: 'employed_income_prompt',
     type: 'choice',
-    interactiveHeader: 'Income',
+    interactiveHeader: 'Quick check',
+    interactiveOptions: ['employed_income_yes', 'employed_income_no'],
     options: {
+      employed_income_yes: 'LICENSE_CHECK',
+      employed_income_no: 'END_CHAT_NOT_READY',
       income_over_15k: 'LICENSE_CHECK',
       income_over_9k: 'LICENSE_CHECK',
-      income_under_5k: 'END_CHAT_INCOME',
+      income_under_5k: 'END_CHAT_NOT_READY',
     },
     optionTitles: {
-      income_over_15k: 'More than R15k',
-      income_over_9k: 'More than R9k',
-      income_under_5k: 'Less than R5k',
+      employed_income_yes: 'Yes',
+      employed_income_no: 'No',
+      income_over_15k: 'Yes',
+      income_over_9k: 'Yes',
+      income_under_5k: 'No',
     },
     optionLabels: {
-      income_over_15k: [
-        'more than r15k',
-        'over 15k',
-        'above 15k',
-        'income_over_15k',
-        '1',
-      ],
-      income_over_9k: [
-        'more than r9k',
-        'over 9k',
-        'above 9k',
-        'income_over_9k',
-        '2',
-      ],
-      income_under_5k: [
-        'less than r5k',
-        'under 5k',
-        'below 5k',
-        'income_under_5k',
-        '3',
-      ],
+      employed_income_yes: ['yes', 'y', '1', 'employed_income_yes'],
+      employed_income_no: ['no', 'n', '2', 'employed_income_no'],
+      income_over_15k: ['income_over_15k', 'more than r15k'],
+      income_over_9k: ['income_over_9k', 'more than r9k'],
+      income_under_5k: ['income_under_5k', 'less than r5k'],
     },
   },
 
   END_CHAT_INCOME: {
     id: 'END_CHAT_INCOME',
-    promptKey: 'income_under_5k_end',
+    promptKey: 'not_ready_end',
     type: 'terminal',
     terminal: true,
     exitReason: 'income_under_5k',

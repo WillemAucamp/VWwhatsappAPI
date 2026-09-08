@@ -250,10 +250,10 @@ async function testConcurrentInboundSerialization() {
   const session = await store.get(wa);
   assert.strictEqual(
     session.currentState,
-    'EMPLOYMENT_CHECK',
+    'QUALIFY_CONSENT',
     'serialized handling must apply both transitions in order'
   );
-  assert.deepStrictEqual(session.path, ['GREETING', 'EMPLOYMENT_CHECK']);
+  assert.deepStrictEqual(session.path, ['GREETING', 'QUALIFY_CONSENT']);
   // eslint-disable-next-line no-console
   console.log('✓ concurrent inbound messages serialize per WhatsApp number');
 }

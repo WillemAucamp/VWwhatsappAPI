@@ -601,8 +601,11 @@ class FsmEngine {
   }
 
   async _handleInvalid(session, state) {
-    // Already on the recovery menu and still off-option → hand over quietly.
-    if (state && state.id === 'OFF_MENU_RECOVERY') {
+    // Already on a recovery menu and still off-option → hand over quietly.
+    if (
+      state &&
+      (state.id === 'OFF_MENU_RECOVERY' || state.id === 'QUALIFY_CONSENT_NO')
+    ) {
       return this._routeToHuman(session, state.id);
     }
 
