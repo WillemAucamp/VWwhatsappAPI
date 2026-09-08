@@ -58,7 +58,7 @@
     }
     .card p { margin: 0 0 20px; color: var(--muted); font-size: 0.92rem; line-height: 1.4; }
     label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
-    input[type="password"], textarea {
+    input[type="password"], input[type="text"], textarea {
       width: 100%;
       border: 1px solid var(--line);
       background: #fff;
@@ -68,7 +68,7 @@
       font: inherit;
       outline: none;
     }
-    input[type="password"]:focus, textarea:focus {
+    input[type="password"]:focus, input[type="text"]:focus, textarea:focus {
       border-color: var(--green);
       box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.2);
     }
@@ -89,7 +89,7 @@
       border: 1px solid var(--line);
     }
     button.secondary:hover:not(:disabled) { background: var(--line-soft); }
-    button.danger { background: var(--danger); }
+    button.danger { background: var(--danger); color: #fff; }
     button.danger:hover:not(:disabled) { filter: brightness(0.95); }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     .error { color: var(--danger); font-size: 0.85rem; margin-top: 10px; min-height: 1.2em; }
@@ -131,7 +131,6 @@
       overflow: hidden;
     }
 
-    /* Header modeled on screenshot: Chats | ⋮ | green + */
     .aside-head, .thread-head {
       padding: 12px 14px 12px 16px;
       border-bottom: 1px solid var(--line);
@@ -167,7 +166,7 @@
       border: 0;
     }
     .icon-btn:hover:not(:disabled) { background: var(--line-soft); }
-    .icon-btn svg { width: 22px; height: 22px; fill: currentColor; }
+    .icon-btn svg, .fab svg { width: 22px; height: 22px; fill: currentColor; pointer-events: none; }
     .fab {
       width: 40px;
       height: 40px;
@@ -186,13 +185,13 @@
       position: absolute;
       top: calc(100% + 4px);
       right: 0;
-      min-width: 160px;
+      min-width: 190px;
       background: #fff;
       border: 1px solid var(--line);
       border-radius: 8px;
       box-shadow: 0 2px 16px rgba(11, 20, 26, 0.12);
       padding: 6px 0;
-      z-index: 20;
+      z-index: 40;
     }
     .menu button {
       width: 100%;
@@ -204,6 +203,37 @@
       padding: 10px 16px;
     }
     .menu button:hover:not(:disabled) { background: var(--line-soft); }
+
+    .filter-bar {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line-soft);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      background: #fff;
+    }
+    .filter-chip {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .filter-chip.active {
+      border-color: transparent;
+      color: #fff;
+      background: var(--green-deep);
+    }
+    .filter-chip .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
 
     #chatList {
       overflow: auto;
@@ -240,6 +270,12 @@
       margin-top: 4px;
       font-weight: 400;
     }
+    .chat-item .label-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+    }
     .badge {
       display: inline-block;
       font-size: 0.68rem;
@@ -252,6 +288,15 @@
     }
     .badge.takeover { background: rgba(37, 211, 102, 0.18); color: var(--green-deep); }
     .badge.quiet { background: #e7f3ff; color: #027eb5; }
+    .label-pill {
+      display: inline-block;
+      font-size: 0.68rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+      color: #fff;
+      text-transform: none;
+    }
 
     main {
       display: flex;
@@ -269,11 +314,19 @@
       background: #fff;
       flex-shrink: 0;
     }
+
     .thread-head .sub {
       color: var(--muted);
       font-size: 0.78rem;
       margin-top: 2px;
       font-weight: 400;
+    }
+    .thread-labels {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+      min-height: 0;
     }
     #messages {
       flex: 1;
@@ -335,8 +388,15 @@
       display: grid;
       gap: 8px;
       background: #f0f2f5;
+      position: relative;
       flex-shrink: 0;
     }
+    .composer-hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin: 0;
+    }
+
     .composer textarea {
       border-radius: 22px;
       border-color: transparent;
@@ -347,6 +407,139 @@
     }
     .composer-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .composer-actions .grow { margin-left: auto; border-radius: 22px; padding: 10px 20px; }
+
+    .slash-menu {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: calc(100% - 4px);
+      max-height: 240px;
+      overflow: auto;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(11, 20, 26, 0.16);
+      z-index: 30;
+      padding: 6px 0;
+    }
+    .slash-item {
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      color: var(--text);
+      border-radius: 0;
+      padding: 10px 14px;
+      font-weight: 500;
+      display: grid;
+      gap: 2px;
+    }
+    .slash-item:hover, .slash-item.active { background: #f0f2f5; }
+    .slash-item .key {
+      color: var(--green-deep);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.82rem;
+    }
+    .slash-item .preview-text {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 400;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .slash-empty {
+      padding: 12px 14px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    /* Modals */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(11, 20, 26, 0.35);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      z-index: 50;
+    }
+    .modal {
+      width: min(520px, 100%);
+      max-height: min(84vh, 720px);
+      overflow: auto;
+      background: #fff;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      box-shadow: 0 12px 40px rgba(11, 20, 26, 0.18);
+      padding: 20px;
+    }
+    .modal h3 {
+      margin: 0 0 6px;
+      font-size: 1.15rem;
+    }
+    .modal .modal-sub {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.4;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .form-row { margin-bottom: 12px; }
+    .form-row.inline {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 520px) {
+      .form-row.inline { grid-template-columns: 1fr; }
+    }
+    .manage-list { display: grid; gap: 8px; margin-top: 8px; }
+    .manage-row {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: grid;
+      gap: 6px;
+    }
+    .manage-row .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .manage-row .meta-line {
+      color: var(--muted);
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .manage-row .row-actions { display: flex; gap: 6px; }
+    .color-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+    .color-swatch {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      padding: 0;
+    }
+    .color-swatch.selected { border-color: var(--text); }
+    .check-list { display: grid; gap: 8px; }
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .check-row input { width: auto; }
   </style>
 </head>
 <body>
@@ -376,24 +569,30 @@
           </button>
           <div id="sideMenu" class="menu hidden" role="menu">
             <button type="button" id="menuRefresh" role="menuitem">Refresh</button>
+            <button type="button" id="menuShortcuts" role="menuitem">Manage shortcuts</button>
+            <button type="button" id="menuLabels" role="menuitem">Manage labels</button>
             <button type="button" id="logoutBtn" role="menuitem">Log out</button>
           </div>
         </div>
       </div>
       <div id="authBanner" class="banner danger hidden"></div>
+      <div class="filter-bar" id="labelFilters"></div>
       <div id="chatList"></div>
+
     </aside>
     <main>
       <div class="thread-head">
         <div>
           <h2 id="threadTitle">Select a chat</h2>
           <div id="threadStatus" class="sub"></div>
+          <div id="threadLabels" class="thread-labels"></div>
         </div>
         <div class="head-actions">
           <button type="button" class="icon-btn" id="threadMenuBtn" aria-label="Chat actions" title="Chat actions">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
           </button>
           <div id="threadMenu" class="menu hidden" role="menu">
+            <button type="button" id="assignLabelsBtn" role="menuitem" disabled>Labels…</button>
             <button type="button" id="takeoverBtn" role="menuitem" disabled>Take over</button>
             <button type="button" id="releaseBtn" role="menuitem" disabled>Release to bot</button>
           </div>
@@ -401,10 +600,13 @@
       </div>
       <div id="messages"><div class="empty">Choose a conversation on the left.</div></div>
       <div class="composer">
+        <div id="slashMenu" class="slash-menu hidden" role="listbox" aria-label="Shortcuts"></div>
+        <p class="composer-hint">Type <strong>/</strong> for shortcuts</p>
         <textarea id="replyBox" rows="2" placeholder="Type a message" disabled></textarea>
         <div class="composer-actions">
           <button type="button" class="secondary" id="takeoverBtnBar" disabled>Take over</button>
           <button type="button" class="secondary" id="releaseBtnBar" disabled>Release to bot</button>
+          <button type="button" class="secondary" id="labelsBtnBar" disabled>Labels</button>
           <button type="button" class="grow" id="sendBtn" disabled>Send</button>
         </div>
         <div class="error" id="threadError"></div>
@@ -412,11 +614,90 @@
     </main>
   </section>
 
+  <!-- Shortcuts modal -->
+  <div id="shortcutsModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal">
+      <h3>Message shortcuts</h3>
+      <p class="modal-sub">Create replies you can insert by typing <strong>/</strong> in the chat box (like WhatsApp Business).</p>
+      <form id="shortcutForm">
+        <div class="form-row inline">
+          <div>
+            <label for="shortcutKey">Shortcut</label>
+            <input id="shortcutKey" type="text" placeholder="greeting" maxlength="40" required />
+          </div>
+          <div>
+            <label for="shortcutText">Message</label>
+            <input id="shortcutText" type="text" placeholder="Hi! How can I help…" required />
+          </div>
+        </div>
+        <div class="modal-actions" style="margin-top:0;">
+          <button type="submit" id="shortcutSaveBtn">Add shortcut</button>
+        </div>
+        <div class="error" id="shortcutError"></div>
+      </form>
+      <div class="manage-list" id="shortcutList"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="closeShortcutsModal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Labels manage modal -->
+  <div id="labelsModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal">
+      <h3>Chat labels</h3>
+      <p class="modal-sub">Tag conversations so you can find VIP, follow-ups, and hot leads quickly.</p>
+      <form id="labelForm">
+        <div class="form-row">
+          <label for="labelName">Name</label>
+          <input id="labelName" type="text" placeholder="VIP" maxlength="40" required />
+        </div>
+        <div class="form-row">
+          <label>Colour</label>
+          <div class="color-swatches" id="labelColorSwatches"></div>
+        </div>
+        <div class="modal-actions" style="margin-top:0;">
+          <button type="submit" id="labelSaveBtn">Add label</button>
+        </div>
+        <div class="error" id="labelError"></div>
+      </form>
+      <div class="manage-list" id="labelList"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="closeLabelsModal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Assign labels modal -->
+  <div id="assignLabelsModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal">
+      <h3>Labels for this chat</h3>
+      <p class="modal-sub" id="assignLabelsSub">Select labels to apply.</p>
+      <div class="check-list" id="assignLabelsList"></div>
+      <div class="error" id="assignLabelsError"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="closeAssignLabelsModal">Cancel</button>
+        <button type="button" id="saveAssignLabelsBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const state = {
       token: sessionStorage.getItem('agentToken') || '',
       selected: null,
       poll: null,
+      chats: [],
+      shortcuts: [],
+      labels: [],
+      labelColors: ['#128c7e', '#027eb5', '#c4530a', '#b42318', '#6941c6', '#067647', '#363f72', '#b54708'],
+      selectedLabelColor: '#128c7e',
+      filterLabelId: 'all',
+      threadLabelIds: [],
+      slash: { open: false, query: '', start: -1, end: -1, active: 0, matches: [] },
+      editingShortcutId: null,
+      editingLabelId: null,
+      assignDraft: [],
     };
 
     const el = (id) => document.getElementById(id);
@@ -438,11 +719,12 @@
       return data;
     }
 
-    function showApp() {
+    async function showApp() {
       el('login').classList.add('hidden');
       el('app').classList.remove('hidden');
       refreshAuthBanner();
-      loadChats();
+      await loadDeskMeta();
+      await loadChats();
       if (state.poll) clearInterval(state.poll);
       state.poll = setInterval(() => {
         loadChats(true);
@@ -493,7 +775,12 @@
       el('sideMenu').classList.add('hidden');
       el('threadMenu').classList.toggle('hidden');
     });
-    document.addEventListener('click', closeMenus);
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.menu') || e.target.closest('.head-actions')) return;
+      closeMenus();
+    });
+    el('sideMenu').addEventListener('click', (e) => e.stopPropagation());
+    el('threadMenu').addEventListener('click', (e) => e.stopPropagation());
 
     el('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -519,35 +806,109 @@
     el('logoutBtn').addEventListener('click', doLogout);
     el('menuRefresh').addEventListener('click', () => { closeMenus(); loadChats(); });
     el('refreshBtn').addEventListener('click', () => loadChats());
+    el('menuShortcuts').addEventListener('click', () => { closeMenus(); openShortcutsModal(); });
+    el('menuLabels').addEventListener('click', () => { closeMenus(); openLabelsModal(); });
+
+    async function loadDeskMeta() {
+      try {
+        const [sc, lb] = await Promise.all([
+          api('/api/shortcuts'),
+          api('/api/labels'),
+        ]);
+        state.shortcuts = sc.shortcuts || [];
+        state.labels = lb.labels || [];
+        if (Array.isArray(lb.colors) && lb.colors.length) {
+          state.labelColors = lb.colors;
+        }
+        renderLabelFilters();
+        renderColorSwatches();
+      } catch (err) {
+        if (err.status === 401) showLogin();
+      }
+    }
+
+    function renderLabelFilters() {
+      const bar = el('labelFilters');
+      const chips = [
+        { id: 'all', name: 'All', color: null },
+        ...state.labels,
+      ];
+      bar.innerHTML = chips.map((c) => {
+        const active = state.filterLabelId === c.id ? 'active' : '';
+        const style = c.id !== 'all' && state.filterLabelId === c.id
+          ? ' style="background:' + c.color + ';"'
+          : '';
+        const dot = c.color
+          ? '<span class="dot" style="background:' + c.color + ';"></span>'
+          : '';
+        return (
+          '<button type="button" class="filter-chip ' + active + '" data-label="' + c.id + '"' + style + '>' +
+            dot + escapeHtml(c.name) +
+          '</button>'
+        );
+      }).join('');
+      bar.querySelectorAll('.filter-chip').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          state.filterLabelId = btn.getAttribute('data-label') || 'all';
+          renderLabelFilters();
+          renderChatList();
+        });
+      });
+    }
+
+    function chatHasLabel(chat, labelId) {
+      if (!labelId || labelId === 'all') return true;
+      if ((chat.labelIds || []).includes(labelId)) return true;
+      return (chat.labels || []).some((l) => l.id === labelId);
+    }
+
+    function renderChatList() {
+      const list = el('chatList');
+      let chats = state.chats.slice();
+      if (state.filterLabelId !== 'all') {
+        chats = chats.filter((c) => chatHasLabel(c, state.filterLabelId));
+      }
+      if (!state.chats.length) {
+        list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats yet. When a customer messages WhatsApp, they appear here.</div>';
+        return;
+      }
+      if (!chats.length) {
+        list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats with this label.</div>';
+        return;
+      }
+      list.innerHTML = chats.map((c) => {
+        const active = state.selected === c.waNumber ? 'active' : '';
+        const badges = [];
+        if (c.agentTakenOver) badges.push('<span class="badge takeover">agent</span>');
+        else if (c.status === 'quiet') badges.push('<span class="badge quiet">quiet</span>');
+        else if (c.status) badges.push('<span class="badge">' + escapeHtml(c.status) + '</span>');
+        const labelHtml = (c.labels || []).map((l) =>
+          '<span class="label-pill" style="background:' + escapeHtml(l.color) + ';">' + escapeHtml(l.name) + '</span>'
+        ).join('');
+        return (
+          '<button type="button" class="chat-item ' + active + '" data-wa="' + c.waNumber + '">' +
+            '<div class="wa">+' + c.waNumber + badges.join('') + '</div>' +
+            '<div class="preview">' + escapeHtml(c.lastText || '') + '</div>' +
+            (labelHtml ? '<div class="label-row">' + labelHtml + '</div>' : '') +
+          '</button>'
+        );
+      }).join('');
+      list.querySelectorAll('.chat-item').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.selected = btn.getAttribute('data-wa');
+          renderChatList();
+          loadThread(state.selected);
+        });
+      });
+    }
 
     async function loadChats(silent) {
       try {
         const data = await api('/api/chats');
-        const list = el('chatList');
-        if (!data.chats.length) {
-          list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats yet. When a customer messages WhatsApp, they appear here.</div>';
-          return;
-        }
-        list.innerHTML = data.chats.map((c) => {
-          const active = state.selected === c.waNumber ? 'active' : '';
-          const badges = [];
-          if (c.agentTakenOver) badges.push('<span class="badge takeover">agent</span>');
-          else if (c.status === 'quiet') badges.push('<span class="badge quiet">quiet</span>');
-          else if (c.status) badges.push('<span class="badge">' + c.status + '</span>');
-          return (
-            '<button type="button" class="chat-item ' + active + '" data-wa="' + c.waNumber + '">' +
-              '<div class="wa">+' + c.waNumber + badges.join('') + '</div>' +
-              '<div class="preview">' + escapeHtml(c.lastText || '') + '</div>' +
-            '</button>'
-          );
-        }).join('');
-        list.querySelectorAll('.chat-item').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            state.selected = btn.getAttribute('data-wa');
-            loadChats(true);
-            loadThread(state.selected);
-          });
-        });
+        state.chats = data.chats || [];
+        renderChatList();
       } catch (err) {
         if (!silent) el('threadError').textContent = err.message;
         if (err.status === 401) showLogin();
@@ -561,6 +922,19 @@
       el('releaseBtn').disabled = !on;
       el('takeoverBtnBar').disabled = !on;
       el('releaseBtnBar').disabled = !on;
+      el('assignLabelsBtn').disabled = !on;
+      el('labelsBtnBar').disabled = !on;
+    }
+
+    function renderThreadLabels(labels) {
+      const box = el('threadLabels');
+      if (!labels || !labels.length) {
+        box.innerHTML = '';
+        return;
+      }
+      box.innerHTML = labels.map((l) =>
+        '<span class="label-pill" style="background:' + escapeHtml(l.color) + ';">' + escapeHtml(l.name) + '</span>'
+      ).join('');
     }
 
     async function loadThread(wa, silent) {
@@ -572,6 +946,8 @@
         el('threadStatus').textContent = s
           ? ('Status: ' + s.status + (s.agentTakenOver ? ' · agent takeover' : '') + (s.currentState ? ' · ' + s.currentState : ''))
           : 'No bot session yet';
+        state.threadLabelIds = data.labelIds || [];
+        renderThreadLabels(data.labels || []);
         setThreadActionsEnabled(true);
 
         const box = el('messages');
@@ -597,9 +973,47 @@
       }
     }
 
-    el('sendBtn').addEventListener('click', async () => {
+    el('sendBtn').addEventListener('click', sendReply);
+    el('replyBox').addEventListener('keydown', (e) => {
+      if (state.slash.open) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          state.slash.active = Math.min(state.slash.active + 1, state.slash.matches.length - 1);
+          renderSlashMenu();
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          state.slash.active = Math.max(state.slash.active - 1, 0);
+          renderSlashMenu();
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          if (state.slash.matches[state.slash.active]) {
+            e.preventDefault();
+            applyShortcut(state.slash.matches[state.slash.active]);
+            return;
+          }
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          hideSlashMenu();
+          return;
+        }
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendReply();
+      }
+    });
+    el('replyBox').addEventListener('input', onComposerInput);
+    el('replyBox').addEventListener('keyup', onComposerInput);
+    el('replyBox').addEventListener('click', onComposerInput);
+
+    async function sendReply() {
       const text = el('replyBox').value.trim();
       if (!state.selected || !text) return;
+      hideSlashMenu();
       el('threadError').textContent = '';
       el('sendBtn').disabled = true;
       try {
@@ -615,7 +1029,83 @@
       } finally {
         el('sendBtn').disabled = false;
       }
-    });
+    }
+
+    function onComposerInput() {
+      const box = el('replyBox');
+      const value = box.value;
+      const caret = box.selectionStart || 0;
+      const before = value.slice(0, caret);
+      const match = before.match(/(?:^|\s)(\/[a-zA-Z0-9_-]*)$/);
+      if (!match) {
+        hideSlashMenu();
+        return;
+      }
+      const token = match[1];
+      const start = caret - token.length;
+      const query = token.slice(1).toLowerCase();
+      const matches = state.shortcuts.filter((s) =>
+        !query || s.key.includes(query) || String(s.text).toLowerCase().includes(query)
+      );
+      state.slash = {
+        open: true,
+        query,
+        start,
+        end: caret,
+        active: 0,
+        matches,
+      };
+      renderSlashMenu();
+    }
+
+    function renderSlashMenu() {
+      const menu = el('slashMenu');
+      if (!state.slash.open) {
+        menu.classList.add('hidden');
+        return;
+      }
+      menu.classList.remove('hidden');
+      if (!state.slash.matches.length) {
+        menu.innerHTML = '<div class="slash-empty">No shortcuts match. Manage them from the ⋮ menu.</div>';
+        return;
+      }
+      menu.innerHTML = state.slash.matches.map((s, i) => {
+        const active = i === state.slash.active ? 'active' : '';
+        return (
+          '<button type="button" class="slash-item ' + active + '" data-id="' + s.id + '" role="option">' +
+            '<span class="key">/' + escapeHtml(s.key) + '</span>' +
+            '<span class="preview-text">' + escapeHtml(s.text) + '</span>' +
+          '</button>'
+        );
+      }).join('');
+      menu.querySelectorAll('.slash-item').forEach((btn) => {
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const item = state.shortcuts.find((s) => s.id === btn.getAttribute('data-id'));
+          if (item) applyShortcut(item);
+        });
+      });
+    }
+
+    function hideSlashMenu() {
+      state.slash.open = false;
+      state.slash.matches = [];
+      el('slashMenu').classList.add('hidden');
+    }
+
+    function applyShortcut(item) {
+      const box = el('replyBox');
+      const value = box.value;
+      const before = value.slice(0, state.slash.start);
+      const after = value.slice(state.slash.end);
+      const insert = item.text;
+      const needsSpace = before && !/\s$/.test(before) ? ' ' : '';
+      box.value = before + needsSpace + insert + after;
+      const pos = (before + needsSpace + insert).length;
+      box.focus();
+      box.setSelectionRange(pos, pos);
+      hideSlashMenu();
+    }
 
     async function doTakeover() {
       closeMenus();
@@ -649,6 +1139,271 @@
     el('takeoverBtnBar').addEventListener('click', doTakeover);
     el('releaseBtn').addEventListener('click', doRelease);
     el('releaseBtnBar').addEventListener('click', doRelease);
+    el('assignLabelsBtn').addEventListener('click', () => { closeMenus(); openAssignLabelsModal(); });
+    el('labelsBtnBar').addEventListener('click', openAssignLabelsModal);
+
+    // —— Shortcuts modal ——
+    function openShortcutsModal() {
+      state.editingShortcutId = null;
+      el('shortcutForm').reset();
+      el('shortcutSaveBtn').textContent = 'Add shortcut';
+      el('shortcutError').textContent = '';
+      renderShortcutList();
+      el('shortcutsModal').classList.remove('hidden');
+    }
+    function closeShortcutsModal() {
+      el('shortcutsModal').classList.add('hidden');
+    }
+    el('closeShortcutsModal').addEventListener('click', closeShortcutsModal);
+    el('shortcutsModal').addEventListener('click', (e) => {
+      if (e.target === el('shortcutsModal')) closeShortcutsModal();
+    });
+
+    function renderShortcutList() {
+      const list = el('shortcutList');
+      if (!state.shortcuts.length) {
+        list.innerHTML = '<div class="slash-empty">No shortcuts yet.</div>';
+        return;
+      }
+      list.innerHTML = state.shortcuts.map((s) => (
+        '<div class="manage-row">' +
+          '<div class="top">' +
+            '<strong>/' + escapeHtml(s.key) + '</strong>' +
+            '<div class="row-actions">' +
+              '<button type="button" class="secondary" data-edit="' + s.id + '">Edit</button>' +
+              '<button type="button" class="danger" data-del="' + s.id + '">Delete</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="meta-line">' + escapeHtml(s.text) + '</div>' +
+        '</div>'
+      )).join('');
+      list.querySelectorAll('[data-edit]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const item = state.shortcuts.find((s) => s.id === btn.getAttribute('data-edit'));
+          if (!item) return;
+          state.editingShortcutId = item.id;
+          el('shortcutKey').value = item.key;
+          el('shortcutText').value = item.text;
+          el('shortcutSaveBtn').textContent = 'Save changes';
+        });
+      });
+      list.querySelectorAll('[data-del]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          el('shortcutError').textContent = '';
+          try {
+            await api('/api/shortcuts/' + encodeURIComponent(btn.getAttribute('data-del')), {
+              method: 'DELETE',
+            });
+            await loadDeskMeta();
+            renderShortcutList();
+          } catch (err) {
+            el('shortcutError').textContent = err.message;
+          }
+        });
+      });
+    }
+
+    el('shortcutForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      el('shortcutError').textContent = '';
+      const key = el('shortcutKey').value;
+      const text = el('shortcutText').value;
+      try {
+        if (state.editingShortcutId) {
+          await api('/api/shortcuts/' + encodeURIComponent(state.editingShortcutId), {
+            method: 'PUT',
+            body: JSON.stringify({ key, text }),
+          });
+        } else {
+          await api('/api/shortcuts', {
+            method: 'POST',
+            body: JSON.stringify({ key, text }),
+          });
+        }
+        state.editingShortcutId = null;
+        el('shortcutForm').reset();
+        el('shortcutSaveBtn').textContent = 'Add shortcut';
+        await loadDeskMeta();
+        renderShortcutList();
+      } catch (err) {
+        el('shortcutError').textContent = err.message;
+      }
+    });
+
+    // —— Labels manage modal ——
+    function renderColorSwatches() {
+      const box = el('labelColorSwatches');
+      box.innerHTML = state.labelColors.map((c) => {
+        const selected = c === state.selectedLabelColor ? 'selected' : '';
+        return '<button type="button" class="color-swatch ' + selected + '" data-color="' + c + '" style="background:' + c + ';" aria-label="Colour ' + c + '"></button>';
+      }).join('');
+      box.querySelectorAll('.color-swatch').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.selectedLabelColor = btn.getAttribute('data-color');
+          renderColorSwatches();
+        });
+      });
+    }
+
+    function openLabelsModal() {
+      state.editingLabelId = null;
+      el('labelForm').reset();
+      el('labelSaveBtn').textContent = 'Add label';
+      el('labelError').textContent = '';
+      state.selectedLabelColor = state.labelColors[0];
+      renderColorSwatches();
+      renderLabelManageList();
+      el('labelsModal').classList.remove('hidden');
+    }
+    function closeLabelsModal() {
+      el('labelsModal').classList.add('hidden');
+    }
+    el('closeLabelsModal').addEventListener('click', closeLabelsModal);
+    el('labelsModal').addEventListener('click', (e) => {
+      if (e.target === el('labelsModal')) closeLabelsModal();
+    });
+
+    function renderLabelManageList() {
+      const list = el('labelList');
+      if (!state.labels.length) {
+        list.innerHTML = '<div class="slash-empty">No labels yet.</div>';
+        return;
+      }
+      list.innerHTML = state.labels.map((l) => (
+        '<div class="manage-row">' +
+          '<div class="top">' +
+            '<span class="label-pill" style="background:' + escapeHtml(l.color) + ';">' + escapeHtml(l.name) + '</span>' +
+            '<div class="row-actions">' +
+              '<button type="button" class="secondary" data-edit="' + l.id + '">Edit</button>' +
+              '<button type="button" class="danger" data-del="' + l.id + '">Delete</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      )).join('');
+      list.querySelectorAll('[data-edit]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const item = state.labels.find((l) => l.id === btn.getAttribute('data-edit'));
+          if (!item) return;
+          state.editingLabelId = item.id;
+          el('labelName').value = item.name;
+          state.selectedLabelColor = item.color;
+          el('labelSaveBtn').textContent = 'Save changes';
+          renderColorSwatches();
+        });
+      });
+      list.querySelectorAll('[data-del]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          el('labelError').textContent = '';
+          try {
+            await api('/api/labels/' + encodeURIComponent(btn.getAttribute('data-del')), {
+              method: 'DELETE',
+            });
+            if (state.filterLabelId === btn.getAttribute('data-del')) {
+              state.filterLabelId = 'all';
+            }
+            await loadDeskMeta();
+            await loadChats(true);
+            renderLabelManageList();
+          } catch (err) {
+            el('labelError').textContent = err.message;
+          }
+        });
+      });
+    }
+
+    el('labelForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      el('labelError').textContent = '';
+      const name = el('labelName').value;
+      const color = state.selectedLabelColor;
+      try {
+        if (state.editingLabelId) {
+          await api('/api/labels/' + encodeURIComponent(state.editingLabelId), {
+            method: 'PUT',
+            body: JSON.stringify({ name, color }),
+          });
+        } else {
+          await api('/api/labels', {
+            method: 'POST',
+            body: JSON.stringify({ name, color }),
+          });
+        }
+        state.editingLabelId = null;
+        el('labelForm').reset();
+        el('labelSaveBtn').textContent = 'Add label';
+        state.selectedLabelColor = state.labelColors[0];
+        await loadDeskMeta();
+        await loadChats(true);
+        renderLabelManageList();
+        renderColorSwatches();
+      } catch (err) {
+        el('labelError').textContent = err.message;
+      }
+    });
+
+    // —— Assign labels ——
+    function openAssignLabelsModal() {
+      if (!state.selected) return;
+      el('assignLabelsError').textContent = '';
+      el('assignLabelsSub').textContent = 'Select labels for +' + state.selected + '.';
+      state.assignDraft = state.threadLabelIds.slice();
+      const list = el('assignLabelsList');
+      if (!state.labels.length) {
+        list.innerHTML = '<div class="slash-empty">Create labels first from the ⋮ menu.</div>';
+      } else {
+        list.innerHTML = state.labels.map((l) => {
+          const checked = state.assignDraft.includes(l.id) ? 'checked' : '';
+          return (
+            '<label class="check-row">' +
+              '<input type="checkbox" value="' + l.id + '" ' + checked + ' />' +
+              '<span class="label-pill" style="background:' + escapeHtml(l.color) + ';">' + escapeHtml(l.name) + '</span>' +
+            '</label>'
+          );
+        }).join('');
+        list.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+          input.addEventListener('change', () => {
+            if (input.checked) {
+              if (!state.assignDraft.includes(input.value)) state.assignDraft.push(input.value);
+            } else {
+              state.assignDraft = state.assignDraft.filter((id) => id !== input.value);
+            }
+          });
+        });
+      }
+      el('assignLabelsModal').classList.remove('hidden');
+    }
+    function closeAssignLabelsModal() {
+      el('assignLabelsModal').classList.add('hidden');
+    }
+    el('closeAssignLabelsModal').addEventListener('click', closeAssignLabelsModal);
+    el('assignLabelsModal').addEventListener('click', (e) => {
+      if (e.target === el('assignLabelsModal')) closeAssignLabelsModal();
+    });
+    el('saveAssignLabelsBtn').addEventListener('click', async () => {
+      if (!state.selected) return;
+      el('assignLabelsError').textContent = '';
+      try {
+        const saved = await api('/api/chats/' + encodeURIComponent(state.selected) + '/labels', {
+          method: 'PUT',
+          body: JSON.stringify({ labelIds: state.assignDraft }),
+        });
+        state.threadLabelIds = saved.labelIds || [];
+        state.chats = state.chats.map((c) => {
+          if (c.waNumber !== state.selected) return c;
+          return {
+            ...c,
+            labelIds: saved.labelIds || [],
+            labels: saved.labels || [],
+          };
+        });
+        renderChatList();
+        closeAssignLabelsModal();
+        await loadThread(state.selected);
+        await loadChats(true);
+      } catch (err) {
+        el('assignLabelsError').textContent = err.message;
+      }
+    });
 
     function escapeHtml(s) {
       return String(s)

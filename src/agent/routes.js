@@ -4,6 +4,8 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
+const { createShortcutStore } = require('./shortcutStore');
+const { createLabelStore } = require('./labelStore');
 
 function timingSafeEqualStr(a, b) {
   const left = Buffer.from(String(a || ''));
@@ -12,15 +14,24 @@ function timingSafeEqualStr(a, b) {
   return crypto.timingSafeEqual(left, right);
 }
 
+function sendStoreError(res, err) {
+  const status = err && err.status ? err.status : 500;
+  return res.status(status).json({ error: err.message || String(err) });
+}
+
 function createAgentRouter({
   engine,
   sessionStore,
   messageStore,
+  shortcutStore,
+  labelStore,
   sendMessage,
 } = {}) {
   const router = express.Router();
   const password = config.agent.deskPassword;
   const enabled = config.agent.deskEnabled && Boolean(password);
+  const shortcuts = shortcutStore || createShortcutStore();
+  const labels = labelStore || createLabelStore();
 
   function requireAuth(req, res, next) {
     if (!enabled) {
@@ -86,15 +97,27 @@ function createAgentRouter({
 
   router.get('/api/chats', requireAuth, async (_req, res) => {
     try {
-      const chats = await messageStore.listChats();
+      const [chats, labelBundle] = await Promise.all([
+        messageStore.listChats(),
+        labels.getChatLabelsMap(),
+      ]);
+      const labelById = new Map(
+        (labelBundle.labels || []).map((l) => [l.id, l])
+      );
       const enriched = [];
       for (const chat of chats) {
         const session = await sessionStore.get(chat.waNumber);
+        const labelIds = labelBundle.chatLabels[chat.waNumber] || [];
         enriched.push({
           ...chat,
           status: session ? session.status : 'unknown',
           currentState: session ? session.currentState : null,
           agentTakenOver: Boolean(session && session.agentTakenOver),
+          labelIds,
+          labels: labelIds
+            .map((id) => labelById.get(id))
+            .filter(Boolean)
+            .map((l) => ({ id: l.id, name: l.name, color: l.color })),
         });
       }
       res.json({ chats: enriched });
@@ -106,13 +129,21 @@ function createAgentRouter({
   router.get('/api/chats/:wa', requireAuth, async (req, res) => {
     try {
       const wa = String(req.params.wa || '').replace(/\D/g, '');
-      const [messages, session] = await Promise.all([
+      const [messages, session, labelIds, allLabels] = await Promise.all([
         messageStore.listMessages(wa),
         sessionStore.get(wa),
+        labels.getChatLabelIds(wa),
+        labels.listLabels(),
       ]);
+      const labelById = new Map(allLabels.map((l) => [l.id, l]));
       res.json({
         waNumber: wa,
         messages,
+        labelIds,
+        labels: labelIds
+          .map((id) => labelById.get(id))
+          .filter(Boolean)
+          .map((l) => ({ id: l.id, name: l.name, color: l.color })),
         session: session
           ? {
               status: session.status,
@@ -126,6 +157,28 @@ function createAgentRouter({
       });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });
+    }
+  });
+
+  router.put('/api/chats/:wa/labels', requireAuth, express.json(), async (req, res) => {
+    try {
+      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      const labelIds = req.body && Array.isArray(req.body.labelIds)
+        ? req.body.labelIds
+        : [];
+      const result = await labels.setChatLabels(wa, labelIds);
+      const allLabels = await labels.listLabels();
+      const labelById = new Map(allLabels.map((l) => [l.id, l]));
+      res.json({
+        ok: true,
+        ...result,
+        labels: result.labelIds
+          .map((id) => labelById.get(id))
+          .filter(Boolean)
+          .map((l) => ({ id: l.id, name: l.name, color: l.color })),
+      });
+    } catch (err) {
+      return sendStoreError(res, err);
     }
   });
 
@@ -191,6 +244,92 @@ function createAgentRouter({
       res.json({ ok: true, ...result });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });
+    }
+  });
+
+  // —— Shortcuts (type "/" in composer) ——
+  router.get('/api/shortcuts', requireAuth, async (_req, res) => {
+    try {
+      const list = await shortcuts.list();
+      res.json({ shortcuts: list });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.post('/api/shortcuts', requireAuth, express.json(), async (req, res) => {
+    try {
+      const row = await shortcuts.create({
+        key: req.body && req.body.key,
+        text: req.body && req.body.text,
+      });
+      res.status(201).json({ shortcut: row });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.put('/api/shortcuts/:id', requireAuth, express.json(), async (req, res) => {
+    try {
+      const row = await shortcuts.update(req.params.id, {
+        key: req.body && req.body.key,
+        text: req.body && req.body.text,
+      });
+      res.json({ shortcut: row });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.delete('/api/shortcuts/:id', requireAuth, async (req, res) => {
+    try {
+      await shortcuts.remove(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  // —— Labels ——
+  router.get('/api/labels', requireAuth, async (_req, res) => {
+    try {
+      const list = await labels.listLabels();
+      res.json({ labels: list, colors: labels.colors || [] });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.post('/api/labels', requireAuth, express.json(), async (req, res) => {
+    try {
+      const row = await labels.createLabel({
+        name: req.body && req.body.name,
+        color: req.body && req.body.color,
+      });
+      res.status(201).json({ label: row });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.put('/api/labels/:id', requireAuth, express.json(), async (req, res) => {
+    try {
+      const row = await labels.updateLabel(req.params.id, {
+        name: req.body && req.body.name,
+        color: req.body && req.body.color,
+      });
+      res.json({ label: row });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.delete('/api/labels/:id', requireAuth, async (req, res) => {
+    try {
+      await labels.removeLabel(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      return sendStoreError(res, err);
     }
   });
 

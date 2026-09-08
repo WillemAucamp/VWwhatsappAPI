@@ -51,18 +51,28 @@ Staff browser inbox (Cloud API chats, no Coexistence required):
 2. Open `https://your-host/agent`
 3. Sign in → pick a chat → **Take over** / reply / **Release to bot**
 
+### Shortcuts (type `/`)
+
+Create canned replies under **⋮ → Manage shortcuts**. In the composer, type `/` then a shortcut name (e.g. `/greeting`) and pick from the list — same idea as WhatsApp Business quick replies.
+
+### Labels
+
+Create labels under **⋮ → Manage labels**. Open a chat → **Labels** to tag it (VIP, Follow-up, etc.). Filter the chat list with the chips above the inbox.
+
 ### Where chats are stored
 
 | Data | Path (on the Render container) | Purpose |
 |---|---|---|
 | Message transcripts | `data/transcripts/<waNumber>.jsonl` | Agent desk chat history (one JSON line per message) |
 | Bot sessions | `data/sessions/` | FSM state (greeting step, quiet, takeover, etc.) |
+| Shortcuts & labels | `data/agent/` | Agent desk canned replies and chat labels |
 | Lead log | `data/logs/leads.jsonl` | Qualified / exited leads |
 
-Override with `AGENT_TRANSCRIPT_PATH` / `SESSION_STORE_PATH` if needed.
+Override with `AGENT_TRANSCRIPT_PATH` / `SESSION_STORE_PATH` / `AGENT_SHORTCUTS_PATH` / `AGENT_LABELS_PATH` if needed.
 
 **Render free disk is ephemeral** — redeploys wipe `data/` unless you attach a persistent disk. The live inbox only shows numbers that already messaged this running instance.
 
 ### If the menu never arrives / Send says 401
 
 `GET /health` → `webhook.lastSendError` with **code 190** means `WHATSAPP_TOKEN` is expired or wrong. Paste a fresh token (prefer a permanent **system user** token) into Render env and redeploy. Also keep `WHATSAPP_APP_SECRET` matched to the same Meta app (signature rejects drop inbound messages).
+

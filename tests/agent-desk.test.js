@@ -15,6 +15,8 @@ config.agent.deskEnabled = true;
 config.agent.deskPassword = 'desk-secret';
 
 const { createMessageStore } = require('../src/agent/messageStore');
+const { createShortcutStore } = require('../src/agent/shortcutStore');
+const { createLabelStore } = require('../src/agent/labelStore');
 const { createAgentRouter } = require('../src/agent/routes');
 const { MemorySessionStore } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
@@ -29,9 +31,20 @@ function listen(app) {
   });
 }
 
+function authHeaders() {
+  return {
+    Authorization: 'Bearer desk-secret',
+    'Content-Type': 'application/json',
+  };
+}
+
 async function testMessageStoreAndApis() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-tx-'));
+  const shortcutsPath = path.join(dir, 'shortcuts.json');
+  const labelsPath = path.join(dir, 'labels.json');
   const messageStore = createMessageStore(dir);
+  const shortcutStore = createShortcutStore(shortcutsPath);
+  const labelStore = createLabelStore(labelsPath);
   const sessionStore = new MemorySessionStore();
   const outbound = [];
 
@@ -60,6 +73,8 @@ async function testMessageStoreAndApis() {
       engine,
       sessionStore,
       messageStore,
+      shortcutStore,
+      labelStore,
       sendMessage: async (to, payload) => {
         outbound.push({ to, payload });
         return { messages: [{ id: 'wamid.agent' }] };
@@ -84,15 +99,13 @@ async function testMessageStoreAndApis() {
     }).then((r) => r.json());
     assert.strictEqual(chats.chats.length, 1);
     assert.strictEqual(chats.chats[0].waNumber, '27821234567');
+    assert.deepStrictEqual(chats.chats[0].labelIds, []);
 
     const reply = await fetch(
       `http://127.0.0.1:${port}/agent/api/chats/27821234567/reply`,
       {
         method: 'POST',
-        headers: {
-          Authorization: 'Bearer desk-secret',
-          'Content-Type': 'application/json',
-        },
+        headers: authHeaders(),
         body: JSON.stringify({ text: 'Hi from desk' }),
       }
     );
@@ -104,18 +117,88 @@ async function testMessageStoreAndApis() {
 
     await fetch(`http://127.0.0.1:${port}/agent/api/chats/27821234567/release`, {
       method: 'POST',
-      headers: {
-        Authorization: 'Bearer desk-secret',
-        'Content-Type': 'application/json',
-      },
+      headers: authHeaders(),
       body: '{}',
     });
     const after = await sessionStore.get('27821234567');
     assert.strictEqual(after.agentTakenOver, false);
     assert.strictEqual(after.currentState, 'GREETING');
 
+    // Shortcuts
+    const shortcuts = await fetch(`http://127.0.0.1:${port}/agent/api/shortcuts`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    assert.ok(shortcuts.shortcuts.length >= 3);
+    assert.ok(shortcuts.shortcuts.some((s) => s.key === 'greeting'));
+
+    const created = await fetch(`http://127.0.0.1:${port}/agent/api/shortcuts`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ key: '/Thanks', text: 'Thank you for contacting VW Melrose.' }),
+    }).then(async (r) => {
+      assert.strictEqual(r.status, 201);
+      return r.json();
+    });
+    assert.strictEqual(created.shortcut.key, 'thanks');
+
+    const updated = await fetch(
+      `http://127.0.0.1:${port}/agent/api/shortcuts/${created.shortcut.id}`,
+      {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ text: 'Thanks — chat soon!' }),
+      }
+    ).then((r) => r.json());
+    assert.strictEqual(updated.shortcut.text, 'Thanks — chat soon!');
+
+    const del = await fetch(
+      `http://127.0.0.1:${port}/agent/api/shortcuts/${created.shortcut.id}`,
+      { method: 'DELETE', headers: { Authorization: 'Bearer desk-secret' } }
+    );
+    assert.strictEqual(del.status, 200);
+
+    // Labels
+    const labels = await fetch(`http://127.0.0.1:${port}/agent/api/labels`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    assert.ok(labels.labels.length >= 4);
+    const vip = labels.labels.find((l) => l.name === 'VIP');
+    assert.ok(vip);
+
+    const newLabel = await fetch(`http://127.0.0.1:${port}/agent/api/labels`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name: 'Trade-in', color: '#067647' }),
+    }).then(async (r) => {
+      assert.strictEqual(r.status, 201);
+      return r.json();
+    });
+    assert.strictEqual(newLabel.label.name, 'Trade-in');
+
+    const assign = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27821234567/labels`,
+      {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ labelIds: [vip.id, newLabel.label.id] }),
+      }
+    ).then((r) => r.json());
+    assert.strictEqual(assign.labelIds.length, 2);
+
+    const chatsLabeled = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    assert.strictEqual(chatsLabeled.chats[0].labels.length, 2);
+    assert.ok(chatsLabeled.chats[0].labels.some((l) => l.name === 'VIP'));
+
+    const thread = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27821234567`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    ).then((r) => r.json());
+    assert.deepStrictEqual(thread.labelIds.sort(), [vip.id, newLabel.label.id].sort());
+
     // eslint-disable-next-line no-console
-    console.log('✓ agent desk auth, reply takeover, and release');
+    console.log('✓ agent desk auth, reply, shortcuts, and labels');
   } finally {
     server.close();
   }
