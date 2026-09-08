@@ -490,9 +490,8 @@ class FsmEngine {
           stubMarker: this.stubMarker,
           extras,
         });
-        const linkText = [linkBody, extraText, catalogLink.url]
-          .filter(Boolean)
-          .join('\n\n');
+        // Put the URL only via `link` so Graph sends one preview (not a duplicate).
+        const linkText = [linkBody, extraText].filter(Boolean).join('\n\n');
         return await this.sendMessage(waNumber, {
           text: linkText,
           link: catalogLink.url,

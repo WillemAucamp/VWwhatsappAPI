@@ -473,7 +473,8 @@ async function testCatalogLinkWhenInteractiveCatalogFails() {
     });
 
     const stockSend = sent[sent.length - 1];
-    assert.ok(String(stockSend.payload.text).includes('https://wa.me/c/27720630780'));
+    assert.ok(String(stockSend.payload.text).includes('Open the catalogue link'));
+    assert.ok(!String(stockSend.payload.text).includes('https://wa.me/c/27720630780'));
     assert.strictEqual(stockSend.payload.link, 'https://wa.me/c/27720630780');
     assert.strictEqual(stockSend.payload.meta.catalogMode, 'catalog_link');
     // eslint-disable-next-line no-console
