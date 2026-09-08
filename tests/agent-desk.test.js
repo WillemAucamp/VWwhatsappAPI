@@ -121,8 +121,72 @@ async function testMessageStoreAndApis() {
   }
 }
 
+async function testAgentTakeoverHoldsUntilRelease() {
+  const sessionStore = new MemorySessionStore();
+  const outbound = [];
+
+  const engine = new FsmEngine({
+    sessionStore,
+    leadLogger: new CapturingLogger(),
+    sendMessage: async (to, payload) => {
+      outbound.push({ to, payload });
+      return { messages: [{ id: `wamid.${outbound.length}` }] };
+    },
+    notifyAgent: async () => ({ delivered: false }),
+  });
+
+  // Start a normal funnel, then staff takes over and replies "Hello".
+  await engine.handleInbound('27829990001', 'hi');
+  await engine.takeOver('27829990001');
+  const held = await sessionStore.get('27829990001');
+  assert.strictEqual(held.status, 'quiet');
+  assert.strictEqual(held.agentTakenOver, true);
+
+  const beforeCount = outbound.length;
+
+  // Customer (or mirrored) reopen keywords must NOT restart during takeover.
+  for (const text of ['Hello', 'hi', 'restart', 'start', 'anything else']) {
+    // eslint-disable-next-line no-await-in-loop
+    const result = await engine.handleInbound('27829990001', text);
+    assert.strictEqual(result.agentTakenOver, true);
+    assert.strictEqual(result.quiet, true);
+    // eslint-disable-next-line no-await-in-loop
+    const session = await sessionStore.get('27829990001');
+    assert.strictEqual(session.agentTakenOver, true);
+    assert.strictEqual(session.status, 'quiet');
+  }
+
+  // Bot must stay silent — no restart notice, no quiet_thread_notice, no menu.
+  const afterInbound = outbound.slice(beforeCount);
+  assert.strictEqual(
+    afterInbound.length,
+    0,
+    `expected no bot outbound during agent takeover, got ${JSON.stringify(afterInbound)}`
+  );
+
+  // Only Release to bot hands control back and restarts greeting.
+  await engine.releaseToBot('27829990001');
+  const released = await sessionStore.get('27829990001');
+  assert.strictEqual(released.agentTakenOver, false);
+  assert.strictEqual(released.status, 'active');
+  assert.strictEqual(released.currentState, 'GREETING');
+  assert.ok(
+    outbound.some(
+      (o) =>
+        o.payload &&
+        o.payload.meta &&
+        o.payload.meta.promptKey === 'session_restart_notice'
+    ),
+    'release should send session_restart_notice'
+  );
+
+  // eslint-disable-next-line no-console
+  console.log('✓ agent takeover holds until explicit release');
+}
+
 async function main() {
   await testMessageStoreAndApis();
+  await testAgentTakeoverHoldsUntilRelease();
   // eslint-disable-next-line no-console
   console.log('\nagent desk tests passed.');
 }
