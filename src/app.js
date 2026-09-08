@@ -95,8 +95,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when See our cars must use live Meta catalog product_list.
-        fsm: 'catalog-link-waba-2026-09-08',
+        // Bumped when stocklist "Check if I qualify" must not bounce to GREETING.
+        fsm: 'stocklist-any-car-cold-start-2026-09-08',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||
