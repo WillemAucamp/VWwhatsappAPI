@@ -45,6 +45,9 @@ const config = {
     // file | postgres — defaults to postgres when DATABASE_URL is set (Supabase).
     messageStore: (process.env.MESSAGE_STORE || '').toLowerCase(),
     databaseUrl: process.env.DATABASE_URL || '',
+    shortcutsPath:
+      process.env.AGENT_SHORTCUTS_PATH || './data/agent/shortcuts.json',
+    labelsPath: process.env.AGENT_LABELS_PATH || './data/agent/labels.json',
   },
 
   session: {
@@ -67,7 +70,9 @@ const config = {
   },
 
   links: {
-    applicationLink: process.env.APPLICATION_LINK || '',
+    applicationLink:
+      process.env.APPLICATION_LINK ||
+      'https://forms.gle/eZq13HF91GpGqivU9',
     stockLink: process.env.STOCK_LINK || '',
   },
 

@@ -6,7 +6,6 @@ const { createEmptySession } = require('../session/store');
 const {
   buildOutboundText,
   buildInteractiveFromState,
-  listValidOptionHints,
   resolveCopy,
 } = require('../content/resolve');
 const { buildRecord } = require('../logger/leadLogger');
@@ -68,6 +67,19 @@ function resolveOptionKey(state, normalized, replyId) {
     return String(replyId);
   }
   return matchOption(state, normalized);
+}
+
+/**
+ * If the inbound matches a main-menu (GREETING) option — e.g. customer tapped
+ * Qualify Me on an older greeting after a redeploy wiped the session — return
+ * the destination state id. Otherwise null.
+ */
+function resolveGreetingDestination(normalized, replyId) {
+  const greeting = STATES[ENTRY_STATE];
+  if (!greeting) return null;
+  const optionKey = resolveOptionKey(greeting, normalized, replyId);
+  if (!optionKey) return null;
+  return greeting.options[optionKey] || null;
 }
 
 function linkForState(state) {
@@ -404,6 +416,12 @@ class FsmEngine {
         ? { stateId: state.id, promptKey: state.promptKey }
         : null;
       await this._finalizeTerminal(session, state);
+    } else if (state.autoAdvanceTo && !sendError) {
+      // Info slides (e.g. special descriptions) → continue into the next step
+      // in the same turn so the customer lands on Quick check immediately.
+      this._clearFollowUp(session);
+      await this.sessionStore.set(session.waNumber, session);
+      return this._enterState(session, state.autoAdvanceTo);
     } else {
       this._armWaitingFollowUp(session);
       await this.sessionStore.set(session.waNumber, session);
@@ -583,24 +601,19 @@ class FsmEngine {
   }
 
   async _handleInvalid(session, state) {
-    const max = config.fsm.maxInvalidAttempts;
-    session.invalidAttempts += 1;
-
-    if (session.invalidAttempts > max) {
+    // Already on a recovery menu and still off-option → hand over quietly.
+    if (
+      state &&
+      (state.id === 'OFF_MENU_RECOVERY' || state.id === 'QUALIFY_CONSENT_NO')
+    ) {
       return this._routeToHuman(session, state.id);
     }
 
-    const hints = listValidOptionHints(state);
-    const reprompt = resolveCopy('invalid_input_reprompt', {
-      stubMarker: this.stubMarker,
+    session.interruptedFrom = state ? state.id : session.currentState;
+    session.invalidAttempts = 0;
+    return this._enterState(session, 'OFF_MENU_RECOVERY', {
+      fromInterrupt: session.interruptedFrom,
     });
-    const hintLine = hints.length ? hints.join(' | ') : '';
-    const extra = [reprompt, hintLine].filter(Boolean).join('\n');
-
-    await this._send(session.waNumber, state.promptKey, state, extra);
-    this._armWaitingFollowUp(session);
-    await this.sessionStore.set(session.waNumber, session);
-    return { session, state, invalid: true };
   }
 
   async _restart(session) {
@@ -609,17 +622,7 @@ class FsmEngine {
     });
     const footer = resolveCopy('help_footer', { stubMarker: this.stubMarker });
 
-    session.currentState = null;
-    session.path = [];
-    session.invalidAttempts = 0;
-    session.status = 'active';
-    session.interruptedFrom = null;
-    session.lastExitReason = null;
-    session.pendingLead = null;
-    session.pendingTerminalOutbound = null;
-    session.lastLoggedLeadKey = null;
-    session.agentTakenOver = false;
-    this._clearFollowUp(session);
+    this._resetSessionForFreshStart(session);
 
     if (notice || footer) {
       await this.sendMessage(session.waNumber, {
@@ -631,13 +634,43 @@ class FsmEngine {
     return this._enterState(session, ENTRY_STATE);
   }
 
+  _resetSessionForFreshStart(session) {
+    session.currentState = null;
+    session.path = [];
+    session.invalidAttempts = 0;
+    session.status = 'active';
+    session.interruptedFrom = null;
+    session.lastExitReason = null;
+    session.pendingLead = null;
+    session.pendingTerminalOutbound = null;
+    session.lastLoggedLeadKey = null;
+    session.agentTakenOver = false;
+    this._clearFollowUp(session);
+  }
+
+  /**
+   * Start from a wiped/soft-closed session. Honour main-menu button taps
+   * (Qualify Me, See our cars, Opt-Out) so they don't bounce back to GREETING.
+   */
+  async _beginFromMainMenuIntent(session, normalized, replyId) {
+    this._resetSessionForFreshStart(session);
+    const destination = resolveGreetingDestination(normalized, replyId);
+    if (destination) {
+      session.path = [ENTRY_STATE];
+      return this._enterState(session, destination);
+    }
+    return this._enterState(session, ENTRY_STATE);
+  }
+
   /**
    * Staff takeover: bot goes quiet until release / customer restart.
+   * Remembers the in-progress step so Release to bot can resume there.
    * @param {{silent?: boolean}} [options] skip optional notice
    */
   async takeOver(waNumber, options = {}) {
     return this._withSessionLock(waNumber, async () => {
       const session = await this.getOrCreateSession(waNumber);
+      this._rememberResumePoint(session);
       session.agentTakenOver = true;
       session.status = 'quiet';
       session.updatedAt = this._now();
@@ -668,20 +701,104 @@ class FsmEngine {
           status: session.status,
           agentTakenOver: true,
           currentState: session.currentState,
+          interruptedFrom: session.interruptedFrom,
         },
       };
     });
   }
 
   /**
-   * Staff release: clear takeover and restart Melrose greeting for the customer.
+   * Staff release: resume the step from before handover when possible;
+   * otherwise restart at the Melrose greeting.
    */
   async releaseToBot(waNumber) {
     return this._withSessionLock(waNumber, async () => {
       const session = await this.getOrCreateSession(waNumber);
       session.agentTakenOver = false;
+
+      const resumeId = this._resumeStateId(session);
+      if (resumeId) {
+        return this._resumeAtState(session, resumeId);
+      }
       return this._restart(session);
     });
+  }
+
+  /**
+   * Snapshot the in-progress menu step before going quiet, unless we already
+   * have an interruptedFrom from a bot-driven human handover.
+   */
+  _rememberResumePoint(session) {
+    if (session.interruptedFrom && this._isResumableStateId(session.interruptedFrom)) {
+      return;
+    }
+    const resumeId = this._resumeStateId(session);
+    if (resumeId) {
+      session.interruptedFrom = resumeId;
+    }
+  }
+
+  _isResumableStateId(stateId) {
+    const state = stateId ? STATES[stateId] : null;
+    if (!state || state.terminal) return false;
+    if (state.autoAdvanceTo) return false;
+    return state.type === 'choice';
+  }
+
+  /**
+   * Prefer interruptedFrom, then currentState, then walk path backwards for
+   * the last choice menu the customer was answering.
+   */
+  _resumeStateId(session) {
+    const candidates = [session.interruptedFrom, session.currentState];
+    for (const id of candidates) {
+      if (this._isResumableStateId(id)) return id;
+      const state = id ? STATES[id] : null;
+      if (state && state.autoAdvanceTo && this._isResumableStateId(state.autoAdvanceTo)) {
+        return state.autoAdvanceTo;
+      }
+    }
+    if (Array.isArray(session.path)) {
+      for (let i = session.path.length - 1; i >= 0; i -= 1) {
+        const id = session.path[i];
+        if (this._isResumableStateId(id)) return id;
+      }
+    }
+    return null;
+  }
+
+  async _resumeAtState(session, stateId) {
+    session.status = 'active';
+    session.agentTakenOver = false;
+    session.interruptedFrom = null;
+    session.lastExitReason = null;
+    session.pendingTerminalOutbound = null;
+    // Keep path history; drop a trailing human-handover terminal if present.
+    if (Array.isArray(session.path) && session.path.length) {
+      const last = session.path[session.path.length - 1];
+      const lastState = STATES[last];
+      if (lastState && lastState.terminal && lastState.quiet) {
+        session.path = session.path.slice(0, -1);
+      }
+    }
+    this._clearFollowUp(session);
+
+    const notice = resolveCopy('session_resume_notice', {
+      stubMarker: this.stubMarker,
+    });
+    if (notice) {
+      try {
+        await this.sendMessage(session.waNumber, {
+          text: notice,
+          meta: { stateId: null, promptKey: 'session_resume_notice' },
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[fsm] resume notice send failed', err.message);
+      }
+    }
+
+    return this._enterState(session, stateId);
   }
 
   async handleInbound(waNumber, text, extras = {}) {
@@ -720,6 +837,11 @@ class FsmEngine {
       if (session.pendingTerminalOutbound) {
         return this._retryTerminalOutbound(session);
       }
+      // Honour Qualify Me / See our cars / Opt-Out taps instead of only
+      // re-showing the main menu (common after Render session wipe).
+      if (resolveGreetingDestination(normalized, replyId)) {
+        return this._beginFromMainMenuIntent(session, normalized, replyId);
+      }
       return this._restart(session);
     }
 
@@ -730,8 +852,7 @@ class FsmEngine {
         return this._routeToHuman(session, null);
       }
 
-      session.status = 'active';
-      return this._enterState(session, ENTRY_STATE);
+      return this._beginFromMainMenuIntent(session, normalized, replyId);
     }
 
     if (matchesKeywordList(normalized, config.fsm.helpIntentKeywords)) {
@@ -740,7 +861,7 @@ class FsmEngine {
 
     const state = STATES[session.currentState];
     if (!state) {
-      return this._enterState(session, ENTRY_STATE);
+      return this._beginFromMainMenuIntent(session, normalized, replyId);
     }
 
     if (state.terminal) {
@@ -753,6 +874,9 @@ class FsmEngine {
         return { session, quiet: true };
       }
       session.status = 'soft_closed';
+      if (resolveGreetingDestination(normalized, replyId)) {
+        return this._beginFromMainMenuIntent(session, normalized, replyId);
+      }
       return this._restart(session);
     }
 
@@ -785,4 +909,5 @@ module.exports = {
   matchesKeywordList,
   matchOption,
   resolveOptionKey,
+  resolveGreetingDestination,
 };

@@ -43,8 +43,25 @@ async function graphPost(graphBody) {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(`WhatsApp send failed: ${res.status}`);
+    const graph = (data && data.error) || {};
+    const code = graph.code != null ? graph.code : null;
+    const graphMsg = graph.message ? String(graph.message) : '';
+    let hint = '';
+    if (res.status === 401 || code === 190) {
+      hint =
+        ' — WHATSAPP_TOKEN is invalid or expired. Create a new token (prefer a permanent system-user token) in Meta Developer → WhatsApp → API Setup, paste it into Render env, and redeploy.';
+    } else if (code === 100 || code === 33) {
+      hint =
+        ' — Check WHATSAPP_PHONE_NUMBER_ID matches the number on this Meta app.';
+    }
+    const detail = [graphMsg, code != null ? `code ${code}` : '']
+      .filter(Boolean)
+      .join(' · ');
+    const err = new Error(
+      `WhatsApp send failed: ${res.status}${detail ? ` (${detail})` : ''}${hint}`
+    );
     err.status = res.status;
+    err.code = code;
     err.response = data;
     throw err;
   }

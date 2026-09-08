@@ -159,8 +159,8 @@ async function testFileSessionStoreAtomicReplace() {
   session.status = 'active';
   session.path = [
     'GREETING',
-    'EMPLOYMENT_CHECK',
-    'AFFORDABILITY_CHECK',
+    'QUALIFY_CONSENT',
+    'EMPLOYED_INCOME_CHECK',
     'LICENSE_CHECK',
     'CREDIT_CHECK',
   ];

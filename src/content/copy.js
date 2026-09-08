@@ -28,42 +28,106 @@ module.exports = {
     'Browse the link below, then tap to continue with a quick finance check.',
   ].join('\n'),
 
-  promotions_body: [
-    'Promotions — content coming soon.',
+  specials_menu_prompt: [
+    'Great — which special caught your eye?',
     '',
-    'Tap below to return to the main menu, or type *qualify me* to start pre-qualification.',
+    'Tap an option below and I’ll explain it, then we’ll do a quick finance check.',
+  ].join('\n'),
+
+  payment_holiday_body: [
+    'With our Payment Holiday promotion, we provide a helpful financial allowance toward your new car to give you a head start!',
+    '',
+    "Since every car has a unique allowance and bank installments depend on your personal financing plan, we take your car's total allowance and divide it by your monthly installment to see how many months we can cover.",
+    '',
+    'For instance, if your car comes with a *R15,000* allowance and your installment is *R5,000* per month, we’ll take care of your first *3 payments* so you can enjoy your new ride worry-free!',
+  ].join('\n'),
+
+  lower_rate_body: [
+    'Every car comes with a dedicated assistance allowance—a lump sum of money we can use to make your deal much more affordable!',
+    '',
+    'With our *Lower Interest Rate Promotion*, we use that allowance to buy down your interest rate directly with the bank. This drops your monthly repayment and saves you serious money on total interest over time.',
+    '',
+    '*Just a quick note:* The bank sets your starting interest rate based on your credit history. We don’t set the rate ourselves—we just use your car’s allowance to lower whatever rate the bank gives you!',
+  ].join('\n'),
+
+  discount_body: [
+    'Every car comes with a dedicated assistance allowance—a lump sum of money we can use to make your new ride even more affordable!',
+    '',
+    'With our Deposit Assistance Special, we apply that allowance directly as a cash deposit on your behalf. This knocks down the total purchase price right away, giving you lower monthly repayments and helping you owe less overall!',
+  ].join('\n'),
+
+  promotions_body: [
+    'Great — which special caught your eye?',
+    '',
+    'Tap an option below and I’ll explain it, then we’ll do a quick finance check.',
   ].join('\n'),
 
   employment_check_prompt: [
-    'Good choice.',
+    "Cool, let's do this!",
     '',
-    'A few background questions first.',
-    'Are you currently employed?',
+    'Just to make sure we get everything 100% right for you, do you mind if I ask a few quick questions?',
+  ].join('\n'),
+
+  qualify_consent_prompt: [
+    "Cool, let's do this!",
+    '',
+    'Just to make sure we get everything 100% right for you, do you mind if I ask a few quick questions?',
+  ].join('\n'),
+
+  qualify_consent_no_prompt: [
+    'No problem at all.',
+    '',
+    'Would you like to talk to me directly, or should I take you back to the main menu?',
+  ].join('\n'),
+
+  employed_income_prompt: [
+    'First up: Are you currently employed full-time, and is your monthly income above R9,500?',
+  ].join('\n'),
+
+  not_ready_end: [
+    "Ah, unfortunately we wouldn't be able to move forward just yet, but the good news is you can definitely build towards it to get your dream car!",
+    '',
+    "Here's a quick look at what the banks require:",
+    '',
+    '*Permanently Employed:* Minimum *R9,500* net income into your account monthly.',
+    '',
+    '*Self-Employed:* Average monthly earnings of around *R25,000*.',
+    '',
+    "*Starting a New Role?* You don't have to wait! As long as it's a permanent position, you can apply right away using your signed employment contract.",
+    '',
+    "Keep pushing and working hard—you've got this, and we'd love to help you as soon as you hit that mark!",
   ].join('\n'),
 
   employed_no_end: [
-    'Understood.',
+    "Ah, unfortunately we wouldn't be able to move forward just yet, but the good news is you can definitely build towards it to get your dream car!",
     '',
-    'Our finance partners require proof of steady income.',
-    "I'm unable to proceed today.",
+    "Here's a quick look at what the banks require:",
     '',
-    'Please reach out again once this changes.',
-    'Thank you for your time.',
+    '*Permanently Employed:* Minimum *R9,500* net income into your account monthly.',
+    '',
+    '*Self-Employed:* Average monthly earnings of around *R25,000*.',
+    '',
+    "*Starting a New Role?* You don't have to wait! As long as it's a permanent position, you can apply right away using your signed employment contract.",
+    '',
+    "Keep pushing and working hard—you've got this, and we'd love to help you as soon as you hit that mark!",
   ].join('\n'),
 
   affordability_check_prompt: [
-    'Thank you.',
-    '',
-    'What is your approximate monthly income?',
+    'First up: Are you currently employed full-time, and is your monthly income above R9,500?',
   ].join('\n'),
 
   income_under_5k_end: [
-    'Thank you for the honest answer.',
+    "Ah, unfortunately we wouldn't be able to move forward just yet, but the good news is you can definitely build towards it to get your dream car!",
     '',
-    "Based on this, finance approval isn't possible on our current stock.",
-    'Please check back in future.',
+    "Here's a quick look at what the banks require:",
     '',
-    'Thank you for your time.',
+    '*Permanently Employed:* Minimum *R9,500* net income into your account monthly.',
+    '',
+    '*Self-Employed:* Average monthly earnings of around *R25,000*.',
+    '',
+    "*Starting a New Role?* You don't have to wait! As long as it's a permanent position, you can apply right away using your signed employment contract.",
+    '',
+    "Keep pushing and working hard—you've got this, and we'd love to help you as soon as you hit that mark!",
   ].join('\n'),
 
   license_check_prompt: [
@@ -91,20 +155,28 @@ module.exports = {
     'Here is the link:',
     '{{APPLICATION_LINK}}',
     '',
-    'Complete it at your convenience.',
-    "I'll review it personally.",
+    'Complete it at your convenience — we should have feedback for you almost immediately.',
   ].join('\n'),
 
   human_handover_body: [
-    'This requires a personal conversation.',
+    "I've got you — I'm taking over from here.",
     '',
-    "I'll step in directly. One moment.",
+    'Please share a short summary of what you need, and I\'ll be with you as soon as I can.',
+  ].join('\n'),
+
+  off_menu_recovery_prompt: [
+    "Hi I see you haven't chosen an option on the menu?",
+    'Do you want to talk to me directly, or should I take you back to the main menu?',
+    '',
+    '(Remember you can *Opt-Out* at any time)',
   ].join('\n'),
 
   invalid_input_reprompt:
     'Please tap one of the buttons below (or type a matching answer).',
 
   session_restart_notice: 'Starting fresh — here’s the main menu.',
+
+  session_resume_notice: 'Welcome back — let’s pick up where we left off.',
 
   quiet_thread_notice:
     'This chat is with our team right now. Type *restart* when you want the menu again.',
