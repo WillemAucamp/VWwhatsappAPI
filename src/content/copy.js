@@ -142,6 +142,27 @@ module.exports = {
     'How would you describe your credit standing?',
   ].join('\n'),
 
+  credit_bad_plan: [
+    'Here is the quick plan to get your score where it needs to be:',
+    '',
+    '*What to do:*',
+    '',
+    '*Settle any arrears:* Pay off any outstanding balances.',
+    '',
+    '*Build a track record:* Maintain consistent payments for 3–6 months. If you lack credit history, open a store account (like clothing) and pay it on time.',
+    '',
+    "*Track progress:* Sign up for ClearScore (it's 100% free) for monthly score updates.",
+    '',
+    '*What NOT to do:*',
+    '',
+    "Don't take out personal or micro loans.",
+    '',
+    "Don't apply for more vehicle finance for now.",
+    "(Note: Cellphone/internet bills don't build credit for vehicle finance).",
+    '',
+    "I've saved your details! Save my number and feel free to reach out anytime with questions 💪🏼",
+  ].join('\n'),
+
   final_consent_prompt: [
     "You're in a strong position to proceed.",
     '',

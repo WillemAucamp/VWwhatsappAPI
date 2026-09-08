@@ -264,8 +264,18 @@ async function testCreditBadHandover() {
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'credit_bad');
   assert.ok(h.agentEvents.some((e) => e.type === 'handover'));
+  const session = await h.store.get(wa);
+  assert.strictEqual(session.status, 'quiet');
+  assert.strictEqual(session.agentTakenOver, true);
+  const lastText = String(h.messages[h.messages.length - 1].text);
+  assert.ok(lastText.includes('ClearScore'));
+  assert.ok(lastText.includes("I've saved your details"));
+  assert.ok(lastText.includes('*What to do:*'));
+  // Further customer input stays open for staff (quiet), does not restart funnel
+  await h.say(wa, 'thanks');
+  assert.strictEqual((await h.store.get(wa)).status, 'quiet');
   // eslint-disable-next-line no-console
-  console.log('✓ credit_bad → human_handover');
+  console.log('✓ credit_bad → plan + quiet for manual replies');
 }
 
 async function testConsentNoHandover() {

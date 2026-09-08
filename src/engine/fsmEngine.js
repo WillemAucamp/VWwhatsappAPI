@@ -481,6 +481,10 @@ class FsmEngine {
       session.status = 'soft_closed';
     }
 
+    if (state.agentTakeover) {
+      session.agentTakenOver = true;
+    }
+
     const record = buildRecord({
       waNumber: session.waNumber,
       exitReason,
