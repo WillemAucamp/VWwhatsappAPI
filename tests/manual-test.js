@@ -391,6 +391,57 @@ async function testHelpIntentFromTwoStates() {
   console.log('✓ help-intent interrupt from EMPLOYMENT_CHECK and CREDIT_CHECK');
 }
 
+async function testReleaseResumesWhereLeftOff() {
+  const h = createHarness('release_resume');
+  const wa = '27000000040';
+  await h.say(wa, 'hi');
+  await h.say(wa, 'qualify me');
+  let session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
+
+  // Staff desk takeover mid-question
+  await h.engine.takeOver(wa, { silent: true });
+  session = await h.store.get(wa);
+  assert.strictEqual(session.status, 'quiet');
+  assert.strictEqual(session.agentTakenOver, true);
+  assert.strictEqual(session.interruptedFrom, 'EMPLOYMENT_CHECK');
+
+  await h.engine.releaseToBot(wa);
+  session = await h.store.get(wa);
+  assert.strictEqual(session.agentTakenOver, false);
+  assert.strictEqual(session.status, 'active');
+  assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
+  assert.ok(
+    h.messages.some((m) => m.text && m.text.includes('pick up where we left off'))
+  );
+  assert.ok(
+    h.messages.filter((m) => m.meta && m.meta.stateId === 'EMPLOYMENT_CHECK').length >= 2,
+    'employment prompt should be re-sent on resume'
+  );
+
+  // Bot-driven handover (help) then release also resumes
+  const h2 = createHarness('release_after_help');
+  const wa2 = '27000000041';
+  await h2.say(wa2, 'hi');
+  await h2.say(wa2, 'qualify me');
+  await h2.say(wa2, 'yes');
+  await h2.say(wa2, 'more than r9k');
+  await h2.say(wa2, 'help');
+  assert.strictEqual((await h2.store.get(wa2)).interruptedFrom, 'LICENSE_CHECK');
+  await h2.engine.releaseToBot(wa2);
+  assert.strictEqual((await h2.store.get(wa2)).currentState, 'LICENSE_CHECK');
+
+  // No prior step → release still starts at greeting
+  const h3 = createHarness('release_fresh');
+  const wa3 = '27000000042';
+  await h3.engine.takeOver(wa3, { silent: true });
+  await h3.engine.releaseToBot(wa3);
+  assert.strictEqual((await h3.store.get(wa3)).currentState, 'GREETING');
+
+  // eslint-disable-next-line no-console
+  console.log('✓ release to bot resumes prior step (or greeting if none)');
+}
+
 async function testSpecialsMenuThenQualify() {
   const h = createHarness('specials');
   const wa = '27000000013';
@@ -539,6 +590,7 @@ async function main() {
   await testOptOutFromGreeting();
   await testInvalidRetryThenEscalate();
   await testHelpIntentFromTwoStates();
+  await testReleaseResumesWhereLeftOff();
   await testSpecialsMenuThenQualify();
   await testFollowUpCadence();
   await testFollowUpSkippedOnTerminalAndScheduler();

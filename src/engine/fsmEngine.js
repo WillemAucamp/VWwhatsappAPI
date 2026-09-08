@@ -661,11 +661,13 @@ class FsmEngine {
 
   /**
    * Staff takeover: bot goes quiet until release / customer restart.
+   * Remembers the in-progress step so Release to bot can resume there.
    * @param {{silent?: boolean}} [options] skip optional notice
    */
   async takeOver(waNumber, options = {}) {
     return this._withSessionLock(waNumber, async () => {
       const session = await this.getOrCreateSession(waNumber);
+      this._rememberResumePoint(session);
       session.agentTakenOver = true;
       session.status = 'quiet';
       session.updatedAt = this._now();
@@ -696,20 +698,104 @@ class FsmEngine {
           status: session.status,
           agentTakenOver: true,
           currentState: session.currentState,
+          interruptedFrom: session.interruptedFrom,
         },
       };
     });
   }
 
   /**
-   * Staff release: clear takeover and restart Melrose greeting for the customer.
+   * Staff release: resume the step from before handover when possible;
+   * otherwise restart at the Melrose greeting.
    */
   async releaseToBot(waNumber) {
     return this._withSessionLock(waNumber, async () => {
       const session = await this.getOrCreateSession(waNumber);
       session.agentTakenOver = false;
+
+      const resumeId = this._resumeStateId(session);
+      if (resumeId) {
+        return this._resumeAtState(session, resumeId);
+      }
       return this._restart(session);
     });
+  }
+
+  /**
+   * Snapshot the in-progress menu step before going quiet, unless we already
+   * have an interruptedFrom from a bot-driven human handover.
+   */
+  _rememberResumePoint(session) {
+    if (session.interruptedFrom && this._isResumableStateId(session.interruptedFrom)) {
+      return;
+    }
+    const resumeId = this._resumeStateId(session);
+    if (resumeId) {
+      session.interruptedFrom = resumeId;
+    }
+  }
+
+  _isResumableStateId(stateId) {
+    const state = stateId ? STATES[stateId] : null;
+    if (!state || state.terminal) return false;
+    if (state.autoAdvanceTo) return false;
+    return state.type === 'choice';
+  }
+
+  /**
+   * Prefer interruptedFrom, then currentState, then walk path backwards for
+   * the last choice menu the customer was answering.
+   */
+  _resumeStateId(session) {
+    const candidates = [session.interruptedFrom, session.currentState];
+    for (const id of candidates) {
+      if (this._isResumableStateId(id)) return id;
+      const state = id ? STATES[id] : null;
+      if (state && state.autoAdvanceTo && this._isResumableStateId(state.autoAdvanceTo)) {
+        return state.autoAdvanceTo;
+      }
+    }
+    if (Array.isArray(session.path)) {
+      for (let i = session.path.length - 1; i >= 0; i -= 1) {
+        const id = session.path[i];
+        if (this._isResumableStateId(id)) return id;
+      }
+    }
+    return null;
+  }
+
+  async _resumeAtState(session, stateId) {
+    session.status = 'active';
+    session.agentTakenOver = false;
+    session.interruptedFrom = null;
+    session.lastExitReason = null;
+    session.pendingTerminalOutbound = null;
+    // Keep path history; drop a trailing human-handover terminal if present.
+    if (Array.isArray(session.path) && session.path.length) {
+      const last = session.path[session.path.length - 1];
+      const lastState = STATES[last];
+      if (lastState && lastState.terminal && lastState.quiet) {
+        session.path = session.path.slice(0, -1);
+      }
+    }
+    this._clearFollowUp(session);
+
+    const notice = resolveCopy('session_resume_notice', {
+      stubMarker: this.stubMarker,
+    });
+    if (notice) {
+      try {
+        await this.sendMessage(session.waNumber, {
+          text: notice,
+          meta: { stateId: null, promptKey: 'session_resume_notice' },
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[fsm] resume notice send failed', err.message);
+      }
+    }
+
+    return this._enterState(session, stateId);
   }
 
   async handleInbound(waNumber, text, extras = {}) {

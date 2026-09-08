@@ -141,6 +141,8 @@ module.exports = {
 
   session_restart_notice: 'Starting fresh — here’s the main menu.',
 
+  session_resume_notice: 'Welcome back — let’s pick up where we left off.',
+
   quiet_thread_notice:
     'This chat is with our team right now. Type *restart* when you want the menu again.',
 
