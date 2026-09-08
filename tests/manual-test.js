@@ -244,13 +244,17 @@ async function testLicenseNoHandover() {
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'no_license');
   assert.ok(h.agentEvents.some((e) => e.type === 'handover'));
-  assert.ok(
-    String(h.messages[h.messages.length - 1].text).includes(
-      "I'm taking over from here"
-    )
-  );
+  const session = await h.store.get(wa);
+  assert.strictEqual(session.status, 'quiet');
+  assert.strictEqual(session.agentTakenOver, true);
+  const lastText = String(h.messages[h.messages.length - 1].text);
+  assert.ok(lastText.includes('license is a must'));
+  assert.ok(lastText.includes('community of property'));
+  assert.ok(lastText.includes('only one bank'));
+  await h.say(wa, 'thanks');
+  assert.strictEqual((await h.store.get(wa)).status, 'quiet');
   // eslint-disable-next-line no-console
-  console.log('✓ license_no → human_handover');
+  console.log('✓ license_no → exceptions plan + quiet for manual replies');
 }
 
 async function testCreditBadHandover() {

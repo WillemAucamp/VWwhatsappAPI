@@ -136,6 +136,16 @@ module.exports = {
     "Do you hold a valid driver's license?",
   ].join('\n'),
 
+  license_no_plan: [
+    "Unfortunately a license is a must for vehicle finance — the only times you can use someone else's license would be for the following reasons:",
+    '',
+    "1) A medical reason why you can't have a license, with a letter from a specialist",
+    '2) If you are married in community of property, you can use your spouse\'s license',
+    '3) You can use a parent\'s license should you live in the same house with the same surname and the same proof of address',
+    '',
+    'Even with the above mentioned reasons the deal might be declined, as only one bank is willing to consider these.',
+  ].join('\n'),
+
   credit_check_prompt: [
     'One final question.',
     '',
