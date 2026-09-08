@@ -6,7 +6,6 @@ const { createEmptySession } = require('../session/store');
 const {
   buildOutboundText,
   buildInteractiveFromState,
-  listValidOptionHints,
   resolveCopy,
 } = require('../content/resolve');
 const { buildRecord } = require('../logger/leadLogger');
@@ -583,24 +582,16 @@ class FsmEngine {
   }
 
   async _handleInvalid(session, state) {
-    const max = config.fsm.maxInvalidAttempts;
-    session.invalidAttempts += 1;
-
-    if (session.invalidAttempts > max) {
+    // Already on the recovery menu and still off-option → hand over quietly.
+    if (state && state.id === 'OFF_MENU_RECOVERY') {
       return this._routeToHuman(session, state.id);
     }
 
-    const hints = listValidOptionHints(state);
-    const reprompt = resolveCopy('invalid_input_reprompt', {
-      stubMarker: this.stubMarker,
+    session.interruptedFrom = state ? state.id : session.currentState;
+    session.invalidAttempts = 0;
+    return this._enterState(session, 'OFF_MENU_RECOVERY', {
+      fromInterrupt: session.interruptedFrom,
     });
-    const hintLine = hints.length ? hints.join(' | ') : '';
-    const extra = [reprompt, hintLine].filter(Boolean).join('\n');
-
-    await this._send(session.waNumber, state.promptKey, state, extra);
-    this._armWaitingFollowUp(session);
-    await this.sessionStore.set(session.waNumber, session);
-    return { session, state, invalid: true };
   }
 
   async _restart(session) {

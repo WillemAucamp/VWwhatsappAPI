@@ -276,6 +276,46 @@ const STATES = {
     quiet: true,
     notifyAgent: true,
   },
+
+  /**
+   * Shown when the customer replies outside the buttons on any choice menu.
+   * Main-Menu → GREETING; Human-Handover → quiet agent handoff.
+   */
+  OFF_MENU_RECOVERY: {
+    id: 'OFF_MENU_RECOVERY',
+    promptKey: 'off_menu_recovery_prompt',
+    type: 'choice',
+    interactiveHeader: 'VW Melrose',
+    interactiveOptions: ['human_handover', 'main_menu'],
+    options: {
+      human_handover: 'HUMAN_HANDOVER',
+      main_menu: 'GREETING',
+    },
+    optionTitles: {
+      human_handover: 'Human-Handover',
+      main_menu: 'Main-Menu',
+    },
+    optionLabels: {
+      human_handover: [
+        'human-handover',
+        'human handover',
+        'handover',
+        'human',
+        'agent',
+        'speak to me',
+        'talk to me',
+        '1',
+      ],
+      main_menu: [
+        'main-menu',
+        'main menu',
+        'menu',
+        'back',
+        'start over',
+        '2',
+      ],
+    },
+  },
 };
 
 const ENTRY_STATE = 'GREETING';
