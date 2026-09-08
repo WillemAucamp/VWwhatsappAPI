@@ -55,14 +55,19 @@ function recordHandled() {
 
 function recordHandleError(err) {
   stats.inboundHandleErrors += 1;
-  stats.lastError = err && err.message ? String(err.message).slice(0, 200) : String(err);
+  stats.lastError = err && err.message ? String(err.message).slice(0, 500) : String(err);
 }
 
 function recordSendError(err) {
   const msg = err && err.message ? String(err.message) : String(err);
+  // Prefer the enriched message (already includes Graph code/hint); avoid
+  // duplicating a huge raw JSON blob when the message already has detail.
+  const alreadyDetailed = /code\s+\d+|WHATSAPP_TOKEN|expired/i.test(msg);
   const detail =
-    err && err.response ? ` ${JSON.stringify(err.response).slice(0, 180)}` : '';
-  stats.lastSendError = `${msg}${detail}`.slice(0, 300);
+    !alreadyDetailed && err && err.response
+      ? ` ${JSON.stringify(err.response).slice(0, 180)}`
+      : '';
+  stats.lastSendError = `${msg}${detail}`.slice(0, 500);
   stats.lastError = stats.lastSendError;
 }
 

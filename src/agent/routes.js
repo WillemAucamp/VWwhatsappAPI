@@ -58,9 +58,15 @@ function createAgentRouter({
   });
 
   router.get('/api/status', (_req, res) => {
+    const diagnostics = require('../webhook/diagnostics');
+    const snap = diagnostics.snapshot();
     res.json({
       enabled,
       passwordConfigured: Boolean(password),
+      transcriptPath: config.agent.transcriptPath,
+      sessionStorePath: config.session.storePath,
+      lastSendError: snap.lastSendError || null,
+      webhookSignatureRejects: snap.postRejectedSignature || 0,
     });
   });
 
