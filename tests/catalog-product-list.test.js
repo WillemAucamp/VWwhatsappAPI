@@ -172,10 +172,10 @@ async function testSeeCarsSendsProductListAndSelectionAdvances() {
   const sent = [];
   const originalFetch = global.fetch;
   const transport = require('../src/transport/whatsapp');
-  const originalEnsure = transport.ensureCatalogVisible;
-  transport.ensureCatalogVisible = async () => ({
-    is_catalog_visible: true,
-    is_cart_enabled: false,
+  const originalPrepare = transport.prepareCatalogForMessaging;
+  transport.prepareCatalogForMessaging = async () => ({
+    link: { linked: true, already: true, catalogs: [{ id: '1067415159340072' }] },
+    commerce: { is_catalog_visible: true, is_cart_enabled: false, linked: true },
   });
   global.fetch = async (url) => {
     const u = String(url);
@@ -257,7 +257,7 @@ async function testSeeCarsSendsProductListAndSelectionAdvances() {
     console.log('✓ product_list fallback → product pick → qualify');
   } finally {
     global.fetch = originalFetch;
-    transport.ensureCatalogVisible = originalEnsure;
+    transport.prepareCatalogForMessaging = originalPrepare;
     restoreWhatsapp(snap);
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -273,10 +273,10 @@ async function testCatalogMessageFallbackWhenProductReadDenied() {
   const sent = [];
   const originalFetch = global.fetch;
   const transport = require('../src/transport/whatsapp');
-  const originalEnsure = transport.ensureCatalogVisible;
-  transport.ensureCatalogVisible = async () => ({
-    is_catalog_visible: true,
-    is_cart_enabled: false,
+  const originalPrepare = transport.prepareCatalogForMessaging;
+  transport.prepareCatalogForMessaging = async () => ({
+    link: { linked: true, already: true, catalogs: [{ id: '1067415159340072' }] },
+    commerce: { is_catalog_visible: true, is_cart_enabled: false, linked: true },
   });
   global.fetch = async (url) => {
     if (String(url).includes('/products')) {
@@ -326,7 +326,7 @@ async function testCatalogMessageFallbackWhenProductReadDenied() {
     console.log('✓ See our cars prefers catalog_message View catalog');
   } finally {
     global.fetch = originalFetch;
-    transport.ensureCatalogVisible = originalEnsure;
+    transport.prepareCatalogForMessaging = originalPrepare;
     restoreWhatsapp(snap);
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -360,10 +360,10 @@ async function testEmptyCatalogUsesCatalogMessage() {
   const sent = [];
   const originalFetch = global.fetch;
   const transport = require('../src/transport/whatsapp');
-  const originalEnsure = transport.ensureCatalogVisible;
-  transport.ensureCatalogVisible = async () => ({
-    is_catalog_visible: true,
-    is_cart_enabled: false,
+  const originalPrepare = transport.prepareCatalogForMessaging;
+  transport.prepareCatalogForMessaging = async () => ({
+    link: { linked: true, already: true, catalogs: [{ id: '1067415159340072' }] },
+    commerce: { is_catalog_visible: true, is_cart_enabled: false, linked: true },
   });
   global.fetch = async (url) => {
     if (String(url).includes('/products')) {
@@ -403,7 +403,7 @@ async function testEmptyCatalogUsesCatalogMessage() {
     console.log('✓ empty product read still sends catalog_message');
   } finally {
     global.fetch = originalFetch;
-    transport.ensureCatalogVisible = originalEnsure;
+    transport.prepareCatalogForMessaging = originalPrepare;
     restoreWhatsapp(snap);
     Object.assign(config.links, linksSnap);
     fs.rmSync(dir, { recursive: true, force: true });

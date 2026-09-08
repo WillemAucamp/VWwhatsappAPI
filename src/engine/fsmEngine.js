@@ -387,11 +387,11 @@ class FsmEngine {
       const text = parts.join('\n\n');
 
       try {
-        await transport.ensureCatalogVisible();
+        await transport.prepareCatalogForMessaging();
       } catch (visErr) {
-        diagnostics.recordCatalogError(visErr, 'ensure_catalog_visible');
+        diagnostics.recordCatalogError(visErr, 'prepare_catalog');
         // eslint-disable-next-line no-console
-        console.error('[fsm] ensureCatalogVisible failed', {
+        console.error('[fsm] prepareCatalogForMessaging failed', {
           message: visErr && visErr.message ? visErr.message : String(visErr),
           response: visErr && visErr.response ? visErr.response : undefined,
         });

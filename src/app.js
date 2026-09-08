@@ -82,7 +82,7 @@ function createApp(overrides = {}) {
       error: 'not_checked',
     };
     try {
-      catalog = await getCatalogHealth();
+      catalog = await getCatalogHealth({ ensureVisible: true, force: true });
     } catch (err) {
       catalog = {
         ok: false,
@@ -96,7 +96,7 @@ function createApp(overrides = {}) {
       service: 'vw-whatsapp-prequal',
       build: {
         // Bumped when See our cars must use live Meta catalog product_list.
-        fsm: 'catalog-visible-view-catalog-2026-09-08',
+        fsm: 'catalog-link-waba-2026-09-08',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||

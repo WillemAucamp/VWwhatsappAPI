@@ -29,9 +29,9 @@ module.exports = {
   ].join('\n'),
 
   stocklist_fallback_body: [
-    'Here is our current stock.',
+    'I could not open our WhatsApp stock catalogue just now.',
     '',
-    'Browse the link below, then tap to continue with a quick finance check.',
+    'Tap below to continue with a quick finance check, or type *help* and I will assist you.',
   ].join('\n'),
 
   specials_menu_prompt: [

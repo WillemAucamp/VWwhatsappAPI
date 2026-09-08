@@ -359,13 +359,64 @@ async function getCommerceSettings() {
   const { phoneNumberId } = requireCredentials();
   const data = await graphGet(`${phoneNumberId}/whatsapp_commerce_settings`);
   const row =
-    data && Array.isArray(data.data) && data.data.length ? data.data[0] : data;
+    data && Array.isArray(data.data) && data.data.length ? data.data[0] : null;
   return {
     is_catalog_visible: Boolean(row && row.is_catalog_visible),
     is_cart_enabled: row && row.is_cart_enabled != null ? Boolean(row.is_cart_enabled) : null,
     id: row && row.id != null ? String(row.id) : null,
+    linked: Boolean(row),
     raw: data,
   };
+}
+
+/**
+ * List catalogs currently connected to the WhatsApp Business Account.
+ */
+async function listWabaProductCatalogs() {
+  const wabaId = config.whatsapp.wabaId;
+  if (!wabaId) {
+    const err = new Error('WHATSAPP_WABA_ID missing');
+    err.code = 'WABA_ID_MISSING';
+    throw err;
+  }
+  const data = await graphGet(`${wabaId}/product_catalogs`, 'id,name');
+  const rows = Array.isArray(data && data.data) ? data.data : [];
+  return rows.map((row) => ({
+    id: row.id != null ? String(row.id) : null,
+    name: row.name != null ? String(row.name) : null,
+  }));
+}
+
+/**
+ * Connect WHATSAPP_CATALOG_ID to the WABA (idempotent when already linked).
+ */
+async function ensureCatalogLinkedToWaba() {
+  const wabaId = config.whatsapp.wabaId;
+  const catalogId = config.whatsapp.catalogId;
+  if (!wabaId) {
+    const err = new Error('WHATSAPP_WABA_ID missing — cannot link catalog via API');
+    err.code = 'WABA_ID_MISSING';
+    throw err;
+  }
+  if (!catalogId) {
+    const err = new Error('WHATSAPP_CATALOG_ID missing');
+    err.code = 'CATALOG_ID_MISSING';
+    throw err;
+  }
+
+  let existing = [];
+  try {
+    existing = await listWabaProductCatalogs();
+  } catch (_) {
+    existing = [];
+  }
+  if (existing.some((c) => c.id === String(catalogId))) {
+    return { linked: true, already: true, catalogs: existing };
+  }
+
+  await graphPostPath(`${wabaId}/product_catalogs`, { catalog_id: String(catalogId) });
+  const catalogs = await listWabaProductCatalogs().catch(() => existing);
+  return { linked: true, already: false, catalogs };
 }
 
 /**
@@ -379,6 +430,31 @@ async function ensureCatalogVisible() {
     is_cart_enabled: false,
   });
   return getCommerceSettings();
+}
+
+/**
+ * Link catalog to WABA (when possible) then make it visible on the phone number.
+ */
+async function prepareCatalogForMessaging() {
+  const result = {
+    link: null,
+    linkError: null,
+    commerce: null,
+    commerceError: null,
+  };
+  try {
+    result.link = await ensureCatalogLinkedToWaba();
+  } catch (err) {
+    result.linkError = err && err.message ? String(err.message) : String(err);
+    result.linkResponse = err && err.response ? err.response : undefined;
+  }
+  try {
+    result.commerce = await ensureCatalogVisible();
+  } catch (err) {
+    result.commerceError = err && err.message ? String(err.message) : String(err);
+    result.commerceResponse = err && err.response ? err.response : undefined;
+  }
+  return result;
 }
 
 let activeSender = cloudApiSendMessage;
@@ -433,6 +509,9 @@ module.exports = {
   graphGet,
   graphPostPath,
   getCommerceSettings,
+  listWabaProductCatalogs,
+  ensureCatalogLinkedToWaba,
   ensureCatalogVisible,
+  prepareCatalogForMessaging,
   notifyAgent,
 };

@@ -41,24 +41,33 @@ const server = app.listen(config.port, () => {
   console.log(formatReadinessReport(getMetaReadiness()));
   followUpScheduler.start();
 
-  // Show linked Meta catalog on this WhatsApp number (View catalog / storefront).
+  // Link Meta catalog to this WABA (when WABA id is set) and show it on the number.
   if (config.whatsapp.token && config.whatsapp.phoneNumberId) {
-    const { ensureCatalogVisible } = require('./transport/whatsapp');
-    ensureCatalogVisible()
-      .then((settings) => {
+    const { prepareCatalogForMessaging } = require('./transport/whatsapp');
+    prepareCatalogForMessaging()
+      .then((result) => {
         // eslint-disable-next-line no-console
         console.log(
-          '[wa-prequal] commerce settings:',
+          '[wa-prequal] catalog prepare:',
           JSON.stringify({
-            is_catalog_visible: settings.is_catalog_visible,
-            is_cart_enabled: settings.is_cart_enabled,
+            linkError: result.linkError,
+            linkedAlready: result.link && result.link.already,
+            catalogs: result.link && result.link.catalogs,
+            commerce: result.commerce
+              ? {
+                  linked: result.commerce.linked,
+                  is_catalog_visible: result.commerce.is_catalog_visible,
+                  is_cart_enabled: result.commerce.is_cart_enabled,
+                }
+              : null,
+            commerceError: result.commerceError,
           })
         );
       })
       .catch((err) => {
         // eslint-disable-next-line no-console
         console.error(
-          '[wa-prequal] ensureCatalogVisible FAILED — See our cars may fall back until catalog is visible on this number:',
+          '[wa-prequal] prepareCatalogForMessaging FAILED — See our cars may fall back until the catalog is linked + visible:',
           err.message,
           err.response ? JSON.stringify(err.response) : ''
         );
