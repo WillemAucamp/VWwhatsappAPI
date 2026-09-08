@@ -8,6 +8,7 @@
     "test": "node tests/run.js",
     "test:manual": "node tests/manual-test.js",
     "check:meta": "node scripts/check-meta.js",
+    "profile:picture": "node scripts/update-profile-picture.js",
     "send:test": "node scripts/send-test.js"
   },
   "engines": {

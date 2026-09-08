@@ -5,6 +5,8 @@ RUN npm ci --omit=dev
 COPY src ./src
 COPY data ./data
 COPY public ./public
+COPY scripts ./scripts
+COPY docs ./docs
 ENV NODE_ENV=production
 EXPOSE 3000
 CMD ["node", "src/index.js"]

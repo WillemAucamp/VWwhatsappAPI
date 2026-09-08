@@ -97,7 +97,26 @@ Use the client number in international form, no `+` or spaces (`2782…` not `08
 
 Free-form bot text (and interactive menus) only work inside the **24-hour** window after *they* message you (or after a template they reply to). If Graph returns `#131047`, use a template.
 
-## 7. Before real clients
+## 7. Business profile picture (Willem)
+
+The agent desk and WhatsApp identity photo live at `public/agent/profile.jpg`.
+
+**Agent desk:** shown on login, chat list header, and agent bubbles (served at `/agent/static/profile.jpg`).
+
+**WhatsApp customers:** push the same file to the Cloud API business profile:
+
+1. Set `WHATSAPP_APP_ID` in `.env` (Meta App Dashboard → Settings → Basic → App ID), plus the usual token + phone number ID.
+2. Run:
+
+```bash
+npm run profile:picture
+```
+
+Optional custom path: `npm run profile:picture -- /path/to/photo.jpg`
+
+Customers see the new photo after WhatsApp refreshes the business profile (may take a few minutes).
+
+## 8. Before real clients
 
 1. Confirm `src/content/copy.js` matches the Melrose PDF script (already loaded).
 2. Set real `APPLICATION_LINK` (Google Form) and `STOCK_LINK`.
@@ -105,9 +124,10 @@ Free-form bot text (and interactive menus) only work inside the **24-hour** wind
 4. Keep `WHATSAPP_APP_SECRET` set. Production rejects unsigned webhook POSTs.
 5. Submit any templates you need outside 24h in WhatsApp Manager.
 6. Add a payment method on the WABA if you will send paid template conversations.
-7. Open items from the Melrose handoff: Promotions content TBD; Opt-Out currently → human_handover; stocklist uses Continue until dynamic vehicle rows are wired.
+7. Add a profile picture with `npm run profile:picture` (see §7).
+8. Open items from the Melrose handoff: Promotions content TBD; Opt-Out currently → human_handover; stocklist uses Continue until dynamic vehicle rows are wired.
 
-## 8. How the interactive menu works
+## 9. How the interactive menu works
 
 | Layer | Role |
 |---|---|
@@ -131,4 +151,5 @@ Staff can still reply in the WhatsApp Business app on the same thread (Coexisten
 | Send `#131047` | Outside 24h — use a template |
 | Empty replies | Copy key blank or env links unset |
 | `check-meta` Graph fail | Wrong token, phone-number ID, or app does not own that WABA |
+| Profile picture upload fail | `WHATSAPP_APP_ID` set; token can call Resumable Upload + `whatsapp_business_profile` |
 | Coexistence missing | You used migrate/API-only; reconnect with Business app onboarding |

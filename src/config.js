@@ -29,6 +29,7 @@ const config = {
     token: process.env.WHATSAPP_TOKEN || '',
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
     wabaId: process.env.WHATSAPP_WABA_ID || '',
+    appId: process.env.WHATSAPP_APP_ID || '',
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'change-me-verify-token',
     appSecret: process.env.WHATSAPP_APP_SECRET || '',
     apiVersion: process.env.WHATSAPP_API_VERSION || 'v21.0',
