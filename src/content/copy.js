@@ -25,6 +25,12 @@ module.exports = {
   stocklist_body: [
     'Here is our current stock.',
     '',
+    'Browse the cars below, tap one you like, then tap *Message business about this item* so we can continue with a quick finance check.',
+  ].join('\n'),
+
+  stocklist_fallback_body: [
+    'Here is our current stock.',
+    '',
     'Browse the link below, then tap to continue with a quick finance check.',
   ].join('\n'),
 

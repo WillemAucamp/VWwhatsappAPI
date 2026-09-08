@@ -14,7 +14,7 @@ Start here:
 
 ```
 greeting
-  → See our cars → stocklist → (any selection) → employed_income_check
+  → See our cars → live Meta catalog product list → (message about a car) → employed_income_check
   → Qualify Me → employed_income_check
   → I saw a special → Payment Holiday / Lower Interest Rate / Discount
        → (brief description) → employed_income_check
@@ -32,7 +32,7 @@ Greeting uses **3 reply buttons** (WhatsApp max). Opt-Out stays text-matchable.
 
 ```bash
 cp .env.example .env
-# fill Meta values + APPLICATION_LINK / STOCK_LINK — see docs/META_SETUP.md
+# fill Meta values + APPLICATION_LINK / WHATSAPP_CATALOG_ID — see docs/META_SETUP.md
 npm install
 npm test
 npm start
@@ -40,9 +40,11 @@ npm start
 
 ```bash
 npm run check:meta
+npm run check:catalog
 npm run send:test -- --to 2782XXXXXXXX --template hello_world
 ```
 
+`STOCK_LINK` is only a fallback if the catalog is empty or product_list send fails.
 ## Agent desk
 
 Staff browser inbox (Cloud API chats, no Coexistence required):

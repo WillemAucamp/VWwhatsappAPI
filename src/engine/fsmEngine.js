@@ -8,6 +8,10 @@ const {
   buildInteractiveFromState,
   resolveCopy,
 } = require('../content/resolve');
+const {
+  listProductsForProductList,
+  buildProductListInteractive,
+} = require('../catalog/products');
 const { buildRecord } = require('../logger/leadLogger');
 const transport = require('../transport/whatsapp');
 
@@ -367,7 +371,78 @@ class FsmEngine {
       extras.stockLink = appLink;
     }
 
-    const body = buildOutboundText(promptKey, {
+    // Live Meta catalog product_list for "See our cars".
+    if (state && state.catalogProductList && config.whatsapp.catalogId) {
+      try {
+        const products = await listProductsForProductList({
+          catalogId: config.whatsapp.catalogId,
+        });
+        if (products.length) {
+          const body = buildOutboundText(promptKey, {
+            includeFooter: true,
+            stubMarker: this.stubMarker,
+            extras,
+          });
+          const parts = [body, extraText].filter(Boolean);
+          const interactive = buildProductListInteractive({
+            catalogId: config.whatsapp.catalogId,
+            products,
+            header: state.interactiveHeader || 'Our cars',
+            sectionTitle: state.catalogSectionTitle || 'Available now',
+          });
+          try {
+            return await this.sendMessage(waNumber, {
+              text: parts.join('\n\n'),
+              type: 'interactive',
+              interactive,
+              meta: {
+                stateId: state.id,
+                promptKey,
+                catalogId: config.whatsapp.catalogId,
+                productCount: products.length,
+              },
+            });
+          } catch (sendErr) {
+            // eslint-disable-next-line no-console
+            console.error(
+              '[fsm] product_list send failed; falling back to stock link',
+              {
+                catalogId: config.whatsapp.catalogId,
+                productCount: products.length,
+                message:
+                  sendErr && sendErr.message ? sendErr.message : String(sendErr),
+                response: sendErr && sendErr.response ? sendErr.response : undefined,
+              }
+            );
+          }
+        } else {
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[fsm] catalog returned no sellable products; falling back to stock link',
+            { catalogId: config.whatsapp.catalogId }
+          );
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(
+          '[fsm] catalog product_list failed; falling back to stock link',
+          {
+            catalogId: config.whatsapp.catalogId,
+            message: err && err.message ? err.message : String(err),
+            response: err && err.response ? err.response : undefined,
+          }
+        );
+      }
+    }
+
+    const effectivePromptKey =
+      state &&
+      state.catalogProductList &&
+      state.fallbackPromptKey
+        ? state.fallbackPromptKey
+        : promptKey;
+
+    const body = buildOutboundText(effectivePromptKey, {
       includeFooter: true,
       stubMarker: this.stubMarker,
       extras,
@@ -399,7 +474,7 @@ class FsmEngine {
       text,
       link: appLink,
       mediaSlot: state && state.mediaSlot ? state.mediaSlot : undefined,
-      meta: { stateId: state ? state.id : null, promptKey },
+      meta: { stateId: state ? state.id : null, promptKey: effectivePromptKey },
     };
     if (interactive) {
       payload.interactive = interactive;
@@ -523,6 +598,8 @@ class FsmEngine {
       meta: {
         quiet: Boolean(state.quiet),
         softDecline: Boolean(state.softDecline),
+        selectedProductRetailerId: session.selectedProductRetailerId || null,
+        selectedCatalogId: session.selectedCatalogId || null,
       },
     });
 
@@ -679,6 +756,8 @@ class FsmEngine {
     session.pendingTerminalOutbound = null;
     session.lastLoggedLeadKey = null;
     session.agentTakenOver = false;
+    session.selectedProductRetailerId = null;
+    session.selectedCatalogId = null;
     this._clearFollowUp(session);
   }
 
@@ -847,6 +926,16 @@ class FsmEngine {
       extras && extras.replyId != null && extras.replyId !== ''
         ? String(extras.replyId)
         : null;
+    const productRetailerId =
+      extras &&
+      extras.productRetailerId != null &&
+      extras.productRetailerId !== ''
+        ? String(extras.productRetailerId)
+        : null;
+    const inboundCatalogId =
+      extras && extras.catalogId != null && extras.catalogId !== ''
+        ? String(extras.catalogId)
+        : null;
     let session = await this.getOrCreateSession(waNumber);
 
     if (session.status === 'quiet') {
@@ -912,6 +1001,16 @@ class FsmEngine {
         return this._beginFromMainMenuIntent(session, normalized, replyId);
       }
       return this._restart(session);
+    }
+
+    // Customer messaged about / ordered a catalog car while on stock browse.
+    if (state.catalogProductList && productRetailerId) {
+      session.selectedProductRetailerId = productRetailerId;
+      session.selectedCatalogId =
+        inboundCatalogId || config.whatsapp.catalogId || null;
+      const nextId =
+        (state.options && state.options.any_car) || 'EMPLOYED_INCOME_CHECK';
+      return this._enterState(session, nextId);
     }
 
     const optionKey = resolveOptionKey(state, normalized, replyId);

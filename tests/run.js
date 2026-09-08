@@ -20,6 +20,7 @@ const files = [
   'followup-tick-isolation.test.js',
   'meta-readiness.test.js',
   'transport-graph.test.js',
+  'catalog-product-list.test.js',
   'agent-desk.test.js',
   'message-store.test.js',
 ];

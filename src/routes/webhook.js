@@ -24,8 +24,9 @@ function verifyWhatsAppSignature(rawBody, signatureHeader, appSecret) {
 }
 
 /**
- * Normalize inbound Cloud API message to text + optional interactive reply id.
- * @returns {{from:string,text:string,replyId:string|null}|null}
+ * Normalize inbound Cloud API message to text + optional interactive reply id
+ * and optional catalog product selection (inquiry / order).
+ * @returns {{from:string,text:string,replyId:string|null,productRetailerId:string|null,catalogId:string|null}|null}
  */
 function extractInboundMessage(message) {
   if (!message || !message.from) return null;
@@ -33,7 +34,23 @@ function extractInboundMessage(message) {
   if (message.type === 'text') {
     const text = message.text && message.text.body;
     if (text == null) return null;
-    return { from: message.from, text: String(text), replyId: null };
+    const referred =
+      message.context && message.context.referred_product
+        ? message.context.referred_product
+        : null;
+    return {
+      from: message.from,
+      text: String(text),
+      replyId: null,
+      productRetailerId:
+        referred && referred.product_retailer_id != null
+          ? String(referred.product_retailer_id)
+          : null,
+      catalogId:
+        referred && referred.catalog_id != null
+          ? String(referred.catalog_id)
+          : null,
+    };
   }
 
   if (message.type === 'interactive') {
@@ -44,7 +61,29 @@ function extractInboundMessage(message) {
     const replyId = reply.id != null ? String(reply.id) : null;
     const text = reply.title != null ? String(reply.title) : '';
     if (!replyId && !text) return null;
-    return { from: message.from, text, replyId };
+    return {
+      from: message.from,
+      text,
+      replyId,
+      productRetailerId: null,
+      catalogId: null,
+    };
+  }
+
+  // Cart / order from catalog (customer added products and sent order).
+  if (message.type === 'order') {
+    const order = message.order || {};
+    const items = Array.isArray(order.product_items) ? order.product_items : [];
+    const first = items.find((item) => item && item.product_retailer_id);
+    if (!first) return null;
+    return {
+      from: message.from,
+      text: order.text != null ? String(order.text) : '',
+      replyId: null,
+      productRetailerId: String(first.product_retailer_id),
+      catalogId:
+        order.catalog_id != null ? String(order.catalog_id) : null,
+    };
   }
 
   return null;
@@ -148,6 +187,8 @@ function createWebhookRouter({
             try {
               await engine.handleInbound(inbound.from, inbound.text, {
                 replyId: inbound.replyId,
+                productRetailerId: inbound.productRetailerId,
+                catalogId: inbound.catalogId,
               });
               diagnostics.recordHandled();
               dedupe.commit(message.id);

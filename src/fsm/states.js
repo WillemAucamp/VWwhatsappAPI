@@ -9,7 +9,7 @@
  *   optionLabels  free-text fallback synonyms
  *
  * Greeting shows 3 reply buttons (WhatsApp max). Opt-Out stays text-matchable.
- * Stocklist / specials: continue into combined employment+income check.
+ * Stocklist: live Meta catalog product_list; product inquiry → employment+income check.
  */
 
 /** @type {Record<string, object>} */
@@ -55,11 +55,18 @@ const STATES = {
   STOCKLIST_CAROUSEL: {
     id: 'STOCKLIST_CAROUSEL',
     promptKey: 'stocklist_body',
+    // Shown when catalog is empty / Graph catalog fetch fails.
+    fallbackPromptKey: 'stocklist_fallback_body',
     type: 'choice',
-    interactiveHeader: 'VW Melrose',
+    interactiveHeader: 'Our cars',
+    catalogSectionTitle: 'Available now',
+    // Live Meta catalog product_list (see src/catalog/products.js).
+    catalogProductList: true,
+    // Fallback only when catalog products cannot be sent.
     sendLink: 'stock',
     mediaSlot: 'stock_list',
     options: {
+      // Product inquiry / order maps here after storing selectedProductRetailerId.
       any_car: 'EMPLOYED_INCOME_CHECK',
     },
     optionTitles: {

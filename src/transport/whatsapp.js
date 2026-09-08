@@ -140,6 +140,51 @@ function buildInteractiveGraph(interactive, bodyText) {
     return payload;
   }
 
+  // Multi-product message — live Meta Commerce catalog browse.
+  if (interactive.type === 'product_list') {
+    const catalogId = interactive.catalogId || interactive.catalog_id;
+    if (!catalogId) {
+      const err = new Error('product_list requires catalogId');
+      err.code = 'WHATSAPP_INTERACTIVE_INVALID';
+      throw err;
+    }
+    const sections = (interactive.sections || []).map((section) => ({
+      title: section.title ? String(section.title).slice(0, 24) : undefined,
+      product_items: (section.product_items || section.productItems || []).map(
+        (item) => ({
+          product_retailer_id: String(
+            item.product_retailer_id || item.productRetailerId || item
+          ),
+        })
+      ),
+    }));
+    const totalItems = sections.reduce(
+      (n, s) => n + (s.product_items ? s.product_items.length : 0),
+      0
+    );
+    if (!totalItems) {
+      const err = new Error('product_list requires product_items');
+      err.code = 'WHATSAPP_INTERACTIVE_INVALID';
+      throw err;
+    }
+    const payload = {
+      type: 'product_list',
+      header: {
+        type: 'text',
+        text: String(interactive.header || 'Our cars').slice(0, 60),
+      },
+      body: { text: bodyText || ' ' },
+      action: {
+        catalog_id: String(catalogId),
+        sections,
+      },
+    };
+    if (interactive.footer) {
+      payload.footer = { text: String(interactive.footer).slice(0, 60) };
+    }
+    return payload;
+  }
+
   const err = new Error(`Unsupported interactive type: ${interactive.type}`);
   err.code = 'WHATSAPP_INTERACTIVE_INVALID';
   throw err;

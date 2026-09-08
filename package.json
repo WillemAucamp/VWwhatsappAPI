@@ -8,6 +8,7 @@
     "test": "node tests/run.js",
     "test:manual": "node tests/manual-test.js",
     "check:meta": "node scripts/check-meta.js",
+    "check:catalog": "node scripts/check-catalog.js",
     "send:test": "node scripts/send-test.js"
   },
   "engines": {
