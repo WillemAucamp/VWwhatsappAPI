@@ -28,6 +28,12 @@ module.exports = {
     'Tap *View catalog*, browse the cars, then message us about the one you like so we can continue with a quick finance check.',
   ].join('\n'),
 
+  stocklist_link_body: [
+    'Here is our current stock.',
+    '',
+    'Open the catalogue link below, pick a car, then message us about it so we can continue with a quick finance check.',
+  ].join('\n'),
+
   stocklist_fallback_body: [
     'I could not open our WhatsApp stock catalogue just now.',
     '',

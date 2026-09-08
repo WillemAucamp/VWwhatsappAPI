@@ -432,6 +432,29 @@ async function ensureCatalogVisible() {
 }
 
 /**
+ * Digits-only business display number for https://wa.me/c/{digits} catalog links.
+ */
+async function getBusinessCatalogLink() {
+  const { phoneNumberId } = requireCredentials();
+  const phone = await graphGet(
+    phoneNumberId,
+    'display_phone_number,verified_name'
+  );
+  const digits = String(phone.display_phone_number || '').replace(/\D/g, '');
+  if (!digits) {
+    const err = new Error('Could not resolve display_phone_number for catalog link');
+    err.code = 'CATALOG_LINK_PHONE_MISSING';
+    throw err;
+  }
+  return {
+    url: `https://wa.me/c/${digits}`,
+    digits,
+    display_phone_number: phone.display_phone_number || null,
+    verified_name: phone.verified_name || null,
+  };
+}
+
+/**
  * Phone numbers on this WABA — used to confirm Cloud API number matches.
  */
 async function listWabaPhoneNumbers() {
@@ -556,6 +579,7 @@ module.exports = {
   graphGet,
   graphPostPath,
   getCommerceSettings,
+  getBusinessCatalogLink,
   listWabaProductCatalogs,
   listWabaPhoneNumbers,
   ensureCatalogLinkedToWaba,

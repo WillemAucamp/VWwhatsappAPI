@@ -96,7 +96,7 @@ function createApp(overrides = {}) {
       service: 'vw-whatsapp-prequal',
       build: {
         // Bumped when See our cars must use live Meta catalog product_list.
-        fsm: 'waba-phone-match-2026-09-08',
+        fsm: 'catalog-wa-me-link-2026-09-08',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||

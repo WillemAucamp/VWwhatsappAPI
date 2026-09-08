@@ -410,6 +410,83 @@ async function testEmptyCatalogUsesCatalogMessage() {
   }
 }
 
+async function testCatalogLinkWhenInteractiveCatalogFails() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vw-catalog-link-'));
+  const snap = { ...config.whatsapp };
+  config.whatsapp.token = 'test-token';
+  config.whatsapp.phoneNumberId = '123456';
+  config.whatsapp.catalogId = '1067415159340072';
+
+  const sent = [];
+  const originalFetch = global.fetch;
+  const transport = require('../src/transport/whatsapp');
+  const originalPrepare = transport.prepareCatalogForMessaging;
+  const originalLink = transport.getBusinessCatalogLink;
+  transport.prepareCatalogForMessaging = async () => ({});
+  transport.getBusinessCatalogLink = async () => ({
+    url: 'https://wa.me/c/27720630780',
+    digits: '27720630780',
+  });
+  global.fetch = async (url) => {
+    if (String(url).includes('/products')) {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: { message: '(#100) not approved', code: 100 },
+        }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        display_phone_number: '+27 72 063 0780',
+        messages: [{ id: 'wamid.test' }],
+      }),
+    };
+  };
+
+  try {
+    const store = new FileSessionStore(dir);
+    const engine = new FsmEngine({
+      sessionStore: store,
+      leadLogger: createLeadLogger('console'),
+      sendMessage: async (to, payload) => {
+        if (
+          payload &&
+          payload.interactive &&
+          payload.interactive.type === 'catalog_message'
+        ) {
+          const err = new Error('simulated catalog_message failure');
+          err.response = { error: { message: 'catalog_message blocked', code: 100 } };
+          throw err;
+        }
+        sent.push({ to, payload });
+        return { messages: [{ id: `wamid.${sent.length}` }] };
+      },
+    });
+
+    await engine.handleInbound('27829990004', 'hi');
+    await engine.handleInbound('27829990004', 'see_cars', {
+      replyId: 'see_cars',
+    });
+
+    const stockSend = sent[sent.length - 1];
+    assert.ok(String(stockSend.payload.text).includes('https://wa.me/c/27720630780'));
+    assert.strictEqual(stockSend.payload.link, 'https://wa.me/c/27720630780');
+    assert.strictEqual(stockSend.payload.meta.catalogMode, 'catalog_link');
+    // eslint-disable-next-line no-console
+    console.log('✓ catalog_message fail → wa.me catalog link');
+  } finally {
+    global.fetch = originalFetch;
+    transport.prepareCatalogForMessaging = originalPrepare;
+    transport.getBusinessCatalogLink = originalLink;
+    restoreWhatsapp(snap);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   await testProductListGraphBody();
   await testCatalogMessageGraphBody();
@@ -420,6 +497,7 @@ async function main() {
   await testSeeCarsSendsProductListAndSelectionAdvances();
   await testCatalogMessageFallbackWhenProductReadDenied();
   await testEmptyCatalogUsesCatalogMessage();
+  await testCatalogLinkWhenInteractiveCatalogFails();
   // eslint-disable-next-line no-console
   console.log('\ncatalog product list tests passed.');
 }

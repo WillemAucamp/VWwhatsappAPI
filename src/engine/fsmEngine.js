@@ -473,11 +473,45 @@ class FsmEngine {
         diagnostics.recordCatalogError(err, 'product_read');
         // eslint-disable-next-line no-console
         console.error(
-          '[fsm] catalog product read failed; falling back to stock link',
+          '[fsm] catalog product read failed; trying catalog link',
           {
             catalogId: config.whatsapp.catalogId,
             message: err && err.message ? err.message : String(err),
             response: err && err.response ? err.response : undefined,
+          }
+        );
+      }
+
+      // Meta catalog link message — wa.me/c/{businessPhone} with preview thumbnails.
+      try {
+        const catalogLink = await transport.getBusinessCatalogLink();
+        const linkBody = buildOutboundText('stocklist_link_body', {
+          includeFooter: true,
+          stubMarker: this.stubMarker,
+          extras,
+        });
+        const linkText = [linkBody, extraText, catalogLink.url]
+          .filter(Boolean)
+          .join('\n\n');
+        return await this.sendMessage(waNumber, {
+          text: linkText,
+          link: catalogLink.url,
+          meta: {
+            stateId: state.id,
+            promptKey: 'stocklist_link_body',
+            catalogId: config.whatsapp.catalogId,
+            catalogMode: 'catalog_link',
+            catalogUrl: catalogLink.url,
+          },
+        });
+      } catch (linkErr) {
+        diagnostics.recordCatalogError(linkErr, 'catalog_link');
+        // eslint-disable-next-line no-console
+        console.error(
+          '[fsm] catalog link send failed; falling back to qualify button',
+          {
+            message: linkErr && linkErr.message ? linkErr.message : String(linkErr),
+            response: linkErr && linkErr.response ? linkErr.response : undefined,
           }
         );
       }

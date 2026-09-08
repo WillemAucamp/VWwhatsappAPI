@@ -22,6 +22,8 @@ const stats = {
   lastSendError: null,
   lastCatalogError: null,
   lastCatalogMode: null,
+  /** @type {Array<{mode:string,error:string,at:string}>} */
+  catalogAttempts: [],
 };
 
 function touchPost() {
@@ -77,8 +79,17 @@ function recordCatalogError(err, mode) {
   const msg = err && err.message ? String(err.message) : String(err);
   const responseDetail =
     err && err.response ? ` ${JSON.stringify(err.response).slice(0, 220)}` : '';
-  stats.lastCatalogError = `${msg}${responseDetail}`.slice(0, 500);
+  const full = `${msg}${responseDetail}`.slice(0, 500);
+  stats.lastCatalogError = full;
   stats.lastCatalogMode = mode || null;
+  stats.catalogAttempts = Array.isArray(stats.catalogAttempts)
+    ? stats.catalogAttempts.slice(-8)
+    : [];
+  stats.catalogAttempts.push({
+    mode: mode || null,
+    error: full,
+    at: new Date().toISOString(),
+  });
 }
 
 function snapshot() {
