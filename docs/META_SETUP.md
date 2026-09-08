@@ -61,7 +61,7 @@ ngrok http 3000
 
 Set `PUBLIC_BASE_URL` to that `https://…` origin and restart.
 
-Production: any Node 18+ host (Render, Railway, Fly, a VM). Prefer a single process with durable `data/` (sessions + lead logs). Health check: `GET /health`.
+Production: any Node 18+ host (Render, Railway, Fly, a VM). Prefer durable chat history via Supabase (`DATABASE_URL`) — see [SUPABASE_SETUP.md](./SUPABASE_SETUP.md). Health check: `GET /health`.
 
 ## 4. Point Meta at `/webhook`
 

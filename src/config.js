@@ -45,7 +45,11 @@ const config = {
     shortcutsPath:
       process.env.AGENT_SHORTCUTS_PATH || './data/agent/shortcuts.json',
     labelsPath: process.env.AGENT_LABELS_PATH || './data/agent/labels.json',
+    // file | postgres — defaults to postgres when DATABASE_URL is set (Supabase).
+    messageStore: (process.env.MESSAGE_STORE || '').toLowerCase(),
+    databaseUrl: process.env.DATABASE_URL || '',
   },
+
 
   session: {
     ttlMs: intEnv('SESSION_TTL_MS', 24 * 60 * 60 * 1000),

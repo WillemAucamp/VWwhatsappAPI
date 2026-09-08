@@ -62,18 +62,17 @@ Create labels under **⋮ → Manage labels**. Open a chat → **Labels** to tag
 
 ### Where chats are stored
 
-| Data | Path (on the Render container) | Purpose |
+| Data | Path / backend | Purpose |
 |---|---|---|
-| Message transcripts | `data/transcripts/<waNumber>.jsonl` | Agent desk chat history (one JSON line per message) |
+| Message transcripts | `data/transcripts/` **or Supabase Postgres** when `DATABASE_URL` is set | Agent desk chat history |
 | Bot sessions | `data/sessions/` | FSM state (greeting step, quiet, takeover, etc.) |
 | Shortcuts & labels | `data/agent/` | Agent desk canned replies and chat labels |
 | Lead log | `data/logs/leads.jsonl` | Qualified / exited leads |
 
-Override with `AGENT_TRANSCRIPT_PATH` / `SESSION_STORE_PATH` / `AGENT_SHORTCUTS_PATH` / `AGENT_LABELS_PATH` if needed.
+**Keep chat history forever (free):** create a [Supabase](https://supabase.com) project and follow [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md) — set `DATABASE_URL` on Render.
 
-**Render free disk is ephemeral** — redeploys wipe `data/` unless you attach a persistent disk. The live inbox only shows numbers that already messaged this running instance.
+Local file transcripts are wiped on ephemeral hosts (Render free) unless you use Supabase or attach a persistent disk.
 
 ### If the menu never arrives / Send says 401
 
 `GET /health` → `webhook.lastSendError` with **code 190** means `WHATSAPP_TOKEN` is expired or wrong. Paste a fresh token (prefer a permanent **system user** token) into Render env and redeploy. Also keep `WHATSAPP_APP_SECRET` matched to the same Meta app (signature rejects drop inbound messages).
-

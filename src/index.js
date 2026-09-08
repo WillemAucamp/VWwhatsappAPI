@@ -18,6 +18,25 @@ const server = app.listen(config.port, () => {
   console.log(
     `[wa-prequal] listening on :${config.port}  GET /health  GET|POST /webhook  GET /agent`
   );
+  const store = app.locals.messageStore;
+  const backend = (store && store.backend) || 'unknown';
+  // eslint-disable-next-line no-console
+  console.log(`[wa-prequal] transcript store: ${backend}`);
+  if (store && typeof store.ping === 'function') {
+    store
+      .ping()
+      .then(() => {
+        // eslint-disable-next-line no-console
+        console.log('[wa-prequal] postgres transcript store reachable');
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error(
+          '[wa-prequal] postgres transcript store FAILED — check DATABASE_URL (URL-encode special chars in the password, e.g. ! → %21):',
+          err.message
+        );
+      });
+  }
   // eslint-disable-next-line no-console
   console.log(formatReadinessReport(getMetaReadiness()));
   followUpScheduler.start();

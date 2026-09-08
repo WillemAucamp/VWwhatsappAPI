@@ -54,7 +54,20 @@ function createAgentRouter({
   }
 
   router.get('/', (_req, res) => {
-    res.sendFile(path.join(__dirname, '../../public/agent/index.html'));
+    const file = path.join(__dirname, '../../public/agent/index.html');
+    res.sendFile(file, (err) => {
+      if (!err) return;
+      // eslint-disable-next-line no-console
+      console.error('[agent-desk] UI file missing:', file, err.message);
+      if (!res.headersSent) {
+        res
+          .status(500)
+          .type('text')
+          .send(
+            'Agent desk UI missing from server image. Dockerfile must COPY public ./public — then redeploy.'
+          );
+      }
+    });
   });
 
   router.get('/api/status', (_req, res) => {
