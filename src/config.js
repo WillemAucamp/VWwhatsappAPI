@@ -42,6 +42,9 @@ const config = {
       String(process.env.AGENT_DESK_ENABLED || 'true').toLowerCase() !== 'false',
     deskPassword: process.env.AGENT_DESK_PASSWORD || '',
     transcriptPath: process.env.AGENT_TRANSCRIPT_PATH || './data/transcripts',
+    // file | postgres — defaults to postgres when DATABASE_URL is set (Supabase).
+    messageStore: (process.env.MESSAGE_STORE || '').toLowerCase(),
+    databaseUrl: process.env.DATABASE_URL || '',
   },
 
   session: {

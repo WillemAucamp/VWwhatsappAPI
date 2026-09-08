@@ -86,6 +86,7 @@ function createApp(overrides = {}) {
       agentDesk: {
         enabled: Boolean(config.agent.deskEnabled && config.agent.deskPassword),
         path: '/agent',
+        messageStore: messageStore && messageStore.backend ? messageStore.backend : 'unknown',
       },
     });
   });

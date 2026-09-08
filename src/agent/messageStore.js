@@ -3,14 +3,19 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { createPostgresMessageStore } = require('./postgresMessageStore');
 
 /**
- * Per-number JSONL transcript for the agent desk.
+ * Per-number transcript for the agent desk.
  * direction: in | out
  * source: customer | bot | agent
+ *
+ * Backends:
+ * - file (default): JSONL under AGENT_TRANSCRIPT_PATH
+ * - postgres: Supabase / any Postgres via DATABASE_URL
  */
 
-function createMessageStore(dir = config.agent.transcriptPath) {
+function createFileMessageStore(dir = config.agent.transcriptPath) {
   const root = path.resolve(dir);
   fs.mkdirSync(root, { recursive: true });
 
@@ -81,7 +86,30 @@ function createMessageStore(dir = config.agent.transcriptPath) {
     return chats;
   }
 
-  return { append, listMessages, listChats, root };
+  return { append, listMessages, listChats, root, backend: 'file' };
 }
 
-module.exports = { createMessageStore };
+/**
+ * @param {string|object} [options] Directory path (tests) or { backend, databaseUrl, transcriptPath }
+ */
+function createMessageStore(options) {
+  if (typeof options === 'string') {
+    return createFileMessageStore(options);
+  }
+
+  const opts = options || {};
+  const databaseUrl = opts.databaseUrl || config.agent.databaseUrl;
+  const configured =
+    opts.backend ||
+    config.agent.messageStore ||
+    (databaseUrl ? 'postgres' : 'file');
+  const backend = String(configured).toLowerCase();
+
+  if (backend === 'postgres') {
+    return createPostgresMessageStore(databaseUrl);
+  }
+
+  return createFileMessageStore(opts.transcriptPath || config.agent.transcriptPath);
+}
+
+module.exports = { createMessageStore, createFileMessageStore };

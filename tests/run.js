@@ -21,6 +21,7 @@ const files = [
   'meta-readiness.test.js',
   'transport-graph.test.js',
   'agent-desk.test.js',
+  'message-store.test.js',
 ];
 
 let failed = 0;

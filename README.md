@@ -51,4 +51,6 @@ Staff browser inbox (Cloud API chats, no Coexistence required):
 2. Open `https://your-host/agent`
 3. Sign in → pick a chat → **Take over** / reply / **Release to bot**
 
-Transcripts are stored under `data/transcripts/`.
+Transcripts are stored under `data/transcripts/` by default (wiped on ephemeral hosts like Render free).
+
+**Keep history forever (free):** create a [Supabase](https://supabase.com) project and follow [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md) — set `DATABASE_URL` on Render; no Postgres install on your computer.

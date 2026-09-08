@@ -18,6 +18,10 @@ const server = app.listen(config.port, () => {
   console.log(
     `[wa-prequal] listening on :${config.port}  GET /health  GET|POST /webhook  GET /agent`
   );
+  const backend =
+    (app.locals.messageStore && app.locals.messageStore.backend) || 'unknown';
+  // eslint-disable-next-line no-console
+  console.log(`[wa-prequal] transcript store: ${backend}`);
   // eslint-disable-next-line no-console
   console.log(formatReadinessReport(getMetaReadiness()));
   followUpScheduler.start();
