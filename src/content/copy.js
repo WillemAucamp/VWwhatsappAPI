@@ -96,9 +96,8 @@ module.exports = {
   ].join('\n'),
 
   human_handover_body: [
-    'This requires a personal conversation.',
-    '',
-    "I'll step in directly. One moment.",
+    'I see you need my help.',
+    'Could you please summarise what you need and I will be with you ASAP!',
   ].join('\n'),
 
   off_menu_recovery_prompt: [
