@@ -18,7 +18,7 @@ const STATES = {
     id: 'GREETING',
     promptKey: 'greeting_prompt',
     type: 'choice',
-    interactiveHeader: 'VW Melrose',
+    // No interactiveHeader — main menu should not show "VW Melrose" above the buttons.
     // WhatsApp allows max 3 reply buttons. Opt-Out stays text-matchable
     // ("opt out" / "unsubscribe") without forcing a list menu.
     interactiveOptions: ['see_cars', 'qualify_me', 'saw_special'],
