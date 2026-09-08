@@ -16,8 +16,9 @@ Start here:
 greeting
   → See our cars → stocklist → (any selection) → employment_check
   → Qualify Me → employment_check
-  → Promotions → (TBD) → main menu
-  → Opt-Out → human_handover
+  → I saw a special → Payment Holiday / Lower Interest Rate / Discount
+       → (brief description) → employment_check
+  → (type Opt-Out) → human_handover
 
 employment_check → Yes → affordability_check | No → end_chat
 affordability_check → >R15k / >R9k → license_check | <R5k → end_chat
