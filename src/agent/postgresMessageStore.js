@@ -36,17 +36,47 @@ function mapRow(row) {
   };
 }
 
+/**
+ * Supabase passwords often include ! @ # etc. If those are left raw in the
+ * URI, some hosts (Render env parsing / URL libraries) reject the string.
+ * Re-encode only the password segment when needed.
+ */
+function encodePassword(password) {
+  // encodeURIComponent leaves ! ' ( ) * unescaped; percent-encode those too.
+  return encodeURIComponent(password).replace(
+    /[!'()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+}
+
+function normalizeDatabaseUrl(connectionString) {
+  const raw = String(connectionString || '').trim();
+  if (!raw) return raw;
+  const m = raw.match(/^(postgres(?:ql)?:\/\/)([^:/?@]+):([^@]+)@(.+)$/i);
+  if (!m) return raw;
+  const [, scheme, user, password, rest] = m;
+  let decoded = password;
+  try {
+    decoded = decodeURIComponent(password);
+  } catch {
+    decoded = password;
+  }
+  return `${scheme}${user}:${encodePassword(decoded)}@${rest}`;
+}
+
 function createPostgresMessageStore(connectionString) {
   if (!connectionString) {
     throw new Error('DATABASE_URL is required for MESSAGE_STORE=postgres');
   }
 
+  const normalizedUrl = normalizeDatabaseUrl(connectionString);
   const pool = new Pool({
-    connectionString,
-    ssl: connectionString.includes('localhost')
+    connectionString: normalizedUrl,
+    ssl: normalizedUrl.includes('localhost')
       ? undefined
       : { rejectUnauthorized: false },
     max: 5,
+    connectionTimeoutMillis: 15000,
   });
 
   let ready = null;
@@ -56,9 +86,19 @@ function createPostgresMessageStore(connectionString) {
       ready = pool
         .query(CREATE_TABLE_SQL)
         .then(() => pool.query(CREATE_INDEX_SQL))
-        .then(() => undefined);
+        .then(() => undefined)
+        .catch((err) => {
+          ready = null;
+          throw err;
+        });
     }
     return ready;
+  }
+
+  async function ping() {
+    await ensureSchema();
+    const { rows } = await pool.query('select 1 as ok');
+    return rows[0] && rows[0].ok === 1;
   }
 
   async function append(message) {
@@ -147,8 +187,9 @@ function createPostgresMessageStore(connectionString) {
     listMessages,
     listChats,
     close,
+    ping,
     backend: 'postgres',
   };
 }
 
-module.exports = { createPostgresMessageStore };
+module.exports = { createPostgresMessageStore, normalizeDatabaseUrl };

@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 
 const { createMessageStore } = require('../src/agent/messageStore');
+const { normalizeDatabaseUrl } = require('../src/agent/postgresMessageStore');
 
 async function testFileBackendStillDefaultForPathArg() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'msg-store-'));
@@ -49,9 +50,24 @@ async function testPostgresRequiresUrl() {
   console.log('✓ postgres store rejects missing DATABASE_URL');
 }
 
+function testNormalizeDatabaseUrlEncodesPassword() {
+  const out = normalizeDatabaseUrl(
+    'postgresql://postgres.ref:Leendert316!@aws-1-eu-west-1.pooler.supabase.com:5432/postgres'
+  );
+  assert.ok(out.includes('Leendert316%21@'));
+  assert.ok(!out.includes('Leendert316!@'));
+  const already = normalizeDatabaseUrl(
+    'postgresql://u:Leendert316%21@host:5432/postgres'
+  );
+  assert.ok(already.includes('Leendert316%21@'));
+  // eslint-disable-next-line no-console
+  console.log('✓ normalizeDatabaseUrl percent-encodes password special chars');
+}
+
 async function main() {
   await testFileBackendStillDefaultForPathArg();
   await testPostgresRequiresUrl();
+  testNormalizeDatabaseUrlEncodesPassword();
 }
 
 main().catch((err) => {

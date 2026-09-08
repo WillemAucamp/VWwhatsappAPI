@@ -18,7 +18,9 @@ The agent desk can store WhatsApp transcripts in **Supabase** so history survive
    ```
 
 6. Replace `[YOUR-PASSWORD]` with the database password from project creation.
-   - If the password has `@`, `#`, `/`, etc., URL-encode it (e.g. `@` → `%40`).
+   - If the password has `!`, `@`, `#`, `/`, etc., URL-encode it (e.g. `!` → `%21`, `@` → `%40`).
+   - Example: password `Secret!23` → `…:Secret%2123@aws-…pooler.supabase.com:5432/postgres`
+   - The bot also auto-encodes on connect, but Render is more reliable if you paste the encoded URI.
    - Forgot it? Same page → **Reset database password**, then update the URI.
 
 You do **not** create tables by hand — on first message the bot creates `chat_messages`.
