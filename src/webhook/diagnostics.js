@@ -1,0 +1,88 @@
+'use strict';
+
+/**
+ * In-memory webhook diagnostics for /health (no secrets).
+ * Resets on process restart / Render redeploy.
+ */
+const stats = {
+  postReceived: 0,
+  postAccepted: 0,
+  postRejectedSignature: 0,
+  postRejectedNoSecret: 0,
+  inboundExtracted: 0,
+  inboundHandled: 0,
+  inboundHandleErrors: 0,
+  lastPostAt: null,
+  lastAcceptedAt: null,
+  lastRejectReason: null,
+  lastInboundAt: null,
+  lastInboundFrom: null,
+  lastInboundType: null,
+  lastError: null,
+  lastSendError: null,
+};
+
+function touchPost() {
+  stats.postReceived += 1;
+  stats.lastPostAt = new Date().toISOString();
+}
+
+function rejectSignature() {
+  stats.postRejectedSignature += 1;
+  stats.lastRejectReason = 'bad_signature';
+}
+
+function rejectNoSecret() {
+  stats.postRejectedNoSecret += 1;
+  stats.lastRejectReason = 'missing_app_secret';
+}
+
+function acceptPost() {
+  stats.postAccepted += 1;
+  stats.lastAcceptedAt = new Date().toISOString();
+}
+
+function recordInbound({ from, type }) {
+  stats.inboundExtracted += 1;
+  stats.lastInboundAt = new Date().toISOString();
+  stats.lastInboundFrom = from ? String(from).replace(/\d(?=\d{4})/g, '*') : null;
+  stats.lastInboundType = type || null;
+}
+
+function recordHandled() {
+  stats.inboundHandled += 1;
+}
+
+function recordHandleError(err) {
+  stats.inboundHandleErrors += 1;
+  stats.lastError = err && err.message ? String(err.message).slice(0, 500) : String(err);
+}
+
+function recordSendError(err) {
+  const msg = err && err.message ? String(err.message) : String(err);
+  // Prefer the enriched message (already includes Graph code/hint); avoid
+  // duplicating a huge raw JSON blob when the message already has detail.
+  const alreadyDetailed = /code\s+\d+|WHATSAPP_TOKEN|expired/i.test(msg);
+  const detail =
+    !alreadyDetailed && err && err.response
+      ? ` ${JSON.stringify(err.response).slice(0, 180)}`
+      : '';
+  stats.lastSendError = `${msg}${detail}`.slice(0, 500);
+  stats.lastError = stats.lastSendError;
+}
+
+function snapshot() {
+  return { ...stats };
+}
+
+module.exports = {
+  touchPost,
+  rejectSignature,
+  rejectNoSecret,
+  acceptPost,
+  recordInbound,
+  recordHandled,
+  recordHandleError,
+  recordSendError,
+  snapshot,
+};
