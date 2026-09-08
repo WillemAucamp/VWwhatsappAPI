@@ -220,6 +220,42 @@ async function testSeeCarsThenQualify() {
   console.log('✓ See our cars → stocklist → employed+income check');
 }
 
+async function testCheckIfIQualifyAfterSessionWipe() {
+  // After redeploy, session is gone but WhatsApp still shows stocklist button.
+  const h = createHarness('stocklist_cold');
+  const wa = '27000000102';
+  await h.tap(wa, 'any_car', 'Check if I qualify');
+  const session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'EMPLOYED_INCOME_CHECK');
+  assert.ok(session.path.includes('STOCKLIST_CAROUSEL'));
+  assert.ok(
+    h.messages.some((m) => m.meta && m.meta.stateId === 'EMPLOYED_INCOME_CHECK'),
+    'Check if I qualify must enter qualify tree, not bounce to GREETING'
+  );
+  assert.ok(
+    !h.messages.some((m) => m.meta && m.meta.stateId === 'GREETING'),
+    'must not re-send main menu when Check if I qualify was tapped'
+  );
+  // eslint-disable-next-line no-console
+  console.log('✓ Check if I qualify with no session → employed+income check');
+}
+
+async function testCheckIfIQualifyAfterSoftClose() {
+  const h = createHarness('stocklist_soft');
+  const wa = '27000000103';
+  await h.say(wa, 'hi');
+  await h.tap(wa, 'qualify_me', 'Qualify Me');
+  await h.tap(wa, 'employed_income_no', 'No');
+  assert.strictEqual((await h.store.get(wa)).status, 'soft_closed');
+
+  await h.tap(wa, 'any_car', 'Check if I qualify');
+  const session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'EMPLOYED_INCOME_CHECK');
+  assert.strictEqual(session.status, 'active');
+  // eslint-disable-next-line no-console
+  console.log('✓ Check if I qualify after soft_closed → employed+income check');
+}
+
 
 async function testNotReadyEndChat() {
   const h = createHarness('not_ready');
@@ -582,6 +618,8 @@ async function main() {
   await testQualifyMeWithoutPriorGreetingSession();
   await testQualifyMeAfterSoftClose();
   await testSeeCarsThenQualify();
+  await testCheckIfIQualifyAfterSessionWipe();
+  await testCheckIfIQualifyAfterSoftClose();
   await testNotReadyEndChat();
   await testLicenseNoHandover();
   await testCreditBadHandover();
