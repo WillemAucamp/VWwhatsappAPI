@@ -45,7 +45,7 @@ async function testHelpIntentPersistsWhenSendFails() {
 
   const wa = '27821110001';
   await engine.handleInbound(wa, 'hi');
-  await engine.handleInbound(wa, 'qualify me'); // QUALIFY_CONSENT
+  await engine.handleInbound(wa, 'qualify me'); // EMPLOYED_INCOME_CHECK
 
   failSend = true;
   await assert.rejects(
@@ -76,7 +76,7 @@ async function testHelpIntentPersistsWhenSendFails() {
   assert.strictEqual(after.status, 'quiet');
   assert.strictEqual(after.currentState, 'HUMAN_HANDOVER');
   assert.ok(
-    !after.path.includes('EMPLOYED_INCOME_CHECK'),
+    !after.path.includes('LICENSE_CHECK'),
     'bot must not advance qualification after a failed opt-out send'
   );
 

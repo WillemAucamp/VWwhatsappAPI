@@ -14,20 +14,19 @@ Start here:
 
 ```
 greeting
-  → See our cars → stocklist → (any selection) → qualify_consent
-  → Qualify Me → qualify_consent
+  → See our cars → stocklist → (any selection) → employed_income_check
+  → Qualify Me → employed_income_check
   → I saw a special → Payment Holiday / Lower Interest Rate / Discount
-       → (brief description) → qualify_consent
+       → (brief description) → employed_income_check
   → (type Opt-Out) → human_handover
 
-qualify_consent → Yes → employed_income_check | No → Human-Handover / Main-Menu
 employed_income_check → Yes → license_check | No → end_chat (not ready)
 license_check → Yes → credit_check | No → human_handover
 credit_check → Good → final_consent | Bad → human_handover
 final_consent → Yes, send it → send_link | Not right now → human_handover
 ```
 
-Greeting has **4 options** → WhatsApp **list** message. Other steps use reply buttons (≤3).
+Greeting uses **3 reply buttons** (WhatsApp max). Opt-Out stays text-matchable.
 
 ## Run
 

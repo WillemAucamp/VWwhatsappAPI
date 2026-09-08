@@ -458,12 +458,12 @@ async function testInteractiveButtonReplyAdvancesMenu() {
     );
     assert.strictEqual(res.status, 200);
     session = await store.get(wa);
-    assert.strictEqual(session.currentState, 'QUALIFY_CONSENT');
+    assert.strictEqual(session.currentState, 'EMPLOYED_INCOME_CHECK');
   } finally {
     server.close();
   }
   // eslint-disable-next-line no-console
-  console.log('✓ interactive button_reply advances GREETING → QUALIFY_CONSENT');
+  console.log('✓ interactive button_reply advances GREETING → EMPLOYED_INCOME_CHECK');
 }
 
 async function main() {
