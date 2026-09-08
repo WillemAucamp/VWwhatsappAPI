@@ -9,7 +9,7 @@
  *   optionLabels  free-text fallback synonyms
  *
  * Greeting shows 3 reply buttons (WhatsApp max). Opt-Out stays text-matchable.
- * Stocklist / specials: continue into qualify consent → combined employment+income check.
+ * Stocklist / specials: continue into combined employment+income check.
  */
 
 /** @type {Record<string, object>} */
@@ -24,7 +24,7 @@ const STATES = {
     interactiveOptions: ['see_cars', 'qualify_me', 'saw_special'],
     options: {
       see_cars: 'STOCKLIST_CAROUSEL',
-      qualify_me: 'QUALIFY_CONSENT',
+      qualify_me: 'EMPLOYED_INCOME_CHECK',
       saw_special: 'SPECIALS_MENU',
       promotions: 'SPECIALS_MENU',
       opt_out: 'HUMAN_HANDOVER',
@@ -60,7 +60,7 @@ const STATES = {
     sendLink: 'stock',
     mediaSlot: 'stock_list',
     options: {
-      any_car: 'QUALIFY_CONSENT',
+      any_car: 'EMPLOYED_INCOME_CHECK',
     },
     optionTitles: {
       any_car: 'Check if I qualify',
@@ -166,39 +166,48 @@ const STATES = {
     id: 'PAYMENT_HOLIDAY_INFO',
     promptKey: 'payment_holiday_body',
     type: 'info',
-    autoAdvanceTo: 'QUALIFY_CONSENT',
+    autoAdvanceTo: 'EMPLOYED_INCOME_CHECK',
   },
 
   LOWER_RATE_INFO: {
     id: 'LOWER_RATE_INFO',
     promptKey: 'lower_rate_body',
     type: 'info',
-    autoAdvanceTo: 'QUALIFY_CONSENT',
+    autoAdvanceTo: 'EMPLOYED_INCOME_CHECK',
   },
 
   DISCOUNT_INFO: {
     id: 'DISCOUNT_INFO',
     promptKey: 'discount_body',
     type: 'info',
-    autoAdvanceTo: 'QUALIFY_CONSENT',
+    autoAdvanceTo: 'EMPLOYED_INCOME_CHECK',
   },
 
+  // Legacy: older sessions still on the removed consent step see the
+  // employment+income question instead (same Yes/No buttons).
   QUALIFY_CONSENT: {
     id: 'QUALIFY_CONSENT',
-    promptKey: 'qualify_consent_prompt',
+    promptKey: 'employed_income_prompt',
     type: 'choice',
     interactiveHeader: 'Quick check',
+    interactiveOptions: ['employed_income_yes', 'employed_income_no'],
     options: {
-      consent_yes: 'EMPLOYED_INCOME_CHECK',
-      consent_no: 'QUALIFY_CONSENT_NO',
+      employed_income_yes: 'LICENSE_CHECK',
+      employed_income_no: 'END_CHAT_NOT_READY',
+      consent_yes: 'LICENSE_CHECK',
+      consent_no: 'END_CHAT_NOT_READY',
     },
     optionTitles: {
+      employed_income_yes: 'Yes',
+      employed_income_no: 'No',
       consent_yes: 'Yes',
       consent_no: 'No',
     },
     optionLabels: {
-      consent_yes: ['yes', 'y', '1', 'consent_yes', 'ok', 'sure'],
-      consent_no: ['no', 'n', '2', 'consent_no'],
+      employed_income_yes: ['yes', 'y', '1', 'employed_income_yes'],
+      employed_income_no: ['no', 'n', '2', 'employed_income_no'],
+      consent_yes: ['consent_yes'],
+      consent_no: ['consent_no'],
     },
   },
 
@@ -270,27 +279,33 @@ const STATES = {
   // Legacy aliases so older in-progress sessions can still resume after deploy.
   EMPLOYMENT_CHECK: {
     id: 'EMPLOYMENT_CHECK',
-    promptKey: 'qualify_consent_prompt',
+    promptKey: 'employed_income_prompt',
     type: 'choice',
     interactiveHeader: 'Quick check',
-    interactiveOptions: ['consent_yes', 'consent_no'],
+    interactiveOptions: ['employed_income_yes', 'employed_income_no'],
     options: {
-      consent_yes: 'EMPLOYED_INCOME_CHECK',
-      consent_no: 'QUALIFY_CONSENT_NO',
-      employed_yes: 'EMPLOYED_INCOME_CHECK',
+      employed_income_yes: 'LICENSE_CHECK',
+      employed_income_no: 'END_CHAT_NOT_READY',
+      employed_yes: 'LICENSE_CHECK',
       employed_no: 'END_CHAT_NOT_READY',
+      consent_yes: 'LICENSE_CHECK',
+      consent_no: 'END_CHAT_NOT_READY',
     },
     optionTitles: {
-      consent_yes: 'Yes',
-      consent_no: 'No',
+      employed_income_yes: 'Yes',
+      employed_income_no: 'No',
       employed_yes: 'Yes',
       employed_no: 'No',
+      consent_yes: 'Yes',
+      consent_no: 'No',
     },
     optionLabels: {
-      consent_yes: ['yes', 'y', '1', 'consent_yes', 'ok', 'sure'],
-      consent_no: ['no', 'n', '2', 'consent_no'],
+      employed_income_yes: ['yes', 'y', '1', 'employed_income_yes'],
+      employed_income_no: ['no', 'n', '2', 'employed_income_no'],
       employed_yes: ['employed_yes'],
       employed_no: ['employed_no'],
+      consent_yes: ['consent_yes'],
+      consent_no: ['consent_no'],
     },
   },
 
