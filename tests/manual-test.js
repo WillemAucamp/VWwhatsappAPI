@@ -342,6 +342,45 @@ async function testInvalidRetryThenEscalate() {
   console.log('✓ off-menu recovery → Main-Menu / Human-Handover');
 }
 
+async function testOffMenuWhenSessionMissingOrSoftClosed() {
+  // Wiped / never-started session + gibberish must not dump the main menu.
+  const h = createHarness('off_menu_cold');
+  const wa = '27000000110';
+  await h.say(wa, 'sfds');
+  let session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'OFF_MENU_RECOVERY');
+  assert.ok(
+    h.messages.some((m) => m.meta && m.meta.stateId === 'OFF_MENU_RECOVERY')
+  );
+  assert.ok(
+    !h.messages.some((m) => m.meta && m.meta.stateId === 'GREETING'),
+    'off-menu free text must not open the main menu greeting'
+  );
+
+  // Soft-closed + gibberish → recovery (hi still reopens greeting).
+  const h2 = createHarness('off_menu_soft');
+  const wa2 = '27000000111';
+  await h2.say(wa2, 'hi');
+  await h2.say(wa2, 'qualify me');
+  await h2.say(wa2, 'no');
+  assert.strictEqual((await h2.store.get(wa2)).status, 'soft_closed');
+  await h2.say(wa2, 'sfds');
+  session = await h2.store.get(wa2);
+  assert.strictEqual(session.currentState, 'OFF_MENU_RECOVERY');
+  assert.strictEqual(session.status, 'active');
+
+  const h3 = createHarness('off_menu_soft_hi');
+  const wa3 = '27000000112';
+  await h3.say(wa3, 'hi');
+  await h3.say(wa3, 'qualify me');
+  await h3.say(wa3, 'no');
+  await h3.say(wa3, 'hello');
+  assert.strictEqual((await h3.store.get(wa3)).currentState, 'GREETING');
+
+  // eslint-disable-next-line no-console
+  console.log('✓ off-menu free text → recovery (cold + soft_closed)');
+}
+
 async function testHelpIntentFromTwoStates() {
   const h1 = createHarness('help_income');
   const wa1 = '27000000011';
@@ -560,6 +599,7 @@ async function main() {
   await testConsentNoHandover();
   await testOptOutFromGreeting();
   await testInvalidRetryThenEscalate();
+  await testOffMenuWhenSessionMissingOrSoftClosed();
   await testHelpIntentFromTwoStates();
   await testReleaseResumesWhereLeftOff();
   await testSpecialsMenuThenQualify();

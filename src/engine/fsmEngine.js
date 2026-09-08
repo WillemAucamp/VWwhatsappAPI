@@ -88,13 +88,28 @@ function resolveOptionKey(state, normalized, replyId) {
  * If the inbound matches a main-menu (GREETING) option — e.g. customer tapped
  * Qualify Me on an older greeting after a redeploy wiped the session — return
  * the destination state id. Otherwise null.
+ *
+ * Also recognises stocklist "Check if I qualify" (`any_car`) so a wiped or
+ * soft-closed session does not bounce that tap back to the main menu.
  */
 function resolveGreetingDestination(normalized, replyId) {
   const greeting = STATES[ENTRY_STATE];
-  if (!greeting) return null;
-  const optionKey = resolveOptionKey(greeting, normalized, replyId);
-  if (!optionKey) return null;
-  return greeting.options[optionKey] || null;
+  if (greeting) {
+    const optionKey = resolveOptionKey(greeting, normalized, replyId);
+    if (optionKey && greeting.options[optionKey]) {
+      return greeting.options[optionKey];
+    }
+  }
+
+  const stocklist = STATES.STOCKLIST_CAROUSEL;
+  if (stocklist) {
+    const stockKey = resolveOptionKey(stocklist, normalized, replyId);
+    if (stockKey && stocklist.options[stockKey]) {
+      return stocklist.options[stockKey];
+    }
+  }
+
+  return null;
 }
 
 function linkForState(state) {
@@ -808,6 +823,21 @@ class FsmEngine {
     });
   }
 
+  /**
+   * Off-menu free text when there is no active choice (wiped / soft_closed /
+   * never started). Offer Human-Handover / Main-Menu instead of dumping the
+   * customer back on the greeting.
+   */
+  async _enterOffMenuRecoveryFresh(session, { interruptedFrom } = {}) {
+    this._resetSessionForFreshStart(session);
+    if (interruptedFrom) {
+      session.interruptedFrom = interruptedFrom;
+    }
+    return this._enterState(session, 'OFF_MENU_RECOVERY', {
+      fromInterrupt: session.interruptedFrom || undefined,
+    });
+  }
+
   async _restart(session) {
     const notice = resolveCopy('session_restart_notice', {
       stubMarker: this.stubMarker,
@@ -844,16 +874,33 @@ class FsmEngine {
 
   /**
    * Start from a wiped/soft-closed session. Honour main-menu button taps
-   * (Qualify Me, See our cars, Opt-Out) so they don't bounce back to GREETING.
+   * (Qualify Me, See our cars, Opt-Out) and stocklist "Check if I qualify"
+   * so they don't bounce back to GREETING. Unknown free text → off-menu recovery.
    */
   async _beginFromMainMenuIntent(session, normalized, replyId) {
     this._resetSessionForFreshStart(session);
     const destination = resolveGreetingDestination(normalized, replyId);
     if (destination) {
       session.path = [ENTRY_STATE];
+      if (destination !== 'STOCKLIST_CAROUSEL' && STATES.STOCKLIST_CAROUSEL) {
+        const stock = STATES.STOCKLIST_CAROUSEL;
+        const stockKey = resolveOptionKey(stock, normalized, replyId);
+        if (stockKey && stock.options[stockKey] === destination) {
+          session.path.push('STOCKLIST_CAROUSEL');
+        }
+      }
       return this._enterState(session, destination);
     }
-    return this._enterState(session, ENTRY_STATE);
+
+    // Genuine reopen / first hello → main menu. Anything else off-menu → recovery.
+    if (
+      !normalized ||
+      matchesKeywordList(normalized, config.fsm.reopenKeywords)
+    ) {
+      return this._enterState(session, ENTRY_STATE);
+    }
+
+    return this._enterState(session, 'OFF_MENU_RECOVERY');
   }
 
   /**
@@ -1046,7 +1093,12 @@ class FsmEngine {
       if (resolveGreetingDestination(normalized, replyId)) {
         return this._beginFromMainMenuIntent(session, normalized, replyId);
       }
-      return this._restart(session);
+      // Explicit reopen words still restart the greeting.
+      if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
+        return this._restart(session);
+      }
+      // Off-menu free text → Human-Handover / Main-Menu, not a silent main-menu dump.
+      return this._enterOffMenuRecoveryFresh(session);
     }
 
     if (!session.currentState || session.status === 'new') {
@@ -1081,7 +1133,10 @@ class FsmEngine {
       if (resolveGreetingDestination(normalized, replyId)) {
         return this._beginFromMainMenuIntent(session, normalized, replyId);
       }
-      return this._restart(session);
+      if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
+        return this._restart(session);
+      }
+      return this._enterOffMenuRecoveryFresh(session);
     }
 
     // Customer messaged about / ordered a catalog car while on stock browse.

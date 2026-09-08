@@ -95,8 +95,13 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
+<<<<<<< HEAD
         // Bumped when See our cars must use live Meta catalog product_list.
         fsm: 'hide-see-our-cars-2026-09-08',
+=======
+        // Bumped when off-menu free text must show Human-Handover / Main-Menu.
+        fsm: 'off-menu-recovery-not-greeting-2026-09-08',
+>>>>>>> 24d4e22 (fix(fsm): off-menu free text shows Human-Handover / Main-Menu)
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||

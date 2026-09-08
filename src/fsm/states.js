@@ -510,7 +510,6 @@ const STATES = {
     id: 'OFF_MENU_RECOVERY',
     promptKey: 'off_menu_recovery_prompt',
     type: 'choice',
-    interactiveHeader: 'VW Melrose',
     interactiveOptions: ['human_handover', 'main_menu'],
     options: {
       human_handover: 'HUMAN_HANDOVER',
