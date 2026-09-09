@@ -25,17 +25,23 @@ function createChatReadStore(filePath = config.agent.chatReadsPath) {
 
   async function readAllUnlocked() {
     if (!fs.existsSync(file)) {
-      return { reads: {} };
+      return { reads: {}, forcedUnread: {} };
     }
     try {
       const raw = await fs.promises.readFile(file, 'utf8');
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed.reads !== 'object' || !parsed.reads) {
-        return { reads: {} };
+        return { reads: {}, forcedUnread: {} };
       }
-      return { reads: parsed.reads };
+      return {
+        reads: parsed.reads,
+        forcedUnread:
+          parsed.forcedUnread && typeof parsed.forcedUnread === 'object'
+            ? parsed.forcedUnread
+            : {},
+      };
     } catch {
-      return { reads: {} };
+      return { reads: {}, forcedUnread: {} };
     }
   }
 
@@ -43,7 +49,11 @@ function createChatReadStore(filePath = config.agent.chatReadsPath) {
     const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random()
       .toString(36)
       .slice(2, 8)}.tmp`;
-    await fs.promises.writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+    const payload = {
+      reads: data.reads || {},
+      forcedUnread: data.forcedUnread || {},
+    };
+    await fs.promises.writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
     await fs.promises.rename(tmp, file);
   }
 
@@ -51,6 +61,16 @@ function createChatReadStore(filePath = config.agent.chatReadsPath) {
     return withLock(async () => {
       const data = await readAllUnlocked();
       return { ...data.reads };
+    });
+  }
+
+  async function getState() {
+    return withLock(async () => {
+      const data = await readAllUnlocked();
+      return {
+        reads: { ...data.reads },
+        forcedUnread: { ...data.forcedUnread },
+      };
     });
   }
 
@@ -72,12 +92,35 @@ function createChatReadStore(filePath = config.agent.chatReadsPath) {
     return withLock(async () => {
       const data = await readAllUnlocked();
       data.reads[wa] = when;
+      if (data.forcedUnread) delete data.forcedUnread[wa];
       await writeAllUnlocked(data);
-      return { waNumber: wa, lastReadAt: when };
+      return { waNumber: wa, lastReadAt: when, forcedUnread: false };
     });
   }
 
-  return { getAll, get, markRead, file };
+  async function markUnread(waNumber) {
+    const wa = String(waNumber || '').replace(/\D/g, '');
+    if (!wa) {
+      const err = new Error('wa_required');
+      err.status = 400;
+      throw err;
+    }
+    return withLock(async () => {
+      const data = await readAllUnlocked();
+      // Epoch cursor → every inbound counts as unread again.
+      data.reads[wa] = '1970-01-01T00:00:00.000Z';
+      if (!data.forcedUnread) data.forcedUnread = {};
+      data.forcedUnread[wa] = true;
+      await writeAllUnlocked(data);
+      return {
+        waNumber: wa,
+        lastReadAt: data.reads[wa],
+        forcedUnread: true,
+      };
+    });
+  }
+
+  return { getAll, getState, get, markRead, markUnread, file };
 }
 
 module.exports = { createChatReadStore };

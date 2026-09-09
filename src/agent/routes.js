@@ -113,10 +113,14 @@ function createAgentRouter({
 
   router.get('/api/chats', requireAuth, async (_req, res) => {
     try {
-      const [readsMap, labelBundle] = await Promise.all([
-        chatReads.getAll(),
+      const [readState, labelBundle] = await Promise.all([
+        typeof chatReads.getState === 'function'
+          ? chatReads.getState()
+          : chatReads.getAll().then((reads) => ({ reads, forcedUnread: {} })),
         labels.getChatLabelsMap(),
       ]);
+      const readsMap = readState.reads || readState;
+      const forcedUnread = readState.forcedUnread || {};
       const chats = await messageStore.listChats({ lastReadByWa: readsMap });
       const labelById = new Map(
         (labelBundle.labels || []).map((l) => [l.id, l])
@@ -125,8 +129,14 @@ function createAgentRouter({
       for (const chat of chats) {
         const session = await sessionStore.get(chat.waNumber);
         const labelIds = labelBundle.chatLabels[chat.waNumber] || [];
+        let unreadCount = Number(chat.unreadCount) || 0;
+        if (forcedUnread[chat.waNumber]) {
+          unreadCount = Math.max(unreadCount, 1);
+        }
         enriched.push({
           ...chat,
+          unreadCount,
+          forcedUnread: Boolean(forcedUnread[chat.waNumber]),
           status: session ? session.status : 'unknown',
           currentState: session ? session.currentState : null,
           agentTakenOver: Boolean(session && session.agentTakenOver),
@@ -140,6 +150,22 @@ function createAgentRouter({
       res.json({ chats: enriched });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });
+    }
+  });
+
+  router.post('/api/chats/:wa/unread', requireAuth, async (req, res) => {
+    try {
+      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      if (!wa) {
+        return res.status(400).json({ error: 'wa_required' });
+      }
+      if (typeof chatReads.markUnread !== 'function') {
+        return res.status(500).json({ error: 'mark_unread_unavailable' });
+      }
+      const marked = await chatReads.markUnread(wa);
+      res.json({ ok: true, ...marked });
+    } catch (err) {
+      return sendStoreError(res, err);
     }
   });
 

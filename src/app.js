@@ -97,8 +97,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when unread badges floor on latest customer message.
-        fsm: 'fix-unread-visible-2026-09-09',
+        // Bumped when agent desk can mark a chat as unread.
+        fsm: 'mark-chat-unread-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||

@@ -116,6 +116,20 @@ async function testMessageStoreAndApis() {
     }).then((r) => r.json());
     assert.strictEqual(chatsAfterRead.chats[0].unreadCount, 0);
 
+    const markedUnread = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27821234567/unread`,
+      { method: 'POST', headers: authHeaders(), body: '{}' }
+    ).then(async (r) => {
+      assert.strictEqual(r.status, 200);
+      return r.json();
+    });
+    assert.strictEqual(markedUnread.forcedUnread, true);
+    const chatsForcedUnread = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    assert.ok(chatsForcedUnread.chats[0].unreadCount >= 1);
+    assert.strictEqual(chatsForcedUnread.chats[0].forcedUnread, true);
+
     await messageStore.append({
       waNumber: '27821234567',
       direction: 'in',
@@ -134,7 +148,8 @@ async function testMessageStoreAndApis() {
     }).then((r) => r.json());
     const primary = chatsUnread.chats.find((c) => c.waNumber === '27821234567');
     const other = chatsUnread.chats.find((c) => c.waNumber === '27829998877');
-    assert.strictEqual(primary.unreadCount, 1);
+    // Marked unread (epoch cursor) + new inbound → at least the new messages count.
+    assert.ok(primary.unreadCount >= 1);
     assert.strictEqual(other.unreadCount, 1);
 
     // Bot reply must not clear unread on a chat the agent has not opened.

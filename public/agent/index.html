@@ -676,6 +676,7 @@
           </button>
           <div id="threadMenu" class="menu hidden" role="menu">
             <button type="button" id="assignLabelsBtn" role="menuitem" disabled>Labels…</button>
+            <button type="button" id="markUnreadBtn" role="menuitem" disabled>Mark as unread</button>
             <button type="button" id="takeoverBtn" role="menuitem" disabled>Take over</button>
             <button type="button" id="releaseBtn" role="menuitem" disabled>Release to bot</button>
           </div>
@@ -690,6 +691,7 @@
           <button type="button" class="secondary" id="takeoverBtnBar" disabled>Take over</button>
           <button type="button" class="secondary" id="releaseBtnBar" disabled>Release to bot</button>
           <button type="button" class="secondary" id="labelsBtnBar" disabled>Labels</button>
+          <button type="button" class="secondary" id="markUnreadBtnBar" disabled>Unread</button>
           <button type="button" class="grow" id="sendBtn" disabled>Send</button>
         </div>
         <div class="error" id="threadError"></div>
@@ -930,6 +932,7 @@
       if (!c) return 0;
       if (state.selected && String(c.waNumber) === String(state.selected)) return 0;
       let n = Number(c.unreadCount) || 0;
+      if (c.forcedUnread) n = Math.max(n, 1);
       const customerLast = c.lastDirection === 'in' || c.lastSource === 'customer';
       if (customerLast && (!c.lastReadAt || String(c.lastAt) > String(c.lastReadAt))) {
         n = Math.max(n, 1);
@@ -1103,6 +1106,8 @@
       el('releaseBtnBar').disabled = !on;
       el('assignLabelsBtn').disabled = !on;
       el('labelsBtnBar').disabled = !on;
+      el('markUnreadBtn').disabled = !on;
+      el('markUnreadBtnBar').disabled = !on;
     }
 
     function renderThreadLabels(labels) {
@@ -1332,6 +1337,30 @@
     el('releaseBtnBar').addEventListener('click', doRelease);
     el('assignLabelsBtn').addEventListener('click', () => { closeMenus(); openAssignLabelsModal(); });
     el('labelsBtnBar').addEventListener('click', openAssignLabelsModal);
+
+    async function doMarkUnread() {
+      closeMenus();
+      if (!state.selected) return;
+      const wa = state.selected;
+      try {
+        await api('/api/chats/' + encodeURIComponent(wa) + '/unread', {
+          method: 'POST',
+          body: '{}',
+        });
+        // Leave the thread so the next poll does not immediately mark it read again.
+        state.selected = null;
+        setThreadActionsEnabled(false);
+        el('threadTitle').textContent = 'Select a chat';
+        el('threadStatus').textContent = '';
+        el('threadLabels').innerHTML = '';
+        el('messages').innerHTML = '<div class="empty">Marked +' + wa + ' as unread.</div>';
+        await loadChats(true);
+      } catch (err) {
+        el('threadError').textContent = err.message;
+      }
+    }
+    el('markUnreadBtn').addEventListener('click', doMarkUnread);
+    el('markUnreadBtnBar').addEventListener('click', doMarkUnread);
 
     // —— Shortcuts modal ——
     function openShortcutsModal() {
