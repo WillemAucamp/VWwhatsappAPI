@@ -169,12 +169,31 @@ async function testAuthErrorIncludesTokenHint() {
   }
 }
 
+async function testTextDoesNotDuplicateLinkAlreadyInBody() {
+  await withFakeFetch(async (getBody) => {
+    const url = 'https://forms.gle/eZq13HF91GpGqivU9';
+    await cloudApiSendMessage('27821234567', {
+      text: `Click here:\n\n👉 ${url}`,
+      link: url,
+    });
+    const body = getBody();
+    assert.strictEqual(body.type, 'text');
+    assert.strictEqual(body.text.body, `Click here:\n\n👉 ${url}`);
+    assert.strictEqual(body.text.preview_url, true);
+    const occurrences = body.text.body.split(url).length - 1;
+    assert.strictEqual(occurrences, 1);
+    // eslint-disable-next-line no-console
+    console.log('✓ text Graph body does not duplicate link already in copy');
+  });
+}
+
 async function main() {
   await testTemplateGraphBody();
   await testTextViaTemplateNameOnSendMessage();
   await testInteractiveButtonGraphBody();
   await testInteractiveListGraphBody();
   await testAuthErrorIncludesTokenHint();
+  await testTextDoesNotDuplicateLinkAlreadyInBody();
   // eslint-disable-next-line no-console
   console.log('\ntransport graph tests passed.');
 }

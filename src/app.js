@@ -7,7 +7,7 @@ const { createSessionStore } = require('./session/store');
 const { createLeadLogger } = require('./logger/leadLogger');
 const { FsmEngine } = require('./engine/fsmEngine');
 const { createWebhookRouter } = require('./routes/webhook');
-const { sendMessage } = require('./transport/whatsapp');
+const { sendMessage, joinTextAndLink } = require('./transport/whatsapp');
 const { getMetaReadiness } = require('./meta/readiness');
 const { getCatalogHealth } = require('./catalog/health');
 const webhookDiagnostics = require('./webhook/diagnostics');
@@ -30,7 +30,7 @@ function createApp(overrides = {}) {
     const result = await baseSend(to, payload);
     if (messageStore) {
       try {
-        const text = [payload.text, payload.link].filter(Boolean).join('\n\n');
+        const text = joinTextAndLink(payload.text, payload.link);
         const source =
           (payload.meta && payload.meta.source) ||
           (payload.meta && payload.meta.quiet ? 'bot' : 'bot');
@@ -97,8 +97,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when final consent prompt copy was updated.
-        fsm: 'final-consent-copy-2026-09-09',
+        // Bumped when SEND_LINK no longer duplicates the form URL.
+        fsm: 'fix-dup-form-link-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||

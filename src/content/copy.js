@@ -194,7 +194,7 @@ module.exports = {
   send_link_body: [
     'Click on the link below to see what you qualify for, calculate your estimated repayments, and explore the best current specials for you:',
     '',
-    '👉 https://forms.gle/eZq13HF91GpGqivU9',
+    '👉 {{APPLICATION_LINK}}',
   ].join('\n'),
 
   human_handover_body: [

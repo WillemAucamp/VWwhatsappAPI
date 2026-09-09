@@ -17,6 +17,15 @@ function digitsOnly(to) {
   return String(to || '').replace(/\D/g, '');
 }
 
+/** Append link only when it is not already present in the body text. */
+function joinTextAndLink(text, link) {
+  const body = text != null ? String(text) : '';
+  const url = link != null ? String(link).trim() : '';
+  if (!url) return body;
+  if (body && body.includes(url)) return body;
+  return [body, url].filter(Boolean).join('\n\n');
+}
+
 function requireCredentials() {
   const token = config.whatsapp.token;
   const phoneNumberId = config.whatsapp.phoneNumberId;
@@ -215,7 +224,7 @@ function buildInteractiveGraph(interactive, bodyText) {
 
 async function cloudApiSendInteractive(to, { text, link, interactive } = {}) {
   requireCredentials();
-  const bodyText = [text, link].filter(Boolean).join('\n\n');
+  const bodyText = joinTextAndLink(text, link);
   const interactivePayload = buildInteractiveGraph(interactive, bodyText);
 
   return graphPost({
@@ -254,7 +263,7 @@ async function cloudApiSendMessage(to, payload = {}) {
     });
   }
 
-  const bodyText = [payload.text, payload.link].filter(Boolean).join('\n\n');
+  const bodyText = joinTextAndLink(payload.text, payload.link);
 
   return graphPost({
     messaging_product: 'whatsapp',
@@ -262,7 +271,7 @@ async function cloudApiSendMessage(to, payload = {}) {
     to: toDigits,
     type: 'text',
     text: {
-      preview_url: Boolean(payload.link),
+      preview_url: Boolean(payload.link) || /https?:\/\//i.test(bodyText),
       body: bodyText || '',
     },
   });
@@ -576,6 +585,7 @@ module.exports = {
   cloudApiSendTemplate,
   cloudApiSendInteractive,
   buildInteractiveGraph,
+  joinTextAndLink,
   graphGet,
   graphPostPath,
   getCommerceSettings,
