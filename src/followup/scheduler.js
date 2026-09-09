@@ -46,7 +46,7 @@ class FollowUpScheduler {
     if (typeof this._timer.unref === 'function') this._timer.unref();
     // eslint-disable-next-line no-console
     console.log(
-      `[follow-up] scheduler started (first=${this.cfg.firstDelayMs}ms, every=${this.cfg.intervalMs}ms, max=${this.cfg.maxCount}, poll=${pollMs}ms)`
+      `[follow-up] scheduler started (first=${this.cfg.firstDelayMs}ms, second=${this.cfg.secondDelayMs || this.cfg.intervalMs}ms, final=${this.cfg.finalDelayMs}ms, max=${this.cfg.maxCount}, poll=${pollMs}ms)`
     );
     return this;
   }

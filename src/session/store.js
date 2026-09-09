@@ -71,6 +71,8 @@ function createEmptySession(waNumber) {
     lastFollowUpAt: null,
     followUpCount: 0,
     followUpsExhausted: false,
+    // 'choice' | 'final' while waiting on a follow-up action menu; null otherwise.
+    awaitingFollowUpMenu: null,
   };
 }
 

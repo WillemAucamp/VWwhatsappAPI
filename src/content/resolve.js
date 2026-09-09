@@ -156,12 +156,143 @@ function buildInteractiveFromState(state) {
   };
 }
 
+/**
+ * Follow-up action menus (not FSM state options).
+ * reply ids: fu_continue | fu_human_handover | fu_opt_out
+ */
+const FOLLOW_UP_MENU = {
+  choice: {
+    kind: 'choice',
+    promptKey: 'follow_up_choice',
+    options: {
+      fu_human_handover: true,
+      fu_opt_out: true,
+      fu_continue: true,
+    },
+    optionTitles: {
+      fu_human_handover: 'Human-Handover',
+      fu_opt_out: 'Opt-out',
+      fu_continue: 'Continue chat',
+    },
+    optionLabels: {
+      fu_human_handover: [
+        'human-handover',
+        'human handover',
+        'handover',
+        'human',
+        'agent',
+        'fu_human_handover',
+      ],
+      fu_opt_out: [
+        'opt-out',
+        'opt out',
+        'optout',
+        'unsubscribe',
+        'fu_opt_out',
+      ],
+      fu_continue: [
+        'continue chat',
+        'continue',
+        'yes',
+        'resume',
+        'fu_continue',
+      ],
+    },
+  },
+  final: {
+    kind: 'final',
+    promptKey: 'follow_up_final',
+    options: {
+      fu_continue: true,
+      fu_opt_out: true,
+    },
+    optionTitles: {
+      fu_continue: 'Continue chat',
+      fu_opt_out: 'Opt-out',
+    },
+    optionLabels: {
+      fu_continue: [
+        'continue chat',
+        'continue',
+        'yes',
+        'opt in',
+        'opt-in',
+        'optin',
+        'resume',
+        'fu_continue',
+      ],
+      fu_opt_out: [
+        'opt-out',
+        'opt out',
+        'optout',
+        'unsubscribe',
+        'fu_opt_out',
+      ],
+    },
+  },
+};
+
+function followUpMenuSpec(kind) {
+  if (kind === 'choice' || kind === 'final') return FOLLOW_UP_MENU[kind];
+  return null;
+}
+
+function buildFollowUpMenuInteractive(kind) {
+  const spec = followUpMenuSpec(kind);
+  if (!spec) return null;
+  return buildInteractiveFromState({
+    options: spec.options,
+    optionTitles: spec.optionTitles,
+    optionLabels: spec.optionLabels,
+    interactiveHeader: 'VW Melrose',
+  });
+}
+
+/**
+ * Resolve a follow-up menu action from button reply id or free text.
+ * @returns {'fu_continue'|'fu_human_handover'|'fu_opt_out'|null}
+ */
+function resolveFollowUpMenuAction(kind, normalized, replyId) {
+  const spec = followUpMenuSpec(kind);
+  if (!spec) return null;
+  if (
+    replyId != null &&
+    replyId !== '' &&
+    Object.prototype.hasOwnProperty.call(spec.options, replyId)
+  ) {
+    return String(replyId);
+  }
+  const text = String(normalized || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  if (!text) return null;
+  for (const [optionKey, labels] of Object.entries(spec.optionLabels)) {
+    const list = Array.isArray(labels) ? labels : [labels];
+    for (const label of list) {
+      if (
+        String(label || '')
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, ' ') === text
+      ) {
+        return optionKey;
+      }
+    }
+  }
+  return null;
+}
+
 module.exports = {
   resolveCopy,
   applyPlaceholders,
   buildOutboundText,
   listValidOptionHints,
   buildInteractiveFromState,
+  buildFollowUpMenuInteractive,
+  resolveFollowUpMenuAction,
+  followUpMenuSpec,
+  FOLLOW_UP_MENU,
   BUTTON_TITLE_MAX,
   REPLY_BUTTON_MAX,
 };

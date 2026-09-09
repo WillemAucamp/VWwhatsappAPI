@@ -121,6 +121,8 @@ async function testFollowUpPersistBeforeSendPreventsDuplicate() {
   const fuCfg = {
     enabled: true,
     firstDelayMs: config.followUp.firstDelayMs,
+    secondDelayMs: config.followUp.secondDelayMs,
+    finalDelayMs: config.followUp.finalDelayMs,
     intervalMs: config.followUp.intervalMs,
     maxCount: 3,
     includePrompt: true,

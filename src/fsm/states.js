@@ -500,6 +500,22 @@ const STATES = {
     softDecline: false,
     quiet: true,
     notifyAgent: true,
+    agentTakeover: true,
+  },
+
+  /**
+   * Opt-out from a no-reply follow-up menu → soft close + manual (quiet) mode.
+   */
+  FOLLOW_UP_OPT_OUT: {
+    id: 'FOLLOW_UP_OPT_OUT',
+    promptKey: 'follow_up_opt_out_body',
+    type: 'terminal',
+    terminal: true,
+    exitReason: 'opted_out',
+    softDecline: true,
+    quiet: true,
+    notifyAgent: true,
+    agentTakeover: true,
   },
 
   /**

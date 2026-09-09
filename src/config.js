@@ -15,6 +15,12 @@ function intEnv(name, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+const followUpSecondDelayMs = intEnv(
+  'FOLLOW_UP_SECOND_MS',
+  intEnv('FOLLOW_UP_INTERVAL_MS', FOUR_HOURS_MS)
+);
+
 const config = {
   port: intEnv('PORT', 3000),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -82,12 +88,18 @@ const config = {
 
   /**
    * No-reply follow-ups while waiting on an active (non-terminal) question.
-   * First nudge after `firstDelayMs`, then every `intervalMs`, up to `maxCount`.
+   * Absolute delays from lastBotMessageAt:
+   *   1) firstDelayMs  — re-prompt current question (default 30m)
+   *   2) secondDelayMs — Human-Handover / Opt-out / Continue menu (default 4h)
+   *   3) finalDelayMs  — Continue / Opt-out closing menu (default 23h)
    */
   followUp: {
     enabled: String(process.env.FOLLOW_UP_ENABLED || 'true').toLowerCase() !== 'false',
     firstDelayMs: intEnv('FOLLOW_UP_FIRST_MS', 30 * 60 * 1000),
-    intervalMs: intEnv('FOLLOW_UP_INTERVAL_MS', 4 * 60 * 60 * 1000),
+    secondDelayMs: followUpSecondDelayMs,
+    finalDelayMs: intEnv('FOLLOW_UP_FINAL_MS', 23 * 60 * 60 * 1000),
+    /** Alias of secondDelayMs for older callers/tests. */
+    intervalMs: followUpSecondDelayMs,
     maxCount: intEnv('FOLLOW_UP_MAX', 3),
     pollMs: intEnv('FOLLOW_UP_POLL_MS', 60 * 1000),
     includePrompt:

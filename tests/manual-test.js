@@ -16,6 +16,7 @@ const { buildRecord } = require('../src/logger/leadLogger');
 
 const THIRTY_MIN = 30 * 60 * 1000;
 const FOUR_HOURS = 4 * 60 * 60 * 1000;
+const TWENTY_THREE_HOURS = 23 * 60 * 60 * 1000;
 
 class CapturingLogger {
   constructor() {
@@ -61,6 +62,9 @@ function createHarness(label, { nowFn } = {}) {
     agentEvents,
     get clock() {
       return clock;
+    },
+    set clock(ms) {
+      clock = ms;
     },
     setClock(ms) {
       clock = ms;
@@ -513,6 +517,8 @@ async function testFollowUpCadence() {
   const fuCfg = {
     enabled: true,
     firstDelayMs: THIRTY_MIN,
+    secondDelayMs: FOUR_HOURS,
+    finalDelayMs: TWENTY_THREE_HOURS,
     intervalMs: FOUR_HOURS,
     maxCount: 3,
     includePrompt: true,
@@ -527,33 +533,132 @@ async function testFollowUpCadence() {
   h.advance(1000);
   result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
   assert.strictEqual(result.sent, true);
+  assert.strictEqual(result.followUpKind, 'first');
   const firstFu = h.messages[h.messages.length - 1];
   assert.ok(String(firstFu.text).includes(copy.follow_up_first));
   assert.ok(String(firstFu.text).includes(copy.greeting_prompt));
   assert.ok(firstFu.interactive && firstFu.interactive.type === 'button');
-
-  h.advance(FOUR_HOURS - 1000);
-  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
-  assert.strictEqual(result.sent, false);
-  h.advance(1000);
-  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
-  assert.strictEqual(result.sent, true);
+  // First nudge keeps original greeting buttons (not the choice menu).
   assert.ok(
-    String(h.messages[h.messages.length - 1].text).includes(copy.follow_up_repeat)
+    firstFu.interactive.buttons.some((b) => b.id === 'qualify_me'),
+    '30m follow-up should re-show waiting-step options'
   );
 
-  h.advance(FOUR_HOURS);
+  // Second follow-up is absolute from lastBotMessageAt (+4h), not from lastFollowUpAt.
+  const afterFirst = await h.store.get(wa);
+  const armedAt = afterFirst.lastBotMessageAt;
+  h.clock = armedAt + FOUR_HOURS - 1000;
   result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, false);
+  h.clock = armedAt + FOUR_HOURS;
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, true);
+  assert.strictEqual(result.followUpKind, 'choice');
+  const choiceFu = h.messages[h.messages.length - 1];
+  assert.ok(String(choiceFu.text).includes(copy.follow_up_choice));
+  assert.deepStrictEqual(
+    choiceFu.interactive.buttons.map((b) => b.id).sort(),
+    ['fu_continue', 'fu_human_handover', 'fu_opt_out'].sort()
+  );
+  assert.strictEqual((await h.store.get(wa)).awaitingFollowUpMenu, 'choice');
+
+  h.clock = armedAt + TWENTY_THREE_HOURS - 1000;
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, false);
+  h.clock = armedAt + TWENTY_THREE_HOURS;
+  result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
+  assert.strictEqual(result.sent, true);
   assert.strictEqual(result.exhausted, true);
+  assert.strictEqual(result.followUpKind, 'final');
+  const finalFu = h.messages[h.messages.length - 1];
+  assert.ok(String(finalFu.text).includes(copy.follow_up_final));
+  assert.deepStrictEqual(
+    finalFu.interactive.buttons.map((b) => b.id).sort(),
+    ['fu_continue', 'fu_opt_out'].sort()
+  );
   assert.ok(h.agentEvents.some((e) => e.type === 'follow_up_exhausted'));
   // eslint-disable-next-line no-console
-  console.log('✓ follow-up cadence');
+  console.log('✓ follow-up cadence (30m / 4h choice / 23h final)');
+}
+
+async function testFollowUpChoiceMenuActions() {
+  const fuCfg = {
+    enabled: true,
+    firstDelayMs: THIRTY_MIN,
+    secondDelayMs: FOUR_HOURS,
+    finalDelayMs: TWENTY_THREE_HOURS,
+    maxCount: 3,
+    includePrompt: true,
+    notifyAgentOnExhausted: false,
+  };
+
+  // Continue chat → resume waiting step
+  const h1 = createHarness('fu_continue');
+  const wa1 = '27000000040';
+  await h1.say(wa1, 'hi');
+  await h1.say(wa1, 'qualify me');
+  const armed1 = (await h1.store.get(wa1)).lastBotMessageAt;
+  h1.clock = armed1 + THIRTY_MIN;
+  await h1.engine.processFollowUp(wa1, h1.clock, fuCfg);
+  h1.clock = armed1 + FOUR_HOURS;
+  await h1.engine.processFollowUp(wa1, h1.clock, fuCfg);
+  assert.strictEqual((await h1.store.get(wa1)).awaitingFollowUpMenu, 'choice');
+  assert.strictEqual((await h1.store.get(wa1)).currentState, 'EMPLOYED_INCOME_CHECK');
+  await h1.tap(wa1, 'fu_continue', 'Continue chat');
+  const afterContinue = await h1.store.get(wa1);
+  assert.strictEqual(afterContinue.currentState, 'EMPLOYED_INCOME_CHECK');
+  assert.strictEqual(afterContinue.status, 'active');
+  assert.strictEqual(afterContinue.awaitingFollowUpMenu, null);
+  assert.ok(
+    h1.messages.some((m) => m.text && String(m.text).includes(copy.session_resume_notice))
+  );
+
+  // Human-Handover → quiet + agent takeover
+  const h2 = createHarness('fu_handover');
+  const wa2 = '27000000041';
+  await h2.say(wa2, 'hi');
+  const armed2 = (await h2.store.get(wa2)).lastBotMessageAt;
+  h2.clock = armed2 + THIRTY_MIN;
+  await h2.engine.processFollowUp(wa2, h2.clock, fuCfg);
+  h2.clock = armed2 + FOUR_HOURS;
+  await h2.engine.processFollowUp(wa2, h2.clock, fuCfg);
+  await h2.tap(wa2, 'fu_human_handover', 'Human-Handover');
+  const afterHandover = await h2.store.get(wa2);
+  assert.strictEqual(afterHandover.status, 'quiet');
+  assert.strictEqual(afterHandover.agentTakenOver, true);
+  assert.strictEqual(afterHandover.currentState, 'HUMAN_HANDOVER');
+  assert.ok(h2.agentEvents.some((e) => e.type === 'handover'));
+
+  // Opt-out → soft-close meta + quiet manual mode
+  const h3 = createHarness('fu_opt_out');
+  const wa3 = '27000000042';
+  await h3.say(wa3, 'hi');
+  const armed3 = (await h3.store.get(wa3)).lastBotMessageAt;
+  h3.clock = armed3 + THIRTY_MIN;
+  await h3.engine.processFollowUp(wa3, h3.clock, fuCfg);
+  h3.clock = armed3 + FOUR_HOURS;
+  await h3.engine.processFollowUp(wa3, h3.clock, fuCfg);
+  h3.clock = armed3 + TWENTY_THREE_HOURS;
+  await h3.engine.processFollowUp(wa3, h3.clock, fuCfg);
+  assert.strictEqual((await h3.store.get(wa3)).awaitingFollowUpMenu, 'final');
+  await h3.tap(wa3, 'fu_opt_out', 'Opt-out');
+  const afterOpt = await h3.store.get(wa3);
+  assert.strictEqual(afterOpt.status, 'quiet');
+  assert.strictEqual(afterOpt.agentTakenOver, true);
+  assert.strictEqual(afterOpt.currentState, 'FOLLOW_UP_OPT_OUT');
+  assert.strictEqual(afterOpt.lastExitReason, 'opted_out');
+  assert.ok(h3.logger.leads.some((l) => l.exitReason === 'opted_out'));
+
+  // eslint-disable-next-line no-console
+  console.log('✓ follow-up menu Continue / Human-Handover / Opt-out');
 }
 
 async function testFollowUpSkippedOnTerminalAndScheduler() {
   const fuCfg = {
     enabled: true,
     firstDelayMs: THIRTY_MIN,
+    secondDelayMs: FOUR_HOURS,
+    finalDelayMs: TWENTY_THREE_HOURS,
     intervalMs: FOUR_HOURS,
     maxCount: 3,
     includePrompt: true,
@@ -604,6 +709,7 @@ async function main() {
   await testReleaseResumesWhereLeftOff();
   await testSpecialsMenuThenQualify();
   await testFollowUpCadence();
+  await testFollowUpChoiceMenuActions();
   await testFollowUpSkippedOnTerminalAndScheduler();
 
   const sample = buildRecord({
@@ -613,6 +719,8 @@ async function main() {
   });
   assert.ok(sample.timestamp);
   assert.strictEqual(config.followUp.firstDelayMs, THIRTY_MIN);
+  assert.strictEqual(config.followUp.secondDelayMs, FOUR_HOURS);
+  assert.strictEqual(config.followUp.finalDelayMs, TWENTY_THREE_HOURS);
   assert.strictEqual(config.followUp.intervalMs, FOUR_HOURS);
 
   // eslint-disable-next-line no-console

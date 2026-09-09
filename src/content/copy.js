@@ -224,6 +224,15 @@ module.exports = {
   follow_up_first:
     'Just checking in — still there? Tap a button below to continue.',
 
-  follow_up_repeat:
-    "We're still here if you'd like to continue. Tap a button below, or type *help* for a person.",
+  follow_up_choice:
+    "Heyy, I see you haven't chosen an option yet, maybe I can help or, would you like to Opt-out?",
+
+  follow_up_final:
+    "Hi, hopefully I haven't disturbed you? I will no longer contact you, unless you would like to opt-in. If ever you needed my help, I am ready and willing!",
+
+  follow_up_opt_out_body: [
+    "All good — I've stopped the automated messages and won't follow up again.",
+    '',
+    'Our team has this chat if you need anything. Type *restart* anytime to reopen the menu.',
+  ].join('\n'),
 };

@@ -6,6 +6,8 @@ const { createEmptySession } = require('../session/store');
 const {
   buildOutboundText,
   buildInteractiveFromState,
+  buildFollowUpMenuInteractive,
+  resolveFollowUpMenuAction,
   resolveCopy,
 } = require('../content/resolve');
 const {
@@ -239,6 +241,7 @@ class FsmEngine {
     session.lastFollowUpAt = null;
     session.followUpCount = 0;
     session.followUpsExhausted = false;
+    session.awaitingFollowUpMenu = null;
   }
 
   _clearFollowUp(session) {
@@ -246,8 +249,15 @@ class FsmEngine {
     session.lastFollowUpAt = null;
     session.followUpCount = 0;
     session.followUpsExhausted = false;
+    session.awaitingFollowUpMenu = null;
   }
 
+  /**
+   * Absolute delays from lastBotMessageAt:
+   *   count 0 → firstDelayMs (re-prompt)
+   *   count 1 → secondDelayMs (choice menu)
+   *   count 2 → finalDelayMs (closing menu)
+   */
   nextFollowUpDueAt(session, followUpConfig = config.followUp) {
     if (!session || !followUpConfig.enabled) return null;
     if (session.status !== 'active') return null;
@@ -259,17 +269,30 @@ class FsmEngine {
     const max = followUpConfig.maxCount;
     if (session.followUpCount >= max) return null;
 
-    if (session.followUpCount === 0) {
-      return session.lastBotMessageAt + followUpConfig.firstDelayMs;
-    }
-    const anchor = session.lastFollowUpAt || session.lastBotMessageAt;
-    return anchor + followUpConfig.intervalMs;
+    const delays = [
+      followUpConfig.firstDelayMs,
+      followUpConfig.secondDelayMs != null
+        ? followUpConfig.secondDelayMs
+        : followUpConfig.intervalMs,
+      followUpConfig.finalDelayMs != null
+        ? followUpConfig.finalDelayMs
+        : 23 * 60 * 60 * 1000,
+    ];
+    const delay = delays[session.followUpCount];
+    if (delay == null || !Number.isFinite(delay)) return null;
+    return session.lastBotMessageAt + delay;
   }
 
   async processFollowUp(waNumber, now = this._now(), followUpConfig = config.followUp) {
     return this._withSessionLock(waNumber, () =>
       this._processFollowUpUnlocked(waNumber, now, followUpConfig)
     );
+  }
+
+  _followUpKindForCount(followUpCount) {
+    if (followUpCount === 0) return 'first';
+    if (followUpCount === 1) return 'choice';
+    return 'final';
   }
 
   async _processFollowUpUnlocked(
@@ -287,25 +310,34 @@ class FsmEngine {
     if (now < dueAt) return { sent: false, reason: 'not_due', dueAt };
 
     const state = STATES[session.currentState];
-    const isFirst = session.followUpCount === 0;
-    const promptKey = isFirst ? 'follow_up_first' : 'follow_up_repeat';
+    const kind = this._followUpKindForCount(session.followUpCount);
+    const promptKey =
+      kind === 'first'
+        ? 'follow_up_first'
+        : kind === 'choice'
+          ? 'follow_up_choice'
+          : 'follow_up_final';
 
     const nudge = resolveCopy(promptKey, { stubMarker: this.stubMarker });
-    const footer = resolveCopy('help_footer', { stubMarker: this.stubMarker });
     const parts = [nudge];
 
-    if (followUpConfig.includePrompt && state && state.promptKey) {
-      const question = resolveCopy(state.promptKey, { stubMarker: this.stubMarker });
-      if (question) parts.push(question);
-      if (state.continuePromptKey) {
-        const cont = resolveCopy(state.continuePromptKey, {
+    // First nudge re-attaches the waiting question + original buttons.
+    if (kind === 'first') {
+      const footer = resolveCopy('help_footer', { stubMarker: this.stubMarker });
+      if (followUpConfig.includePrompt && state && state.promptKey) {
+        const question = resolveCopy(state.promptKey, {
           stubMarker: this.stubMarker,
         });
-        if (cont) parts.push(cont);
+        if (question) parts.push(question);
+        if (state.continuePromptKey) {
+          const cont = resolveCopy(state.continuePromptKey, {
+            stubMarker: this.stubMarker,
+          });
+          if (cont) parts.push(cont);
+        }
       }
+      if (footer) parts.push(footer);
     }
-
-    if (footer) parts.push(footer);
 
     // Persist the follow-up slot before Graph send. Otherwise a successful
     // send + failed sessionStore.set leaves lastFollowUpAt unset and the next
@@ -313,22 +345,31 @@ class FsmEngine {
     const prevCount = session.followUpCount;
     const prevFollowUpAt = session.lastFollowUpAt;
     const prevExhausted = session.followUpsExhausted;
+    const prevAwaiting = session.awaitingFollowUpMenu;
 
     session.followUpCount += 1;
     session.lastFollowUpAt = now;
+    session.awaitingFollowUpMenu = kind === 'first' ? null : kind;
     if (session.followUpCount >= followUpConfig.maxCount) {
       session.followUpsExhausted = true;
     }
     await this.sessionStore.set(session.waNumber, session);
 
     try {
-      const interactive = buildInteractiveFromState(state);
+      let interactive = null;
+      if (kind === 'first') {
+        interactive = buildInteractiveFromState(state);
+      } else {
+        interactive = buildFollowUpMenuInteractive(kind);
+      }
+
       const followPayload = {
         text: parts.filter(Boolean).join('\n\n'),
-        link: linkForState(state),
+        link: kind === 'first' ? linkForState(state) : undefined,
         meta: {
           type: 'follow_up',
           followUpIndex: session.followUpCount,
+          followUpKind: kind,
           stateId: session.currentState,
           promptKey,
         },
@@ -342,6 +383,7 @@ class FsmEngine {
       session.followUpCount = prevCount;
       session.lastFollowUpAt = prevFollowUpAt;
       session.followUpsExhausted = prevExhausted;
+      session.awaitingFollowUpMenu = prevAwaiting;
       await this.sessionStore.set(session.waNumber, session);
       throw err;
     }
@@ -364,9 +406,47 @@ class FsmEngine {
       sent: true,
       waNumber: session.waNumber,
       followUpCount: session.followUpCount,
+      followUpKind: kind,
       stateId: session.currentState,
       exhausted: session.followUpsExhausted,
     };
+  }
+
+  /**
+   * Handle Continue / Human-Handover / Opt-out from a no-reply follow-up menu.
+   * @returns {object|null} handler result, or null if inbound is not a menu action
+   *   (caller should fall through to normal state options — e.g. a stale button).
+   */
+  async _handleFollowUpMenuInbound(session, normalized, replyId) {
+    const kind = session.awaitingFollowUpMenu;
+    if (!kind) return null;
+
+    const action = resolveFollowUpMenuAction(kind, normalized, replyId);
+    if (!action) return null;
+
+    session.awaitingFollowUpMenu = null;
+
+    if (action === 'fu_continue') {
+      const resumeId =
+        this._resumeStateId(session) || session.currentState;
+      if (resumeId && this._isResumableStateId(resumeId)) {
+        return this._resumeAtState(session, resumeId);
+      }
+      return this._restart(session);
+    }
+
+    if (action === 'fu_human_handover') {
+      return this._routeToHuman(session, session.currentState);
+    }
+
+    if (action === 'fu_opt_out') {
+      session.interruptedFrom = session.currentState;
+      return this._enterState(session, 'FOLLOW_UP_OPT_OUT', {
+        fromInterrupt: session.interruptedFrom,
+      });
+    }
+
+    return null;
   }
 
   async getOrCreateSession(waNumber) {
@@ -1113,6 +1193,18 @@ class FsmEngine {
 
     if (matchesKeywordList(normalized, config.fsm.helpIntentKeywords)) {
       return this._routeToHuman(session, session.currentState);
+    }
+
+    // No-reply follow-up action menus (Continue / Human-Handover / Opt-out).
+    // Prefer menu actions; unmatched input can still hit the waiting-step options
+    // (e.g. a stale button from the 30m nudge).
+    if (session.awaitingFollowUpMenu) {
+      const menuResult = await this._handleFollowUpMenuInbound(
+        session,
+        normalized,
+        replyId
+      );
+      if (menuResult) return menuResult;
     }
 
     const state = STATES[session.currentState];
