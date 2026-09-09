@@ -41,6 +41,24 @@ function normalizeShortcutText(text) {
     .trimEnd();
 }
 
+/**
+ * Shortcuts saved via the old single-line input lost all newlines.
+ * Re-insert breaks before section/bullet emojis and known closing lines.
+ * Leaves already-multiline text untouched.
+ */
+function repairCollapsedShortcutText(text) {
+  const raw = String(text || '');
+  if (/\n/.test(raw)) return normalizeShortcutText(raw);
+  if (!/[👉🏛️🏦📊🚗📋]/.test(raw)) return normalizeShortcutText(raw);
+
+  const repaired = raw
+    .replace(/\s+([🏛️🏦📊🚗])/gu, '\n$1')
+    .replace(/\s+(👉)/gu, '\n$1')
+    .replace(/\s+(Because of all these variables)/g, '\n$1')
+    .replace(/\s+(What I can do is)/g, '\n$1');
+  return normalizeShortcutText(repaired);
+}
+
 function createShortcutStore(filePath = config.agent.shortcutsPath) {
   const file = path.resolve(filePath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -71,6 +89,17 @@ function createShortcutStore(filePath = config.agent.shortcutsPath) {
       const parsed = JSON.parse(raw);
       if (!parsed || !Array.isArray(parsed.shortcuts)) {
         return { shortcuts: [] };
+      }
+      let changed = false;
+      const now = new Date().toISOString();
+      parsed.shortcuts = parsed.shortcuts.map((s) => {
+        const nextText = repairCollapsedShortcutText(s && s.text);
+        if (nextText === (s && s.text)) return s;
+        changed = true;
+        return { ...s, text: nextText, updatedAt: now };
+      });
+      if (changed) {
+        await writeAllUnlocked(parsed);
       }
       return parsed;
     } catch {
@@ -190,4 +219,10 @@ function createShortcutStore(filePath = config.agent.shortcutsPath) {
   return { list, create, update, remove, file, normalizeKey };
 }
 
-module.exports = { createShortcutStore, normalizeKey, DEFAULT_SHORTCUTS };
+module.exports = {
+  createShortcutStore,
+  normalizeKey,
+  normalizeShortcutText,
+  repairCollapsedShortcutText,
+  DEFAULT_SHORTCUTS,
+};

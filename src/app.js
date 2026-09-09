@@ -95,8 +95,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when agent-desk shortcuts preserve multi-line message bodies.
-        fsm: 'shortcut-preserve-newlines-2026-09-09',
+        // Bumped when live shortcuts auto-repair collapsed newlines on boot.
+        fsm: 'shortcut-repair-newlines-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||
@@ -155,6 +155,14 @@ function createApp(overrides = {}) {
   app.locals.shortcutStore = shortcutStore;
   app.locals.labelStore = labelStore;
   app.locals.config = config;
+
+  // Rewrite any shortcuts that were flattened by the old single-line editor.
+  Promise.resolve()
+    .then(() => shortcutStore.list())
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('[shortcuts] startup repair failed', err && err.message);
+    });
 
   if (overrides.followUpScheduler) {
     app.locals.followUpScheduler = overrides.followUpScheduler;

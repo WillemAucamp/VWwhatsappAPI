@@ -181,6 +181,33 @@ async function testMessageStoreAndApis() {
       { method: 'DELETE', headers: { Authorization: 'Bearer desk-secret' } }
     );
 
+    // Collapsed one-line bodies (from the old text input) are repaired on load.
+    const collapsed =
+      "How vehicle finance works 🏛️ The dealership doesn't decide your instalment or interest rate — that's entirely up to the bank. 📊 Your instalment depends heavily on your credit profile. This isn't just your credit score — it includes things like: 👉 Your age 👉 Whether you pay your accounts on time each month 👉 How much of your available credit you're using (ideally under 50%) 👉 How diverse your credit accounts are 👉 How long you've been employed 🚗 It also depends on the vehicle you choose: 👉 New and used vehicles fall into different risk categories 👉 Banks apply different scoring criteria to each, which affects the interest rate you're offered Because of all these variables, we won't know your exact instalment until the bank runs your inquiry 📋. What I can do is get the ball rolling by inquiring so we can see exactly what you qualify for";
+    const existing = JSON.parse(fs.readFileSync(shortcutsPath, 'utf8'));
+    existing.shortcuts.push({
+      id: 'sc_collapsed_finance',
+      key: 'financehelp',
+      text: collapsed,
+      updatedAt: '2026-09-09T00:00:00.000Z',
+    });
+    fs.writeFileSync(shortcutsPath, `${JSON.stringify(existing, null, 2)}\n`);
+    const repairedList = await fetch(`http://127.0.0.1:${port}/agent/api/shortcuts`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    const repaired = repairedList.shortcuts.find((s) => s.key === 'financehelp');
+    assert.ok(repaired, 'repaired finance shortcut present');
+    assert.ok(repaired.text.includes('\n🏛️ '));
+    assert.ok(repaired.text.includes('\n👉 Your age\n👉 Whether you pay'));
+    assert.ok(repaired.text.includes('\n🚗 It also depends'));
+    assert.ok(repaired.text.includes('\nBecause of all these variables'));
+    assert.ok(repaired.text.includes('\nWhat I can do is get the ball rolling'));
+    assert.strictEqual(repaired.text.includes(' 👉 '), false);
+    await fetch(
+      `http://127.0.0.1:${port}/agent/api/shortcuts/${repaired.id}`,
+      { method: 'DELETE', headers: { Authorization: 'Bearer desk-secret' } }
+    );
+
     // Labels
     const labels = await fetch(`http://127.0.0.1:${port}/agent/api/labels`, {
       headers: { Authorization: 'Bearer desk-secret' },
