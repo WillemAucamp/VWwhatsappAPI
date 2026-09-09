@@ -23,6 +23,7 @@ const files = [
   'catalog-product-list.test.js',
   'agent-desk.test.js',
   'message-store.test.js',
+  'app-boot-no-conflict.test.js',
 ];
 
 let failed = 0;
