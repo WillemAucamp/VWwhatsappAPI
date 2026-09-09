@@ -476,6 +476,108 @@
     }
     .composer-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .composer-actions .grow { margin-left: auto; border-radius: 22px; padding: 10px 20px; }
+    .composer-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+    .composer-row textarea { flex: 1; }
+    .emoji-toggle {
+      flex-shrink: 0;
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      border-radius: 50%;
+      font-size: 1.35rem;
+      line-height: 1;
+      background: #fff;
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+    .emoji-toggle:hover:not(:disabled) { background: #f0f2f5; }
+    .emoji-toggle:disabled { opacity: 0.45; }
+    .emoji-picker {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: calc(100% - 4px);
+      max-height: min(340px, 50vh);
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 8px 28px rgba(11, 20, 26, 0.18);
+      z-index: 35;
+      overflow: hidden;
+    }
+    .emoji-picker.hidden { display: none; }
+    .emoji-picker-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+    .emoji-picker-head input {
+      flex: 1;
+      margin: 0;
+      border-radius: 20px;
+      padding: 8px 12px;
+      font-size: 0.85rem;
+    }
+    .emoji-cats {
+      display: flex;
+      gap: 2px;
+      overflow-x: auto;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--line);
+      flex-shrink: 0;
+      scrollbar-width: thin;
+    }
+    .emoji-cat {
+      flex-shrink: 0;
+      width: 36px;
+      height: 32px;
+      padding: 0;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      font-size: 1.1rem;
+      cursor: pointer;
+      color: var(--ink);
+    }
+    .emoji-cat:hover { background: #f0f2f5; }
+    .emoji-cat.active { background: #e7f8f5; }
+    .emoji-grid {
+      flex: 1;
+      overflow: auto;
+      padding: 8px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+      gap: 2px;
+      align-content: start;
+    }
+    .emoji-grid button {
+      width: 100%;
+      aspect-ratio: 1;
+      padding: 0;
+      border: none;
+      border-radius: 8px;
+      background: transparent;
+      font-size: 1.35rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .emoji-grid button:hover { background: #f0f2f5; }
+    .emoji-empty {
+      grid-column: 1 / -1;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+      padding: 24px 8px;
+    }
 
     .slash-menu {
       position: absolute;
@@ -685,8 +787,19 @@
       <div id="messages"><div class="empty">Choose a conversation on the left.</div></div>
       <div class="composer">
         <div id="slashMenu" class="slash-menu hidden" role="listbox" aria-label="Shortcuts"></div>
-        <p class="composer-hint">Type <strong>/</strong> for shortcuts</p>
-        <textarea id="replyBox" rows="2" placeholder="Type a message" disabled></textarea>
+        <div id="emojiPicker" class="emoji-picker hidden" role="dialog" aria-label="Emoji picker">
+          <div class="emoji-picker-head">
+            <input id="emojiSearch" type="search" placeholder="Search emoji…" autocomplete="off" />
+            <button type="button" class="secondary" id="emojiCloseBtn" style="padding:6px 10px;border-radius:8px;">Close</button>
+          </div>
+          <div id="emojiCats" class="emoji-cats" role="tablist" aria-label="Emoji categories"></div>
+          <div id="emojiGrid" class="emoji-grid" role="listbox" aria-label="Emojis"></div>
+        </div>
+        <p class="composer-hint">Type <strong>/</strong> for shortcuts · use 😀 for emoji</p>
+        <div class="composer-row">
+          <button type="button" class="emoji-toggle" id="emojiBtn" title="Insert emoji" aria-label="Insert emoji" disabled>😀</button>
+          <textarea id="replyBox" rows="2" placeholder="Type a message" disabled></textarea>
+        </div>
         <div class="composer-actions">
           <button type="button" class="secondary" id="takeoverBtnBar" disabled>Take over</button>
           <button type="button" class="secondary" id="releaseBtnBar" disabled>Release to bot</button>
@@ -767,6 +880,7 @@
     </div>
   </div>
 
+  <script src="/agent/static/emojis.js"></script>
   <script>
     const state = {
       token: sessionStorage.getItem('agentToken') || '',
@@ -782,6 +896,7 @@
       chatSearch: '',
       threadLabelIds: [],
       slash: { open: false, query: '', start: -1, end: -1, active: 0, matches: [] },
+      emoji: { open: false, categoryId: 'smileys', query: '' },
       editingShortcutId: null,
       editingLabelId: null,
       assignDraft: [],
@@ -1100,6 +1215,7 @@
     function setThreadActionsEnabled(on) {
       el('replyBox').disabled = !on;
       el('sendBtn').disabled = !on;
+      el('emojiBtn').disabled = !on;
       el('takeoverBtn').disabled = !on;
       el('releaseBtn').disabled = !on;
       el('takeoverBtnBar').disabled = !on;
@@ -1108,6 +1224,7 @@
       el('labelsBtnBar').disabled = !on;
       el('markUnreadBtn').disabled = !on;
       el('markUnreadBtnBar').disabled = !on;
+      if (!on) hideEmojiPicker();
     }
 
     function renderThreadLabels(labels) {
@@ -1191,6 +1308,11 @@
           return;
         }
       }
+      if (state.emoji.open && e.key === 'Escape') {
+        e.preventDefault();
+        hideEmojiPicker();
+        return;
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendReply();
@@ -1206,6 +1328,7 @@
       if (state.sending) return;
       state.sending = true;
       hideSlashMenu();
+      hideEmojiPicker();
       el('threadError').textContent = '';
       el('sendBtn').disabled = true;
       try {
@@ -1234,6 +1357,7 @@
         hideSlashMenu();
         return;
       }
+      hideEmojiPicker();
       const token = match[1];
       const start = caret - token.length;
       const query = token.slice(1).toLowerCase();
@@ -1250,6 +1374,122 @@
       };
       renderSlashMenu();
     }
+
+    function emojiLibrary() {
+      return (window.AGENT_EMOJI_LIBRARY && window.AGENT_EMOJI_LIBRARY.categories) || [];
+    }
+
+    function hideEmojiPicker() {
+      state.emoji.open = false;
+      el('emojiPicker').classList.add('hidden');
+    }
+
+    function showEmojiPicker() {
+      hideSlashMenu();
+      state.emoji.open = true;
+      if (!state.emoji.categoryId && emojiLibrary().length) {
+        state.emoji.categoryId = emojiLibrary()[0].id;
+      }
+      el('emojiPicker').classList.remove('hidden');
+      renderEmojiCats();
+      renderEmojiGrid();
+      el('emojiSearch').focus();
+    }
+
+    function toggleEmojiPicker() {
+      if (state.emoji.open) hideEmojiPicker();
+      else showEmojiPicker();
+    }
+
+    function renderEmojiCats() {
+      const cats = emojiLibrary();
+      el('emojiCats').innerHTML = cats.map((c) => {
+        const active = c.id === state.emoji.categoryId ? ' active' : '';
+        return (
+          '<button type="button" class="emoji-cat' + active + '" data-cat="' + escapeHtml(c.id) + '" title="' +
+            escapeHtml(c.name) + '" aria-label="' + escapeHtml(c.name) + '">' + c.icon + '</button>'
+        );
+      }).join('');
+      el('emojiCats').querySelectorAll('.emoji-cat').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.emoji.categoryId = btn.getAttribute('data-cat');
+          state.emoji.query = '';
+          el('emojiSearch').value = '';
+          renderEmojiCats();
+          renderEmojiGrid();
+        });
+      });
+    }
+
+    function emojiMatches(item, query) {
+      if (!query) return true;
+      const q = query.toLowerCase().trim();
+      if (!q) return true;
+      return String(item.k || '').toLowerCase().includes(q) || String(item.e || '').includes(q);
+    }
+
+    function renderEmojiGrid() {
+      const cats = emojiLibrary();
+      const query = state.emoji.query || '';
+      let list = [];
+      if (query.trim()) {
+        cats.forEach((c) => {
+          c.emojis.forEach((item) => {
+            if (emojiMatches(item, query)) list.push(item);
+          });
+        });
+      } else {
+        const cat = cats.find((c) => c.id === state.emoji.categoryId) || cats[0];
+        list = (cat && cat.emojis) || [];
+      }
+      const grid = el('emojiGrid');
+      if (!list.length) {
+        grid.innerHTML = '<div class="emoji-empty">No emoji match that search.</div>';
+        return;
+      }
+      // Cap search results so the panel stays snappy.
+      const shown = query.trim() ? list.slice(0, 240) : list;
+      grid.innerHTML = shown.map((item) => (
+        '<button type="button" title="' + escapeHtml(item.k || '') + '" aria-label="' +
+          escapeHtml(item.k || item.e) + '">' + item.e + '</button>'
+      )).join('');
+      grid.querySelectorAll('button').forEach((btn, i) => {
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          insertEmoji(shown[i].e);
+        });
+      });
+    }
+
+    function insertEmoji(emoji) {
+      const box = el('replyBox');
+      if (box.disabled) return;
+      const start = box.selectionStart || 0;
+      const end = box.selectionEnd || 0;
+      const value = box.value;
+      box.value = value.slice(0, start) + emoji + value.slice(end);
+      const next = start + emoji.length;
+      box.focus();
+      box.setSelectionRange(next, next);
+      box.dispatchEvent(new Event('input'));
+    }
+
+    el('emojiBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleEmojiPicker();
+    });
+    el('emojiCloseBtn').addEventListener('click', hideEmojiPicker);
+    el('emojiSearch').addEventListener('input', () => {
+      state.emoji.query = el('emojiSearch').value || '';
+      renderEmojiGrid();
+    });
+    document.addEventListener('click', (e) => {
+      if (!state.emoji.open) return;
+      const picker = el('emojiPicker');
+      const btn = el('emojiBtn');
+      if (picker.contains(e.target) || btn.contains(e.target)) return;
+      hideEmojiPicker();
+    });
 
     function renderSlashMenu() {
       const menu = el('slashMenu');

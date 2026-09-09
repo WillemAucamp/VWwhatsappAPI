@@ -123,6 +123,8 @@ function createApp(overrides = {}) {
         enabled: Boolean(config.agent.deskEnabled && config.agent.deskPassword),
         path: '/agent',
         messageStore: messageStore && messageStore.backend ? messageStore.backend : 'unknown',
+        // Agent composer emoji picker (desk UI only).
+        emojiPicker: 'agent-emoji-picker-2026-09-09',
       },
     });
   });
