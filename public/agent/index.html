@@ -738,6 +738,7 @@
           <div class="color-swatches" id="labelColorSwatches"></div>
         </div>
         <div class="modal-actions" style="margin-top:0;">
+          <button type="button" class="secondary hidden" id="labelCancelEditBtn">Cancel edit</button>
           <button type="submit" id="labelSaveBtn">Add label</button>
         </div>
         <div class="error" id="labelError"></div>
@@ -1421,20 +1422,38 @@
       });
     }
 
-    function openLabelsModal() {
+    function friendlyLabelError(err) {
+      const code = err && err.message ? String(err.message) : '';
+      if (code === 'label_name_required') return 'Enter a label name.';
+      if (code === 'label_name_exists') return 'A label with that name already exists.';
+      if (code === 'label_not_found') return 'That label was removed. Try Add label again.';
+      return code || 'Could not save label.';
+    }
+
+    function resetLabelForm() {
       state.editingLabelId = null;
       el('labelForm').reset();
       el('labelSaveBtn').textContent = 'Add label';
       el('labelError').textContent = '';
-      state.selectedLabelColor = state.labelColors[0];
+      state.selectedLabelColor = state.labelColors[0] || '#128c7e';
+      const cancelBtn = el('labelCancelEditBtn');
+      if (cancelBtn) cancelBtn.classList.add('hidden');
       renderColorSwatches();
+    }
+
+    function openLabelsModal() {
+      resetLabelForm();
       renderLabelManageList();
       el('labelsModal').classList.remove('hidden');
     }
     function closeLabelsModal() {
       el('labelsModal').classList.add('hidden');
+      resetLabelForm();
     }
     el('closeLabelsModal').addEventListener('click', closeLabelsModal);
+    el('labelCancelEditBtn').addEventListener('click', () => {
+      resetLabelForm();
+    });
     el('labelsModal').addEventListener('click', (e) => {
       if (e.target === el('labelsModal')) closeLabelsModal();
     });
@@ -1464,24 +1483,32 @@
           el('labelName').value = item.name;
           state.selectedLabelColor = item.color;
           el('labelSaveBtn').textContent = 'Save changes';
+          el('labelError').textContent = '';
+          el('labelCancelEditBtn').classList.remove('hidden');
           renderColorSwatches();
+          el('labelName').focus();
         });
       });
       list.querySelectorAll('[data-del]').forEach((btn) => {
         btn.addEventListener('click', async () => {
           el('labelError').textContent = '';
+          const delId = btn.getAttribute('data-del');
           try {
-            await api('/api/labels/' + encodeURIComponent(btn.getAttribute('data-del')), {
+            await api('/api/labels/' + encodeURIComponent(delId), {
               method: 'DELETE',
             });
-            if (state.filterLabelId === btn.getAttribute('data-del')) {
+            if (state.filterLabelId === delId) {
               state.filterLabelId = 'all';
+            }
+            // Deleting the label being edited left the form stuck on "Save changes".
+            if (state.editingLabelId === delId) {
+              resetLabelForm();
             }
             await loadDeskMeta();
             await loadChats(true);
             renderLabelManageList();
           } catch (err) {
-            el('labelError').textContent = err.message;
+            el('labelError').textContent = friendlyLabelError(err);
           }
         });
       });
@@ -1490,30 +1517,47 @@
     el('labelForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       el('labelError').textContent = '';
-      const name = el('labelName').value;
+      const name = String(el('labelName').value || '').trim();
       const color = state.selectedLabelColor;
+      if (!name) {
+        el('labelError').textContent = 'Enter a label name.';
+        return;
+      }
+      const saveBtn = el('labelSaveBtn');
+      saveBtn.disabled = true;
       try {
         if (state.editingLabelId) {
-          await api('/api/labels/' + encodeURIComponent(state.editingLabelId), {
-            method: 'PUT',
-            body: JSON.stringify({ name, color }),
-          });
+          try {
+            await api('/api/labels/' + encodeURIComponent(state.editingLabelId), {
+              method: 'PUT',
+              body: JSON.stringify({ name, color }),
+            });
+          } catch (err) {
+            // Label was deleted while editing — create it instead of failing.
+            if (err.status === 404) {
+              state.editingLabelId = null;
+              await api('/api/labels', {
+                method: 'POST',
+                body: JSON.stringify({ name, color }),
+              });
+            } else {
+              throw err;
+            }
+          }
         } else {
           await api('/api/labels', {
             method: 'POST',
             body: JSON.stringify({ name, color }),
           });
         }
-        state.editingLabelId = null;
-        el('labelForm').reset();
-        el('labelSaveBtn').textContent = 'Add label';
-        state.selectedLabelColor = state.labelColors[0];
+        resetLabelForm();
         await loadDeskMeta();
         await loadChats(true);
         renderLabelManageList();
-        renderColorSwatches();
       } catch (err) {
-        el('labelError').textContent = err.message;
+        el('labelError').textContent = friendlyLabelError(err);
+      } finally {
+        saveBtn.disabled = false;
       }
     });
 

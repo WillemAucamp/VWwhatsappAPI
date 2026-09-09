@@ -97,8 +97,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when agent desk filter chips support unread + labels together.
-        fsm: 'agent-desk-filter-chips-2026-09-09',
+        // Bumped when Manage labels can add again after delete-while-editing.
+        fsm: 'fix-add-label-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||

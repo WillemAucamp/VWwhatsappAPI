@@ -263,12 +263,28 @@ async function testMessageStoreAndApis() {
     });
     assert.strictEqual(newLabel.label.name, 'Trade-in');
 
+    // Recreate after delete (same name) — desk must be able to add again.
+    await fetch(`http://127.0.0.1:${port}/agent/api/labels/${newLabel.label.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => assert.strictEqual(r.status, 200));
+    const recreated = await fetch(`http://127.0.0.1:${port}/agent/api/labels`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name: 'Trade-in', color: '#067647' }),
+    }).then(async (r) => {
+      assert.strictEqual(r.status, 201);
+      return r.json();
+    });
+    assert.strictEqual(recreated.label.name, 'Trade-in');
+    assert.notStrictEqual(recreated.label.id, newLabel.label.id);
+
     const assign = await fetch(
       `http://127.0.0.1:${port}/agent/api/chats/27821234567/labels`,
       {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ labelIds: [vip.id, newLabel.label.id] }),
+        body: JSON.stringify({ labelIds: [vip.id, recreated.label.id] }),
       }
     ).then((r) => r.json());
     assert.strictEqual(assign.labelIds.length, 2);
@@ -285,7 +301,7 @@ async function testMessageStoreAndApis() {
       `http://127.0.0.1:${port}/agent/api/chats/27821234567`,
       { headers: { Authorization: 'Bearer desk-secret' } }
     ).then((r) => r.json());
-    assert.deepStrictEqual(thread.labelIds.sort(), [vip.id, newLabel.label.id].sort());
+    assert.deepStrictEqual(thread.labelIds.sort(), [vip.id, recreated.label.id].sort());
 
     // eslint-disable-next-line no-console
     console.log('✓ agent desk auth, reply, shortcuts, and labels');
