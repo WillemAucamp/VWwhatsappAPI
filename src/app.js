@@ -97,8 +97,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when agent desk adds number search + unread badges (desk-only).
-        fsm: 'agent-desk-search-unread-2026-09-09',
+        // Bumped when agent desk filter chips support unread + labels together.
+        fsm: 'agent-desk-filter-chips-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||

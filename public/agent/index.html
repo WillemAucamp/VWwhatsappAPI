@@ -205,13 +205,17 @@
     .menu button:hover:not(:disabled) { background: var(--line-soft); }
 
     .filter-bar {
-      padding: 10px 12px;
+      padding: 8px 12px 10px;
       border-bottom: 1px solid var(--line-soft);
       display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
+      flex-wrap: nowrap;
+      gap: 8px;
       background: #fff;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
     }
+    .filter-bar::-webkit-scrollbar { display: none; }
     .search-bar {
       padding: 8px 12px 0;
       background: #fff;
@@ -232,26 +236,35 @@
       background: #fff;
     }
     .filter-chip {
-      border: 1px solid var(--line);
+      border: 1px solid #e0e0e0;
       background: #fff;
-      color: var(--muted);
+      color: #3b4a54;
       border-radius: 999px;
-      padding: 5px 10px;
-      font-size: 0.75rem;
-      font-weight: 600;
+      padding: 7px 14px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      line-height: 1.2;
     }
+    .filter-chip:hover { background: #f5f6f6; }
     .filter-chip.active {
-      border-color: transparent;
-      color: #fff;
-      background: var(--green-deep);
+      border-color: #d1d7db;
+      color: #111b21;
+      background: #e9edef;
+      font-weight: 600;
     }
     .filter-chip .dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
       display: inline-block;
-      margin-right: 5px;
+      margin-right: 6px;
       vertical-align: middle;
+    }
+    .filter-chip .count {
+      margin-left: 4px;
+      font-weight: 600;
     }
 
     #chatList {
@@ -761,6 +774,7 @@
       labelColors: ['#128c7e', '#027eb5', '#c4530a', '#b42318', '#6941c6', '#067647', '#363f72', '#b54708'],
       selectedLabelColor: '#128c7e',
       filterLabelId: 'all',
+      filterUnread: false,
       chatSearch: '',
       threadLabelIds: [],
       slash: { open: false, query: '', start: -1, end: -1, active: 0, matches: [] },
@@ -896,25 +910,59 @@
       }
     }
 
+    function countChatsForLabel(labelId) {
+      return state.chats.reduce((n, c) => (chatHasLabel(c, labelId) ? n + 1 : n), 0);
+    }
+
+    function countUnreadChats(labelId) {
+      return state.chats.reduce((n, c) => {
+        if (Number(c.unreadCount) <= 0) return n;
+        if (labelId && labelId !== 'all' && !chatHasLabel(c, labelId)) return n;
+        return n + 1;
+      }, 0);
+    }
+
     function renderLabelFilters() {
       const bar = el('labelFilters');
-      const unreadTotal = state.chats.reduce((n, c) => n + (Number(c.unreadCount) > 0 ? 1 : 0), 0);
+      const unreadTotal = countUnreadChats(state.filterLabelId);
+      const allActive = !state.filterUnread && state.filterLabelId === 'all';
       const chips = [
-        { id: 'all', name: 'All', color: null },
-        { id: 'unread', name: unreadTotal ? ('Unread ' + unreadTotal) : 'Unread', color: null },
-        ...state.labels,
+        {
+          id: 'all',
+          name: 'All',
+          color: null,
+          count: null,
+          active: allActive,
+          kind: 'all',
+        },
+        {
+          id: 'unread',
+          name: 'Unread',
+          color: null,
+          count: unreadTotal || null,
+          active: state.filterUnread,
+          kind: 'unread',
+        },
+        ...state.labels.map((l) => ({
+          id: l.id,
+          name: l.name,
+          color: l.color,
+          count: countChatsForLabel(l.id) || null,
+          active: state.filterLabelId === l.id,
+          kind: 'label',
+        })),
       ];
       bar.innerHTML = chips.map((c) => {
-        const active = state.filterLabelId === c.id ? 'active' : '';
-        const style = c.id !== 'all' && c.id !== 'unread' && state.filterLabelId === c.id
-          ? ' style="background:' + c.color + ';"'
-          : '';
+        const active = c.active ? 'active' : '';
         const dot = c.color
           ? '<span class="dot" style="background:' + c.color + ';"></span>'
           : '';
+        const count = c.count
+          ? '<span class="count">' + escapeHtml(String(c.count)) + '</span>'
+          : '';
         return (
-          '<button type="button" class="filter-chip ' + active + '" data-label="' + c.id + '"' + style + '>' +
-            dot + escapeHtml(c.name) +
+          '<button type="button" class="filter-chip ' + active + '" data-filter="' + escapeHtml(c.id) + '" data-kind="' + c.kind + '">' +
+            dot + escapeHtml(c.name) + count +
           '</button>'
         );
       }).join('');
@@ -922,7 +970,16 @@
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          state.filterLabelId = btn.getAttribute('data-label') || 'all';
+          const kind = btn.getAttribute('data-kind') || 'all';
+          const id = btn.getAttribute('data-filter') || 'all';
+          if (kind === 'all') {
+            state.filterUnread = false;
+            state.filterLabelId = 'all';
+          } else if (kind === 'unread') {
+            state.filterUnread = !state.filterUnread;
+          } else if (kind === 'label') {
+            state.filterLabelId = state.filterLabelId === id ? 'all' : id;
+          }
           renderLabelFilters();
           renderChatList();
         });
@@ -931,7 +988,6 @@
 
     function chatHasLabel(chat, labelId) {
       if (!labelId || labelId === 'all') return true;
-      if (labelId === 'unread') return Number(chat.unreadCount) > 0;
       if ((chat.labelIds || []).includes(labelId)) return true;
       return (chat.labels || []).some((l) => l.id === labelId);
     }
@@ -949,23 +1005,26 @@
       return ('+' + wa).toLowerCase().includes(q.toLowerCase());
     }
 
+    function chatMatchesFilters(chat) {
+      if (state.filterUnread && !(Number(chat.unreadCount) > 0)) return false;
+      if (state.filterLabelId !== 'all' && !chatHasLabel(chat, state.filterLabelId)) return false;
+      if (!chatMatchesSearch(chat, state.chatSearch)) return false;
+      return true;
+    }
+
     function renderChatList() {
       const list = el('chatList');
-      let chats = state.chats.slice();
-      if (state.filterLabelId !== 'all') {
-        chats = chats.filter((c) => chatHasLabel(c, state.filterLabelId));
-      }
-      chats = chats.filter((c) => chatMatchesSearch(c, state.chatSearch));
+      const chats = state.chats.filter(chatMatchesFilters);
       if (!state.chats.length) {
         list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats yet. When a customer messages WhatsApp, they appear here.</div>';
         return;
       }
       if (!chats.length) {
-        const emptyMsg = state.chatSearch.trim()
-          ? 'No chats match that number.'
-          : state.filterLabelId === 'unread'
-            ? 'No unread chats.'
-            : 'No chats with this label.';
+        let emptyMsg = 'No chats match these filters.';
+        if (state.chatSearch.trim()) emptyMsg = 'No chats match that number.';
+        else if (state.filterUnread && state.filterLabelId !== 'all') emptyMsg = 'No unread chats with this label.';
+        else if (state.filterUnread) emptyMsg = 'No unread chats.';
+        else if (state.filterLabelId !== 'all') emptyMsg = 'No chats with this label.';
         list.innerHTML = '<div class="empty" style="margin:24px auto;">' + emptyMsg + '</div>';
         return;
       }
