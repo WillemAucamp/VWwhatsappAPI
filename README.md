@@ -65,13 +65,13 @@ Create labels under **⋮ → Manage labels**. Open a chat → **Labels** to tag
 | Data | Path / backend | Purpose |
 |---|---|---|
 | Message transcripts | `data/transcripts/` **or Supabase Postgres** when `DATABASE_URL` is set | Agent desk chat history |
+| Shortcuts, labels, unread | `data/agent/*.json` **or the same Postgres** when `DATABASE_URL` is set | Canned replies, chat tags, read cursors |
 | Bot sessions | `data/sessions/` | FSM state (greeting step, quiet, takeover, etc.) |
-| Shortcuts & labels | `data/agent/` | Agent desk canned replies and chat labels |
 | Lead log | `data/logs/leads.jsonl` | Qualified / exited leads |
 
-**Keep chat history forever (free):** create a [Supabase](https://supabase.com) project and follow [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md) — set `DATABASE_URL` on Render.
+**Keep chats + desk edits forever (free):** create a [Supabase](https://supabase.com) project and follow [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md) — set `DATABASE_URL` on Render. That persists transcripts **and** shortcuts/labels/unread so redeploys stop resetting desk changes.
 
-Local file transcripts are wiped on ephemeral hosts (Render free) unless you use Supabase or attach a persistent disk.
+Local file stores are wiped on ephemeral hosts (Render free) unless you use Supabase or attach a persistent disk.
 
 ### If the menu never arrives / Send says 401
 

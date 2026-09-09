@@ -81,6 +81,7 @@ function createAgentRouter({
       passwordConfigured: Boolean(password),
       transcriptPath: config.agent.transcriptPath,
       sessionStorePath: config.session.storePath,
+      settingsStore: shortcuts && shortcuts.backend ? shortcuts.backend : 'file',
       lastSendError: snap.lastSendError || null,
       webhookSignatureRejects: snap.postRejectedSignature || 0,
     });

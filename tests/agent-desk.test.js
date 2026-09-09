@@ -270,6 +270,9 @@ async function testMessageStoreAndApis() {
       text: collapsed,
       updatedAt: '2026-09-09T00:00:00.000Z',
     });
+    // Simulate pre-migration data so the one-time repair still runs.
+    if (!existing.meta) existing.meta = {};
+    delete existing.meta.shortcuts_repaired_collapsed_v1;
     fs.writeFileSync(shortcutsPath, `${JSON.stringify(existing, null, 2)}\n`);
     const repairedList = await fetch(`http://127.0.0.1:${port}/agent/api/shortcuts`, {
       headers: { Authorization: 'Bearer desk-secret' },
