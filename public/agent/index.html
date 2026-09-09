@@ -1037,9 +1037,7 @@
         if (c.agentTakenOver) badges.push('<span class="badge takeover">agent</span>');
         else if (c.status === 'quiet') badges.push('<span class="badge quiet">quiet</span>');
         else if (c.status) badges.push('<span class="badge">' + escapeHtml(c.status) + '</span>');
-        const labelHtml = (c.labels || []).map((l) =>
-          '<span class="label-pill" style="background:' + escapeHtml(l.color) + ';">' + escapeHtml(l.name) + '</span>'
-        ).join('');
+        const labelHtml = (c.labels || []).map((l) => labelPillHtml(l)).join('');
         const badgeCount = Number(c.unreadCount) > 99 ? '99+' : String(c.unreadCount || 0);
         const metaHtml =
           '<div class="chat-meta">' +
@@ -1098,9 +1096,7 @@
         box.innerHTML = '';
         return;
       }
-      box.innerHTML = labels.map((l) =>
-        '<span class="label-pill" style="background:' + escapeHtml(l.color) + ';">' + escapeHtml(l.name) + '</span>'
-      ).join('');
+      box.innerHTML = labels.map((l) => labelPillHtml(l)).join('');
     }
 
     async function loadThread(wa, silent) {
@@ -1467,7 +1463,7 @@
       list.innerHTML = state.labels.map((l) => (
         '<div class="manage-row">' +
           '<div class="top">' +
-            '<span class="label-pill" style="background:' + escapeHtml(l.color) + ';">' + escapeHtml(l.name) + '</span>' +
+            labelPillHtml(l) +
             '<div class="row-actions">' +
               '<button type="button" class="secondary" data-edit="' + l.id + '">Edit</button>' +
               '<button type="button" class="danger" data-del="' + l.id + '">Delete</button>' +
@@ -1576,7 +1572,7 @@
           return (
             '<label class="check-row">' +
               '<input type="checkbox" value="' + l.id + '" ' + checked + ' />' +
-              '<span class="label-pill" style="background:' + escapeHtml(l.color) + ';">' + escapeHtml(l.name) + '</span>' +
+              labelPillHtml(l) +
             '</label>'
           );
         }).join('');
