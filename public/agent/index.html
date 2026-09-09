@@ -626,7 +626,7 @@
   <section id="login">
     <form class="card" id="loginForm">
       <h1>VW Melrose agent desk</h1>
-      <p>Staff access to Cloud API chats. Bot pauses when you take over or reply.</p>
+      <p>Staff access to Cloud API chats. After Take over or Send, the bot stays quiet until you Release to bot.</p>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required />
       <div style="margin-top:16px; display:flex; gap:8px;">
@@ -779,6 +779,7 @@
       filterUnread: false,
       chatSearch: '',
       threadLabelIds: [],
+      replySending: false,
       slash: { open: false, query: '', start: -1, end: -1, active: 0, matches: [] },
       editingShortcutId: null,
       editingLabelId: null,
@@ -1183,22 +1184,27 @@
 
     async function sendReply() {
       const text = el('replyBox').value.trim();
-      if (!state.selected || !text) return;
+      if (!state.selected || !text || state.replySending) return;
+      state.replySending = true;
       hideSlashMenu();
       el('threadError').textContent = '';
       el('sendBtn').disabled = true;
+      // Clear immediately so a second Enter cannot re-post the same text.
+      el('replyBox').value = '';
       try {
         await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply', {
           method: 'POST',
           body: JSON.stringify({ text }),
         });
-        el('replyBox').value = '';
         await loadThread(state.selected);
         await loadChats(true);
       } catch (err) {
+        // Restore composer text so staff can retry after a failed Graph send.
+        if (!el('replyBox').value.trim()) el('replyBox').value = text;
         el('threadError').textContent = err.data && err.data.error ? err.data.error : err.message;
       } finally {
-        el('sendBtn').disabled = false;
+        state.replySending = false;
+        el('sendBtn').disabled = !state.selected;
       }
     }
 

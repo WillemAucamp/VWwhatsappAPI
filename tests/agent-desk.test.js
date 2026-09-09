@@ -326,8 +326,161 @@ async function testMessageStoreAndApis() {
   }
 }
 
+async function testAgentTakeoverHoldsUntilRelease() {
+  const sessionStore = new MemorySessionStore();
+  const outbound = [];
+
+  const engine = new FsmEngine({
+    sessionStore,
+    leadLogger: new CapturingLogger(),
+    sendMessage: async (to, payload) => {
+      outbound.push({ to, payload });
+      return { messages: [{ id: `wamid.${outbound.length}` }] };
+    },
+    notifyAgent: async () => ({ delivered: false }),
+  });
+
+  // Start a normal funnel, then staff takes over.
+  await engine.handleInbound('27829990001', 'hi');
+  await engine.takeOver('27829990001');
+  const held = await sessionStore.get('27829990001');
+  assert.strictEqual(held.status, 'quiet');
+  assert.strictEqual(held.agentTakenOver, true);
+
+  const beforeCount = outbound.length;
+
+  // Customer (or mirrored) reopen keywords must NOT restart during takeover.
+  for (const text of ['Hello', 'hi', 'restart', 'start', 'anything else']) {
+    // eslint-disable-next-line no-await-in-loop
+    const result = await engine.handleInbound('27829990001', text);
+    assert.strictEqual(result.agentTakenOver, true);
+    assert.strictEqual(result.quiet, true);
+    // eslint-disable-next-line no-await-in-loop
+    const session = await sessionStore.get('27829990001');
+    assert.strictEqual(session.agentTakenOver, true);
+    assert.strictEqual(session.status, 'quiet');
+  }
+
+  // Bot must stay silent — no restart notice, no quiet_thread_notice, no menu.
+  const afterInbound = outbound.slice(beforeCount);
+  assert.strictEqual(
+    afterInbound.length,
+    0,
+    `expected no bot outbound during agent takeover, got ${JSON.stringify(afterInbound)}`
+  );
+
+  // Only Release to bot hands control back (resume prior step when possible).
+  await engine.releaseToBot('27829990001');
+  const released = await sessionStore.get('27829990001');
+  assert.strictEqual(released.agentTakenOver, false);
+  assert.strictEqual(released.status, 'active');
+  assert.strictEqual(released.currentState, 'GREETING');
+  assert.ok(
+    outbound.some(
+      (o) =>
+        o.payload &&
+        o.payload.meta &&
+        (o.payload.meta.promptKey === 'session_resume_notice' ||
+          o.payload.meta.promptKey === 'session_restart_notice')
+    ),
+    'release should send resume or restart notice'
+  );
+
+  // eslint-disable-next-line no-console
+  console.log('✓ agent takeover holds until explicit release');
+}
+
+async function testAgentReplySendsOnceThroughLoggingSend() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-tx-once-'));
+  const messageStore = createMessageStore(dir);
+  const sessionStore = new MemorySessionStore();
+  const graphCalls = [];
+
+  const baseSend = async (to, payload) => {
+    graphCalls.push({ to, payload });
+    return { messages: [{ id: `wamid.graph.${graphCalls.length}` }] };
+  };
+
+  // Mirror production: loggingSend wraps Graph send and appends once.
+  const loggingSend = async (to, payload = {}) => {
+    const result = await baseSend(to, payload);
+    await messageStore.append({
+      waNumber: to,
+      direction: 'out',
+      source:
+        payload.meta && payload.meta.source === 'agent' ? 'agent' : 'bot',
+      text: payload.text || '',
+      wamid:
+        result && result.messages && result.messages[0]
+          ? result.messages[0].id
+          : null,
+    });
+    return result;
+  };
+
+  const engine = new FsmEngine({
+    sessionStore,
+    leadLogger: new CapturingLogger(),
+    sendMessage: loggingSend,
+    notifyAgent: async () => ({ delivered: false }),
+  });
+
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/agent',
+    createAgentRouter({
+      engine,
+      sessionStore,
+      messageStore,
+      shortcutStore: createShortcutStore(path.join(dir, 'shortcuts.json')),
+      labelStore: createLabelStore(path.join(dir, 'labels.json')),
+      chatReadStore: createChatReadStore(path.join(dir, 'reads.json')),
+      sendMessage: loggingSend,
+    })
+  );
+
+  const { server, port } = await listen(app);
+  try {
+    const reply = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27825550123/reply`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ text: 'Only once please' }),
+      }
+    );
+    assert.strictEqual(reply.status, 200);
+
+    const agentSends = graphCalls.filter(
+      (c) => c.payload && c.payload.meta && c.payload.meta.source === 'agent'
+    );
+    assert.strictEqual(
+      agentSends.length,
+      1,
+      `expected one Graph send for agent reply, got ${agentSends.length}`
+    );
+
+    const messages = await messageStore.listMessages('27825550123');
+    const agentRows = messages.filter((m) => m.source === 'agent');
+    assert.strictEqual(
+      agentRows.length,
+      1,
+      `expected one transcript row for agent reply, got ${agentRows.length}`
+    );
+    assert.strictEqual(agentRows[0].text, 'Only once please');
+
+    // eslint-disable-next-line no-console
+    console.log('✓ agent reply hits Graph + transcript exactly once');
+  } finally {
+    server.close();
+  }
+}
+
 async function main() {
   await testMessageStoreAndApis();
+  await testAgentTakeoverHoldsUntilRelease();
+  await testAgentReplySendsOnceThroughLoggingSend();
   // eslint-disable-next-line no-console
   console.log('\nagent desk tests passed.');
 }

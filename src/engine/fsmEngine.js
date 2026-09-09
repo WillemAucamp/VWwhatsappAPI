@@ -914,7 +914,8 @@ class FsmEngine {
   }
 
   /**
-   * Staff takeover: bot goes quiet until release / customer restart.
+   * Staff takeover: bot stays quiet until staff explicitly Release to bot.
+   * Customer reopen keywords (hello/hi/restart/…) must not reclaim the chat.
    * Remembers the in-progress step so Release to bot can resume there.
    * @param {{silent?: boolean}} [options] skip optional notice
    */
@@ -1080,6 +1081,13 @@ class FsmEngine {
       await this._flushPendingLead(session);
       if (session.pendingTerminalOutbound) {
         return this._retryTerminalOutbound(session);
+      }
+      // Agent desk takeover: stay silent until Release to bot — do not reopen
+      // on hello/hi/restart and do not send quiet_thread_notice.
+      if (session.agentTakenOver) {
+        session.updatedAt = this._now();
+        await this.sessionStore.set(waNumber, session);
+        return { session, quiet: true, agentTakenOver: true };
       }
       if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
         return this._restart(session);
