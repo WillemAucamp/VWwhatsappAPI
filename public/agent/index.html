@@ -212,6 +212,25 @@
       gap: 6px;
       background: #fff;
     }
+    .search-bar {
+      padding: 8px 12px 0;
+      background: #fff;
+    }
+    .search-bar input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 9px 14px;
+      font: inherit;
+      font-size: 0.9rem;
+      background: #f0f2f5;
+      margin-bottom: 0;
+    }
+    .search-bar input:focus {
+      outline: none;
+      border-color: var(--green);
+      background: #fff;
+    }
     .filter-chip {
       border: 1px solid var(--line);
       background: #fff;
@@ -250,16 +269,22 @@
       border-radius: 0;
       padding: 12px 16px;
       font-weight: 500;
-      display: block;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px 12px;
+      align-items: start;
     }
     .chat-item:hover { background: #f5f6f6; }
     .chat-item.active { background: #e7f8ef; }
+    .chat-item.unread .wa-num { font-weight: 700; }
+    .chat-item.unread .preview { color: var(--text); font-weight: 600; }
     .chat-item .wa {
       font-size: 0.95rem;
       display: flex;
       align-items: center;
       gap: 6px;
       flex-wrap: wrap;
+      min-width: 0;
     }
     .chat-item .preview {
       color: var(--muted);
@@ -269,12 +294,42 @@
       text-overflow: ellipsis;
       margin-top: 4px;
       font-weight: 400;
+      grid-column: 1;
+    }
+    .chat-item .chat-meta {
+      text-align: right;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .chat-item .chat-time {
+      font-size: 0.72rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .chat-item.unread .chat-time { color: var(--green-deep); font-weight: 600; }
+    .unread-badge {
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      border-radius: 999px;
+      background: #25d366;
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
     }
     .chat-item .label-row {
       display: flex;
       flex-wrap: wrap;
       gap: 4px;
       margin-top: 6px;
+      grid-column: 1 / -1;
     }
     .badge {
       display: inline-block;
@@ -587,6 +642,9 @@
         </div>
       </div>
       <div id="authBanner" class="banner danger hidden"></div>
+      <div class="search-bar">
+        <input id="chatSearch" type="search" inputmode="tel" autocomplete="off" placeholder="Search number" aria-label="Search chats by number" />
+      </div>
       <div class="filter-bar" id="labelFilters"></div>
       <div id="chatList"></div>
 
@@ -703,6 +761,7 @@
       labelColors: ['#128c7e', '#027eb5', '#c4530a', '#b42318', '#6941c6', '#067647', '#363f72', '#b54708'],
       selectedLabelColor: '#128c7e',
       filterLabelId: 'all',
+      chatSearch: '',
       threadLabelIds: [],
       slash: { open: false, query: '', start: -1, end: -1, active: 0, matches: [] },
       editingShortcutId: null,
@@ -839,13 +898,15 @@
 
     function renderLabelFilters() {
       const bar = el('labelFilters');
+      const unreadTotal = state.chats.reduce((n, c) => n + (Number(c.unreadCount) > 0 ? 1 : 0), 0);
       const chips = [
         { id: 'all', name: 'All', color: null },
+        { id: 'unread', name: unreadTotal ? ('Unread ' + unreadTotal) : 'Unread', color: null },
         ...state.labels,
       ];
       bar.innerHTML = chips.map((c) => {
         const active = state.filterLabelId === c.id ? 'active' : '';
-        const style = c.id !== 'all' && state.filterLabelId === c.id
+        const style = c.id !== 'all' && c.id !== 'unread' && state.filterLabelId === c.id
           ? ' style="background:' + c.color + ';"'
           : '';
         const dot = c.color
@@ -870,8 +931,22 @@
 
     function chatHasLabel(chat, labelId) {
       if (!labelId || labelId === 'all') return true;
+      if (labelId === 'unread') return Number(chat.unreadCount) > 0;
       if ((chat.labelIds || []).includes(labelId)) return true;
       return (chat.labels || []).some((l) => l.id === labelId);
+    }
+
+    function digitsOnly(value) {
+      return String(value || '').replace(/\D/g, '');
+    }
+
+    function chatMatchesSearch(chat, query) {
+      const q = String(query || '').trim();
+      if (!q) return true;
+      const wa = String(chat.waNumber || '');
+      const qDigits = digitsOnly(q);
+      if (qDigits) return wa.includes(qDigits);
+      return ('+' + wa).toLowerCase().includes(q.toLowerCase());
     }
 
     function renderChatList() {
@@ -880,16 +955,24 @@
       if (state.filterLabelId !== 'all') {
         chats = chats.filter((c) => chatHasLabel(c, state.filterLabelId));
       }
+      chats = chats.filter((c) => chatMatchesSearch(c, state.chatSearch));
       if (!state.chats.length) {
         list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats yet. When a customer messages WhatsApp, they appear here.</div>';
         return;
       }
       if (!chats.length) {
-        list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats with this label.</div>';
+        const emptyMsg = state.chatSearch.trim()
+          ? 'No chats match that number.'
+          : state.filterLabelId === 'unread'
+            ? 'No unread chats.'
+            : 'No chats with this label.';
+        list.innerHTML = '<div class="empty" style="margin:24px auto;">' + emptyMsg + '</div>';
         return;
       }
       list.innerHTML = chats.map((c) => {
+        const unread = Number(c.unreadCount) > 0;
         const active = state.selected === c.waNumber ? 'active' : '';
+        const unreadCls = unread ? ' unread' : '';
         const badges = [];
         if (c.agentTakenOver) badges.push('<span class="badge takeover">agent</span>');
         else if (c.status === 'quiet') badges.push('<span class="badge quiet">quiet</span>');
@@ -897,9 +980,16 @@
         const labelHtml = (c.labels || []).map((l) =>
           '<span class="label-pill" style="background:' + escapeHtml(l.color) + ';">' + escapeHtml(l.name) + '</span>'
         ).join('');
+        const badgeCount = Number(c.unreadCount) > 99 ? '99+' : String(c.unreadCount || 0);
+        const metaHtml =
+          '<div class="chat-meta">' +
+            '<span class="chat-time">' + escapeHtml(formatBubbleTime(c.lastAt)) + '</span>' +
+            (unread ? '<span class="unread-badge">' + escapeHtml(badgeCount) + '</span>' : '') +
+          '</div>';
         return (
-          '<button type="button" class="chat-item ' + active + '" data-wa="' + c.waNumber + '">' +
-            '<div class="wa">+' + c.waNumber + badges.join('') + '</div>' +
+          '<button type="button" class="chat-item ' + active + unreadCls + '" data-wa="' + c.waNumber + '">' +
+            '<div class="wa"><span class="wa-num">+' + c.waNumber + '</span>' + badges.join('') + '</div>' +
+            metaHtml +
             '<div class="preview">' + escapeHtml(c.lastText || '') + '</div>' +
             (labelHtml ? '<div class="label-row">' + labelHtml + '</div>' : '') +
           '</button>'
@@ -918,12 +1008,18 @@
       try {
         const data = await api('/api/chats');
         state.chats = data.chats || [];
+        renderLabelFilters();
         renderChatList();
       } catch (err) {
         if (!silent) el('threadError').textContent = err.message;
         if (err.status === 401) showLogin();
       }
     }
+
+    el('chatSearch').addEventListener('input', () => {
+      state.chatSearch = el('chatSearch').value || '';
+      renderChatList();
+    });
 
     function setThreadActionsEnabled(on) {
       el('replyBox').disabled = !on;
@@ -959,6 +1055,14 @@
         state.threadLabelIds = data.labelIds || [];
         renderThreadLabels(data.labels || []);
         setThreadActionsEnabled(true);
+        // Clear unread locally; next poll refreshes from server after mark-read.
+        const chat = state.chats.find((c) => c.waNumber === wa);
+        if (chat) {
+          chat.unreadCount = 0;
+          chat.lastReadAt = data.lastReadAt || chat.lastReadAt;
+          renderLabelFilters();
+          renderChatList();
+        }
 
         const box = el('messages');
         if (!data.messages.length) {

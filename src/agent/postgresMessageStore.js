@@ -153,8 +153,9 @@ function createPostgresMessageStore(connectionString) {
     return rows.map(mapRow);
   }
 
-  async function listChats() {
+  async function listChats({ lastReadByWa = {} } = {}) {
     await ensureSchema();
+    const readsJson = JSON.stringify(lastReadByWa || {});
     const { rows } = await pool.query(
       `SELECT DISTINCT ON (wa_number)
          wa_number,
@@ -162,19 +163,39 @@ function createPostgresMessageStore(connectionString) {
          text,
          direction,
          source,
-         (SELECT COUNT(*)::int FROM chat_messages c2 WHERE c2.wa_number = c.wa_number) AS message_count
+         (SELECT COUNT(*)::int FROM chat_messages c2 WHERE c2.wa_number = c.wa_number) AS message_count,
+         (SELECT COUNT(*)::int
+            FROM chat_messages c3
+           WHERE c3.wa_number = c.wa_number
+             AND c3.direction = 'in'
+             AND ($1::jsonb ->> c.wa_number) IS NOT NULL
+             AND c3.at > (($1::jsonb ->> c.wa_number)::timestamptz)
+         ) AS unread_after_read
        FROM chat_messages c
-       ORDER BY wa_number, at DESC`
+       ORDER BY wa_number, at DESC`,
+      [readsJson]
     );
     return rows
-      .map((row) => ({
-        waNumber: row.wa_number,
-        lastAt: row.at instanceof Date ? row.at.toISOString() : String(row.at),
-        lastText: row.text,
-        lastDirection: row.direction,
-        lastSource: row.source,
-        messageCount: row.message_count,
-      }))
+      .map((row) => {
+        const wa = row.wa_number;
+        const since = lastReadByWa[wa] || null;
+        let unreadCount = 0;
+        if (!since) {
+          unreadCount = row.direction === 'in' ? 1 : 0;
+        } else {
+          unreadCount = row.unread_after_read || 0;
+        }
+        return {
+          waNumber: wa,
+          lastAt: row.at instanceof Date ? row.at.toISOString() : String(row.at),
+          lastText: row.text,
+          lastDirection: row.direction,
+          lastSource: row.source,
+          messageCount: row.message_count,
+          unreadCount,
+          lastReadAt: since,
+        };
+      })
       .sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
   }
 

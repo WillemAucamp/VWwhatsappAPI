@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const { createShortcutStore } = require('./shortcutStore');
 const { createLabelStore } = require('./labelStore');
+const { createChatReadStore } = require('./chatReadStore');
 
 function timingSafeEqualStr(a, b) {
   const left = Buffer.from(String(a || ''));
@@ -25,6 +26,7 @@ function createAgentRouter({
   messageStore,
   shortcutStore,
   labelStore,
+  chatReadStore,
   sendMessage,
 } = {}) {
   const router = express.Router();
@@ -32,6 +34,7 @@ function createAgentRouter({
   const enabled = config.agent.deskEnabled && Boolean(password);
   const shortcuts = shortcutStore || createShortcutStore();
   const labels = labelStore || createLabelStore();
+  const chatReads = chatReadStore || createChatReadStore();
 
   function requireAuth(req, res, next) {
     if (!enabled) {
@@ -110,10 +113,11 @@ function createAgentRouter({
 
   router.get('/api/chats', requireAuth, async (_req, res) => {
     try {
-      const [chats, labelBundle] = await Promise.all([
-        messageStore.listChats(),
+      const [readsMap, labelBundle] = await Promise.all([
+        chatReads.getAll(),
         labels.getChatLabelsMap(),
       ]);
+      const chats = await messageStore.listChats({ lastReadByWa: readsMap });
       const labelById = new Map(
         (labelBundle.labels || []).map((l) => [l.id, l])
       );
@@ -148,10 +152,19 @@ function createAgentRouter({
         labels.getChatLabelIds(wa),
         labels.listLabels(),
       ]);
+      // Opening a thread marks it read for the agent desk (bot path untouched).
+      let lastReadAt = null;
+      try {
+        const marked = await chatReads.markRead(wa);
+        lastReadAt = marked.lastReadAt;
+      } catch (_) {
+        lastReadAt = null;
+      }
       const labelById = new Map(allLabels.map((l) => [l.id, l]));
       res.json({
         waNumber: wa,
         messages,
+        lastReadAt,
         labelIds,
         labels: labelIds
           .map((id) => labelById.get(id))

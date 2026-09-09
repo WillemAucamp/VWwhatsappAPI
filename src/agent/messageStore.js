@@ -58,7 +58,7 @@ function createFileMessageStore(dir = config.agent.transcriptPath) {
     }).filter(Boolean);
   }
 
-  async function listChats() {
+  async function listChats({ lastReadByWa = {} } = {}) {
     const names = await fs.promises.readdir(root);
     const chats = [];
     for (const name of names) {
@@ -73,13 +73,33 @@ function createFileMessageStore(dir = config.agent.transcriptPath) {
       } catch {
         continue;
       }
+      const wa = String(last.waNumber || '');
+      const since = lastReadByWa[wa] || null;
+      let unreadCount = 0;
+      if (!since) {
+        // Never opened in the desk: flag only if the latest message is inbound.
+        unreadCount = last.direction === 'in' ? 1 : 0;
+      } else {
+        for (const line of lines) {
+          let row = null;
+          try {
+            row = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (!row || row.direction !== 'in') continue;
+          if (String(row.at) > String(since)) unreadCount += 1;
+        }
+      }
       chats.push({
-        waNumber: last.waNumber,
+        waNumber: wa,
         lastAt: last.at,
         lastText: last.text,
         lastDirection: last.direction,
         lastSource: last.source,
         messageCount: lines.length,
+        unreadCount,
+        lastReadAt: since,
       });
     }
     chats.sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));

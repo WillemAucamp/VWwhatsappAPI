@@ -36,6 +36,10 @@ async function testFileBackendStillDefaultForPathArg() {
   assert.strictEqual(chats[0].waNumber, '27820001111');
   assert.strictEqual(chats[0].lastText, 'pong');
   assert.strictEqual(chats[0].messageCount, 2);
+  assert.strictEqual(chats[0].unreadCount, 0);
+
+  const unreadChats = await store.listChats({ lastReadByWa: {} });
+  assert.strictEqual(unreadChats[0].unreadCount, 0);
 
   // eslint-disable-next-line no-console
   console.log('✓ file message store append / list / chats');

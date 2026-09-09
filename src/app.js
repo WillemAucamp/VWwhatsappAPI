@@ -14,6 +14,7 @@ const webhookDiagnostics = require('./webhook/diagnostics');
 const { createMessageStore } = require('./agent/messageStore');
 const { createShortcutStore } = require('./agent/shortcutStore');
 const { createLabelStore } = require('./agent/labelStore');
+const { createChatReadStore } = require('./agent/chatReadStore');
 const { createAgentRouter } = require('./agent/routes');
 
 function createApp(overrides = {}) {
@@ -22,6 +23,7 @@ function createApp(overrides = {}) {
   const messageStore = overrides.messageStore || createMessageStore();
   const shortcutStore = overrides.shortcutStore || createShortcutStore();
   const labelStore = overrides.labelStore || createLabelStore();
+  const chatReadStore = overrides.chatReadStore || createChatReadStore();
 
   const baseSend = overrides.sendMessage || sendMessage;
   const loggingSend = async (to, payload = {}) => {
@@ -95,8 +97,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when live shortcuts auto-repair collapsed newlines on boot.
-        fsm: 'shortcut-repair-newlines-2026-09-09',
+        // Bumped when agent desk adds number search + unread badges (desk-only).
+        fsm: 'agent-desk-search-unread-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||
@@ -142,6 +144,7 @@ function createApp(overrides = {}) {
       messageStore,
       shortcutStore,
       labelStore,
+      chatReadStore,
       sendMessage: loggingSend,
     })
   );
@@ -154,6 +157,7 @@ function createApp(overrides = {}) {
   app.locals.messageStore = messageStore;
   app.locals.shortcutStore = shortcutStore;
   app.locals.labelStore = labelStore;
+  app.locals.chatReadStore = chatReadStore;
   app.locals.config = config;
 
   // Rewrite any shortcuts that were flattened by the old single-line editor.

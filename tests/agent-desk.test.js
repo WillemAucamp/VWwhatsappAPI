@@ -17,6 +17,7 @@ config.agent.deskPassword = 'desk-secret';
 const { createMessageStore } = require('../src/agent/messageStore');
 const { createShortcutStore } = require('../src/agent/shortcutStore');
 const { createLabelStore } = require('../src/agent/labelStore');
+const { createChatReadStore } = require('../src/agent/chatReadStore');
 const { createAgentRouter } = require('../src/agent/routes');
 const { MemorySessionStore } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
@@ -42,9 +43,11 @@ async function testMessageStoreAndApis() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-tx-'));
   const shortcutsPath = path.join(dir, 'shortcuts.json');
   const labelsPath = path.join(dir, 'labels.json');
+  const chatReadsPath = path.join(dir, 'chat_reads.json');
   const messageStore = createMessageStore(dir);
   const shortcutStore = createShortcutStore(shortcutsPath);
   const labelStore = createLabelStore(labelsPath);
+  const chatReadStore = createChatReadStore(chatReadsPath);
   const sessionStore = new MemorySessionStore();
   const outbound = [];
 
@@ -75,6 +78,7 @@ async function testMessageStoreAndApis() {
       messageStore,
       shortcutStore,
       labelStore,
+      chatReadStore,
       sendMessage: async (to, payload) => {
         outbound.push({ to, payload });
         return { messages: [{ id: 'wamid.agent' }] };
@@ -99,6 +103,39 @@ async function testMessageStoreAndApis() {
     }).then((r) => r.json());
     assert.strictEqual(chats.chats.length, 1);
     assert.strictEqual(chats.chats[0].waNumber, '27821234567');
+    assert.strictEqual(chats.chats[0].unreadCount, 1);
+
+    const threadOpen = await fetch(`http://127.0.0.1:${port}/agent/api/chats/27821234567`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    assert.ok(threadOpen.lastReadAt);
+    assert.strictEqual(threadOpen.messages.length, 1);
+
+    const chatsAfterRead = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    assert.strictEqual(chatsAfterRead.chats[0].unreadCount, 0);
+
+    await messageStore.append({
+      waNumber: '27821234567',
+      direction: 'in',
+      source: 'customer',
+      text: 'still here',
+      at: new Date(Date.now() + 1000).toISOString(),
+    });
+    await messageStore.append({
+      waNumber: '27829998877',
+      direction: 'in',
+      source: 'customer',
+      text: 'another lead',
+    });
+    const chatsUnread = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    const primary = chatsUnread.chats.find((c) => c.waNumber === '27821234567');
+    const other = chatsUnread.chats.find((c) => c.waNumber === '27829998877');
+    assert.strictEqual(primary.unreadCount, 1);
+    assert.strictEqual(other.unreadCount, 1);
     assert.deepStrictEqual(chats.chats[0].labelIds, []);
 
     const reply = await fetch(
@@ -239,8 +276,10 @@ async function testMessageStoreAndApis() {
     const chatsLabeled = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
       headers: { Authorization: 'Bearer desk-secret' },
     }).then((r) => r.json());
-    assert.strictEqual(chatsLabeled.chats[0].labels.length, 2);
-    assert.ok(chatsLabeled.chats[0].labels.some((l) => l.name === 'VIP'));
+    const labeled = chatsLabeled.chats.find((c) => c.waNumber === '27821234567');
+    assert.ok(labeled);
+    assert.strictEqual(labeled.labels.length, 2);
+    assert.ok(labeled.labels.some((l) => l.name === 'VIP'));
 
     const thread = await fetch(
       `http://127.0.0.1:${port}/agent/api/chats/27821234567`,
