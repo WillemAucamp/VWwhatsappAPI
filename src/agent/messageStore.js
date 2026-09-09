@@ -61,6 +61,7 @@ function createFileMessageStore(dir = config.agent.transcriptPath) {
   async function listChats({ lastReadByWa = {} } = {}) {
     const names = await fs.promises.readdir(root);
     const chats = [];
+    const reads = normalizeReadsMap(lastReadByWa);
     for (const name of names) {
       if (!name.endsWith('.jsonl')) continue;
       const file = path.join(root, name);
@@ -73,8 +74,8 @@ function createFileMessageStore(dir = config.agent.transcriptPath) {
       } catch {
         continue;
       }
-      const wa = String(last.waNumber || '');
-      const since = lastReadByWa[wa] || null;
+      const wa = normalizeWa(last.waNumber);
+      const since = reads[wa] || null;
       let unreadCount = 0;
       let inboundTotal = 0;
       for (const line of lines) {
@@ -84,15 +85,15 @@ function createFileMessageStore(dir = config.agent.transcriptPath) {
         } catch {
           continue;
         }
-        if (!row || row.direction !== 'in') continue;
+        if (!row || !isInboundRow(row)) continue;
         inboundTotal += 1;
         if (since && String(row.at) > String(since)) unreadCount += 1;
       }
       // Never opened in the desk: every customer message is still unread for staff
       // (even if the bot already replied afterward).
       if (!since) unreadCount = inboundTotal;
-      chats.push({
-        waNumber: wa,
+      const chat = {
+        waNumber: wa || String(last.waNumber || ''),
         lastAt: last.at,
         lastText: last.text,
         lastDirection: last.direction,
@@ -100,13 +101,52 @@ function createFileMessageStore(dir = config.agent.transcriptPath) {
         messageCount: lines.length,
         unreadCount,
         lastReadAt: since,
-      });
+      };
+      chat.unreadCount = applyUnreadFloor(chat, since);
+      chats.push(chat);
     }
     chats.sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
     return chats;
   }
 
   return { append, listMessages, listChats, root, backend: 'file' };
+}
+
+function normalizeWa(wa) {
+  return String(wa || '').replace(/\D/g, '');
+}
+
+function normalizeReadsMap(map) {
+  const out = {};
+  for (const [key, value] of Object.entries(map || {})) {
+    const wa = normalizeWa(key);
+    if (!wa) continue;
+    // Keep the latest cursor if duplicates appear under different formats.
+    if (!out[wa] || String(value) > String(out[wa])) out[wa] = value;
+  }
+  return out;
+}
+
+function isInboundRow(row) {
+  if (!row) return false;
+  if (row.direction === 'in') return true;
+  if (row.direction === 'out') return false;
+  return row.source === 'customer';
+}
+
+/** Ensure a latest customer message after last-read always shows as unread. */
+function applyUnreadFloor(chat, since) {
+  let n = Number(chat && chat.unreadCount) || 0;
+  const customerLast =
+    (chat && chat.lastDirection === 'in') ||
+    (chat && chat.lastSource === 'customer');
+  if (
+    customerLast &&
+    (!since || String(chat.lastAt) > String(since))
+  ) {
+    n = Math.max(n, 1);
+  }
+  return n;
 }
 
 /**

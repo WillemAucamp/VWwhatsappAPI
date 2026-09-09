@@ -64,6 +64,31 @@ function normalizeDatabaseUrl(connectionString) {
   return `${scheme}${user}:${encodePassword(decoded)}@${rest}`;
 }
 
+function normalizeWa(wa) {
+  return String(wa || '').replace(/\D/g, '');
+}
+
+function normalizeReadsMap(map) {
+  const out = {};
+  for (const [key, value] of Object.entries(map || {})) {
+    const wa = normalizeWa(key);
+    if (!wa) continue;
+    if (!out[wa] || String(value) > String(out[wa])) out[wa] = value;
+  }
+  return out;
+}
+
+function applyUnreadFloor(chat, since) {
+  let n = Number(chat && chat.unreadCount) || 0;
+  const customerLast =
+    (chat && chat.lastDirection === 'in') ||
+    (chat && chat.lastSource === 'customer');
+  if (customerLast && (!since || String(chat.lastAt) > String(since))) {
+    n = Math.max(n, 1);
+  }
+  return n;
+}
+
 function createPostgresMessageStore(connectionString) {
   if (!connectionString) {
     throw new Error('DATABASE_URL is required for MESSAGE_STORE=postgres');
@@ -155,7 +180,8 @@ function createPostgresMessageStore(connectionString) {
 
   async function listChats({ lastReadByWa = {} } = {}) {
     await ensureSchema();
-    const readsJson = JSON.stringify(lastReadByWa || {});
+    const reads = normalizeReadsMap(lastReadByWa);
+    const readsJson = JSON.stringify(reads);
     const { rows } = await pool.query(
       `SELECT DISTINCT ON (wa_number)
          wa_number,
@@ -173,8 +199,8 @@ function createPostgresMessageStore(connectionString) {
             FROM chat_messages c3
            WHERE c3.wa_number = c.wa_number
              AND c3.direction = 'in'
-             AND ($1::jsonb ->> c.wa_number) IS NOT NULL
-             AND c3.at > (($1::jsonb ->> c.wa_number)::timestamptz)
+             AND ($1::jsonb ->> regexp_replace(c.wa_number, '\\D', '', 'g')) IS NOT NULL
+             AND c3.at > (($1::jsonb ->> regexp_replace(c.wa_number, '\\D', '', 'g'))::timestamptz)
          ) AS unread_after_read
        FROM chat_messages c
        ORDER BY wa_number, at DESC`,
@@ -182,14 +208,14 @@ function createPostgresMessageStore(connectionString) {
     );
     return rows
       .map((row) => {
-        const wa = row.wa_number;
-        const since = lastReadByWa[wa] || null;
+        const wa = normalizeWa(row.wa_number);
+        const since = reads[wa] || null;
         // Never opened: count every inbound message so bot replies don't hide unread.
-        const unreadCount = since
+        let unreadCount = since
           ? row.unread_after_read || 0
           : row.inbound_total || 0;
-        return {
-          waNumber: wa,
+        const chat = {
+          waNumber: wa || String(row.wa_number || ''),
           lastAt: row.at instanceof Date ? row.at.toISOString() : String(row.at),
           lastText: row.text,
           lastDirection: row.direction,
@@ -198,6 +224,8 @@ function createPostgresMessageStore(connectionString) {
           unreadCount,
           lastReadAt: since,
         };
+        chat.unreadCount = applyUnreadFloor(chat, since);
+        return chat;
       })
       .sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
   }

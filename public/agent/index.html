@@ -919,10 +919,22 @@
 
     function countUnreadChats(labelId) {
       return state.chats.reduce((n, c) => {
-        if (Number(c.unreadCount) <= 0) return n;
+        if (chatUnreadCount(c) <= 0) return n;
         if (labelId && labelId !== 'all' && !chatHasLabel(c, labelId)) return n;
         return n + 1;
       }, 0);
+    }
+
+    /** Prefer API unreadCount; floor at 1 when latest message is still from the customer. */
+    function chatUnreadCount(c) {
+      if (!c) return 0;
+      if (state.selected && String(c.waNumber) === String(state.selected)) return 0;
+      let n = Number(c.unreadCount) || 0;
+      const customerLast = c.lastDirection === 'in' || c.lastSource === 'customer';
+      if (customerLast && (!c.lastReadAt || String(c.lastAt) > String(c.lastReadAt))) {
+        n = Math.max(n, 1);
+      }
+      return n;
     }
 
     function renderLabelFilters() {
@@ -1009,7 +1021,7 @@
     }
 
     function chatMatchesFilters(chat) {
-      if (state.filterUnread && !(Number(chat.unreadCount) > 0)) return false;
+      if (state.filterUnread && chatUnreadCount(chat) <= 0) return false;
       if (state.filterLabelId !== 'all' && !chatHasLabel(chat, state.filterLabelId)) return false;
       if (!chatMatchesSearch(chat, state.chatSearch)) return false;
       return true;
@@ -1032,7 +1044,8 @@
         return;
       }
       list.innerHTML = chats.map((c) => {
-        const unread = Number(c.unreadCount) > 0;
+        const unreadCount = chatUnreadCount(c);
+        const unread = unreadCount > 0;
         const active = state.selected === c.waNumber ? 'active' : '';
         const unreadCls = unread ? ' unread' : '';
         const badges = [];
@@ -1040,11 +1053,11 @@
         else if (c.status === 'quiet') badges.push('<span class="badge quiet">quiet</span>');
         else if (c.status) badges.push('<span class="badge">' + escapeHtml(c.status) + '</span>');
         const labelHtml = (c.labels || []).map((l) => labelPillHtml(l)).join('');
-        const badgeCount = Number(c.unreadCount) > 99 ? '99+' : String(c.unreadCount || 0);
+        const badgeCount = unreadCount > 99 ? '99+' : String(unreadCount);
         const metaHtml =
           '<div class="chat-meta">' +
             '<span class="chat-time">' + escapeHtml(formatBubbleTime(c.lastAt)) + '</span>' +
-            (unread ? '<span class="unread-badge">' + escapeHtml(badgeCount) + '</span>' : '') +
+            (unread ? '<span class="unread-badge" title="Unread">' + escapeHtml(badgeCount) + '</span>' : '') +
           '</div>';
         return (
           '<button type="button" class="chat-item ' + active + unreadCls + '" data-wa="' + c.waNumber + '">' +

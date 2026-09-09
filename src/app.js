@@ -97,8 +97,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when unread badges count inbound even after bot replies.
-        fsm: 'agent-hold-silent-2026-09-09',
+        // Bumped when unread badges floor on latest customer message.
+        fsm: 'fix-unread-visible-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||
