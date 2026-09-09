@@ -26,16 +26,26 @@ function normalizeInput(text) {
 
 function matchesKeywordList(normalized, keywords) {
   if (!normalized) return false;
+  // Strip punctuation so "Hello!" / "hi," still match reopen words.
+  const softened = normalized
+    .replace(/[^a-z0-9\s]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const candidates = softened && softened !== normalized
+    ? [normalized, softened]
+    : [normalized];
   return keywords.some((kw) => {
     const k = String(kw).toLowerCase().trim();
     if (!k) return false;
-    if (normalized === k) return true;
-    if (k.includes(' ') && normalized.includes(k)) return true;
-    if (!k.includes(' ')) {
-      const re = new RegExp(`(^|\\s)${escapeRegex(k)}(\\s|$)`, 'i');
-      return re.test(normalized);
-    }
-    return false;
+    return candidates.some((text) => {
+      if (text === k) return true;
+      if (k.includes(' ') && text.includes(k)) return true;
+      if (!k.includes(' ')) {
+        const re = new RegExp(`(^|\\s)${escapeRegex(k)}(\\s|$)`, 'i');
+        return re.test(text);
+      }
+      return false;
+    });
   });
 }
 
@@ -1106,6 +1116,26 @@ class FsmEngine {
         session.status = 'active';
         session.path = [];
         return this._routeToHuman(session, null);
+      }
+
+      // Brand-new lead (or no active step): always open the main menu unless
+      // they already tapped a known option. Never send "haven't chosen an
+      // option" — they have not been shown a menu yet.
+      if (session.status === 'new' || !session.path || session.path.length === 0) {
+        this._resetSessionForFreshStart(session);
+        const destination = resolveGreetingDestination(normalized, replyId);
+        if (destination) {
+          session.path = [ENTRY_STATE];
+          if (destination !== 'STOCKLIST_CAROUSEL' && STATES.STOCKLIST_CAROUSEL) {
+            const stock = STATES.STOCKLIST_CAROUSEL;
+            const stockKey = resolveOptionKey(stock, normalized, replyId);
+            if (stockKey && stock.options[stockKey] === destination) {
+              session.path.push('STOCKLIST_CAROUSEL');
+            }
+          }
+          return this._enterState(session, destination);
+        }
+        return this._enterState(session, ENTRY_STATE);
       }
 
       return this._beginFromMainMenuIntent(session, normalized, replyId);

@@ -343,18 +343,30 @@ async function testInvalidRetryThenEscalate() {
 }
 
 async function testOffMenuWhenSessionMissingOrSoftClosed() {
-  // Wiped / never-started session + gibberish must not dump the main menu.
+  // Brand-new lead with free text (even gibberish) should get the main menu —
+  // never "haven't chosen an option" before any menu was shown.
   const h = createHarness('off_menu_cold');
   const wa = '27000000110';
   await h.say(wa, 'sfds');
   let session = await h.store.get(wa);
-  assert.strictEqual(session.currentState, 'OFF_MENU_RECOVERY');
+  assert.strictEqual(session.currentState, 'GREETING');
   assert.ok(
-    h.messages.some((m) => m.meta && m.meta.stateId === 'OFF_MENU_RECOVERY')
+    h.messages.some((m) => m.meta && m.meta.stateId === 'GREETING'),
+    'first inbound on a new session must open the greeting menu'
   );
   assert.ok(
-    !h.messages.some((m) => m.meta && m.meta.stateId === 'GREETING'),
-    'off-menu free text must not open the main menu greeting'
+    !h.messages.some((m) => m.meta && m.meta.stateId === 'OFF_MENU_RECOVERY'),
+    'must not claim the customer skipped a menu they never saw'
+  );
+
+  // Real lead opener with punctuation ("Hello!") must still open greeting.
+  const hHello = createHarness('off_menu_hello_bang');
+  const waHello = '27000000113';
+  await hHello.say(waHello, 'Hello! Can I get more info on this?');
+  session = await hHello.store.get(waHello);
+  assert.strictEqual(session.currentState, 'GREETING');
+  assert.ok(
+    hHello.messages.some((m) => m.meta && m.meta.stateId === 'GREETING')
   );
 
   // Soft-closed + gibberish → recovery (hi still reopens greeting).
@@ -377,8 +389,17 @@ async function testOffMenuWhenSessionMissingOrSoftClosed() {
   await h3.say(wa3, 'hello');
   assert.strictEqual((await h3.store.get(wa3)).currentState, 'GREETING');
 
+  // Soft-closed + "Hello!" (punctuation) should reopen greeting too.
+  const h4 = createHarness('off_menu_soft_hello_bang');
+  const wa4 = '27000000114';
+  await h4.say(wa4, 'hi');
+  await h4.say(wa4, 'qualify me');
+  await h4.say(wa4, 'no');
+  await h4.say(wa4, 'Hello!');
+  assert.strictEqual((await h4.store.get(wa4)).currentState, 'GREETING');
+
   // eslint-disable-next-line no-console
-  console.log('✓ off-menu free text → recovery (cold + soft_closed)');
+  console.log('✓ first contact → greeting; soft_closed gibberish → recovery');
 }
 
 async function testHelpIntentFromTwoStates() {

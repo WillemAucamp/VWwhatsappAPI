@@ -98,7 +98,7 @@ function createApp(overrides = {}) {
       service: 'vw-whatsapp-prequal',
       build: {
         // Bumped when yellow is available as a label colour.
-        fsm: 'label-yellow-2026-09-09',
+        fsm: 'first-contact-greeting-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||
