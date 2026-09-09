@@ -97,8 +97,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when agent desk can mark a chat as unread.
-        fsm: 'mark-chat-unread-2026-09-09',
+        // Bumped when final consent prompt copy was updated.
+        fsm: 'final-consent-copy-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||

@@ -184,12 +184,11 @@ module.exports = {
   ].join('\n'),
 
   final_consent_prompt: [
-    "You're in a strong position to proceed.",
+    'Everything looks great on your end to proceed.',
     '',
-    'Next step: a short application form.',
-    "It only asks for what's needed.",
+    'To take the next step, I can send over a short, simple application form.',
     '',
-    'Shall I send it?',
+    'Ready for me to send it?',
   ].join('\n'),
 
   send_link_body: [
