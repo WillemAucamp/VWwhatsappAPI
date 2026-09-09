@@ -97,8 +97,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when yellow is available as a label colour.
-        fsm: 'first-message-always-menu-2026-09-09',
+        // Bumped when unread badges count inbound even after bot replies.
+        fsm: 'fix-unread-inbound-count-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||

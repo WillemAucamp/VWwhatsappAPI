@@ -36,10 +36,13 @@ async function testFileBackendStillDefaultForPathArg() {
   assert.strictEqual(chats[0].waNumber, '27820001111');
   assert.strictEqual(chats[0].lastText, 'pong');
   assert.strictEqual(chats[0].messageCount, 2);
-  assert.strictEqual(chats[0].unreadCount, 0);
+  // Never opened: inbound customer messages stay unread even after a bot reply.
+  assert.strictEqual(chats[0].unreadCount, 1);
 
-  const unreadChats = await store.listChats({ lastReadByWa: {} });
-  assert.strictEqual(unreadChats[0].unreadCount, 0);
+  const afterRead = await store.listChats({
+    lastReadByWa: { '27820001111': new Date().toISOString() },
+  });
+  assert.strictEqual(afterRead[0].unreadCount, 0);
 
   // eslint-disable-next-line no-console
   console.log('✓ file message store append / list / chats');

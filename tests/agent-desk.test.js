@@ -136,6 +136,22 @@ async function testMessageStoreAndApis() {
     const other = chatsUnread.chats.find((c) => c.waNumber === '27829998877');
     assert.strictEqual(primary.unreadCount, 1);
     assert.strictEqual(other.unreadCount, 1);
+
+    // Bot reply must not clear unread on a chat the agent has not opened.
+    await messageStore.append({
+      waNumber: '27829998877',
+      direction: 'out',
+      source: 'bot',
+      text: 'Welcome menu',
+      at: new Date(Date.now() + 2000).toISOString(),
+    });
+    const chatsAfterBot = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    const otherAfterBot = chatsAfterBot.chats.find((c) => c.waNumber === '27829998877');
+    assert.strictEqual(otherAfterBot.lastSource, 'bot');
+    assert.ok(otherAfterBot.unreadCount >= 1);
+
     assert.deepStrictEqual(chats.chats[0].labelIds, []);
 
     const reply = await fetch(

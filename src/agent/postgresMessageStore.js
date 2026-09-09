@@ -165,6 +165,11 @@ function createPostgresMessageStore(connectionString) {
          source,
          (SELECT COUNT(*)::int FROM chat_messages c2 WHERE c2.wa_number = c.wa_number) AS message_count,
          (SELECT COUNT(*)::int
+            FROM chat_messages c_in
+           WHERE c_in.wa_number = c.wa_number
+             AND c_in.direction = 'in'
+         ) AS inbound_total,
+         (SELECT COUNT(*)::int
             FROM chat_messages c3
            WHERE c3.wa_number = c.wa_number
              AND c3.direction = 'in'
@@ -179,12 +184,10 @@ function createPostgresMessageStore(connectionString) {
       .map((row) => {
         const wa = row.wa_number;
         const since = lastReadByWa[wa] || null;
-        let unreadCount = 0;
-        if (!since) {
-          unreadCount = row.direction === 'in' ? 1 : 0;
-        } else {
-          unreadCount = row.unread_after_read || 0;
-        }
+        // Never opened: count every inbound message so bot replies don't hide unread.
+        const unreadCount = since
+          ? row.unread_after_read || 0
+          : row.inbound_total || 0;
         return {
           waNumber: wa,
           lastAt: row.at instanceof Date ? row.at.toISOString() : String(row.at),

@@ -76,21 +76,21 @@ function createFileMessageStore(dir = config.agent.transcriptPath) {
       const wa = String(last.waNumber || '');
       const since = lastReadByWa[wa] || null;
       let unreadCount = 0;
-      if (!since) {
-        // Never opened in the desk: flag only if the latest message is inbound.
-        unreadCount = last.direction === 'in' ? 1 : 0;
-      } else {
-        for (const line of lines) {
-          let row = null;
-          try {
-            row = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          if (!row || row.direction !== 'in') continue;
-          if (String(row.at) > String(since)) unreadCount += 1;
+      let inboundTotal = 0;
+      for (const line of lines) {
+        let row = null;
+        try {
+          row = JSON.parse(line);
+        } catch {
+          continue;
         }
+        if (!row || row.direction !== 'in') continue;
+        inboundTotal += 1;
+        if (since && String(row.at) > String(since)) unreadCount += 1;
       }
+      // Never opened in the desk: every customer message is still unread for staff
+      // (even if the bot already replied afterward).
+      if (!since) unreadCount = inboundTotal;
       chats.push({
         waNumber: wa,
         lastAt: last.at,
