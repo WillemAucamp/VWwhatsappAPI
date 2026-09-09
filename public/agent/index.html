@@ -18,7 +18,7 @@
       --green-deep: #128c7e;
       --bubble-in: #ffffff;
       --bubble-out: #d9fdd3;
-      --bubble-bot: #fff8c5;
+      --bubble-bot: #e6f6ff;
       --danger: #ea4335;
       --shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
     }
@@ -962,7 +962,7 @@
           return (
             '<div class="bubble ' + cls + '">' +
               escapeHtml(m.text || '') +
-              '<span class="meta">' + who + ' · ' + escapeHtml(m.at || '') + '</span>' +
+              '<span class="meta">' + who + ' · ' + escapeHtml(formatBubbleTime(m.at)) + '</span>' +
             '</div>'
           );
         }).join('');
@@ -1404,6 +1404,18 @@
         el('assignLabelsError').textContent = err.message;
       }
     });
+
+    /** WhatsApp-style HH:MM from ISO timestamp (desk UI only). */
+    function formatBubbleTime(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return String(iso);
+      return d.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+    }
 
     function escapeHtml(s) {
       return String(s)
