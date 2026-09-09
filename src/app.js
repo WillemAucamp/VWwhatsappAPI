@@ -95,13 +95,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-<<<<<<< HEAD
-        // Bumped when See our cars must use live Meta catalog product_list.
-        fsm: 'hide-see-our-cars-2026-09-08',
-=======
-        // Bumped when off-menu free text must show Human-Handover / Main-Menu.
-        fsm: 'off-menu-recovery-not-greeting-2026-09-08',
->>>>>>> 24d4e22 (fix(fsm): off-menu free text shows Human-Handover / Main-Menu)
+        // Bumped when live shortcuts auto-repair collapsed newlines on boot.
+        fsm: 'shortcut-repair-newlines-2026-09-09',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||
@@ -160,6 +155,14 @@ function createApp(overrides = {}) {
   app.locals.shortcutStore = shortcutStore;
   app.locals.labelStore = labelStore;
   app.locals.config = config;
+
+  // Rewrite any shortcuts that were flattened by the old single-line editor.
+  Promise.resolve()
+    .then(() => shortcutStore.list())
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('[shortcuts] startup repair failed', err && err.message);
+    });
 
   if (overrides.followUpScheduler) {
     app.locals.followUpScheduler = overrides.followUpScheduler;

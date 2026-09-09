@@ -30,6 +30,35 @@ function normalizeKey(key) {
     .replace(/[^a-z0-9_-]/g, '');
 }
 
+/** Preserve internal blank lines; only normalise CRLF and trim ends. */
+function normalizeShortcutText(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[^\S\n]+$/gm, '')
+    .replace(/^\n+/, '')
+    .replace(/\n+$/, '')
+    .trimEnd();
+}
+
+/**
+ * Shortcuts saved via the old single-line input lost all newlines.
+ * Re-insert breaks before section/bullet emojis and known closing lines.
+ * Leaves already-multiline text untouched.
+ */
+function repairCollapsedShortcutText(text) {
+  const raw = String(text || '');
+  if (/\n/.test(raw)) return normalizeShortcutText(raw);
+  if (!/[👉🏛️🏦📊🚗📋]/.test(raw)) return normalizeShortcutText(raw);
+
+  const repaired = raw
+    .replace(/\s+([🏛️🏦📊🚗])/gu, '\n$1')
+    .replace(/\s+(👉)/gu, '\n$1')
+    .replace(/\s+(Because of all these variables)/g, '\n$1')
+    .replace(/\s+(What I can do is)/g, '\n$1');
+  return normalizeShortcutText(repaired);
+}
+
 function createShortcutStore(filePath = config.agent.shortcutsPath) {
   const file = path.resolve(filePath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -61,6 +90,17 @@ function createShortcutStore(filePath = config.agent.shortcutsPath) {
       if (!parsed || !Array.isArray(parsed.shortcuts)) {
         return { shortcuts: [] };
       }
+      let changed = false;
+      const now = new Date().toISOString();
+      parsed.shortcuts = parsed.shortcuts.map((s) => {
+        const nextText = repairCollapsedShortcutText(s && s.text);
+        if (nextText === (s && s.text)) return s;
+        changed = true;
+        return { ...s, text: nextText, updatedAt: now };
+      });
+      if (changed) {
+        await writeAllUnlocked(parsed);
+      }
       return parsed;
     } catch {
       return { shortcuts: [] };
@@ -87,7 +127,7 @@ function createShortcutStore(filePath = config.agent.shortcutsPath) {
   async function create({ key, text } = {}) {
     return withLock(async () => {
       const normalized = normalizeKey(key);
-      const body = String(text || '').trim();
+      const body = normalizeShortcutText(text);
       if (!normalized) {
         const err = new Error('shortcut_key_required');
         err.status = 400;
@@ -131,7 +171,7 @@ function createShortcutStore(filePath = config.agent.shortcutsPath) {
           ? normalizeKey(key)
           : current.key;
       const nextText =
-        text != null ? String(text).trim() : current.text;
+        text != null ? normalizeShortcutText(text) : current.text;
       if (!nextKey) {
         const err = new Error('shortcut_key_required');
         err.status = 400;
@@ -179,4 +219,10 @@ function createShortcutStore(filePath = config.agent.shortcutsPath) {
   return { list, create, update, remove, file, normalizeKey };
 }
 
-module.exports = { createShortcutStore, normalizeKey, DEFAULT_SHORTCUTS };
+module.exports = {
+  createShortcutStore,
+  normalizeKey,
+  normalizeShortcutText,
+  repairCollapsedShortcutText,
+  DEFAULT_SHORTCUTS,
+};
