@@ -1475,18 +1475,24 @@
     }
 
     el('emojiBtn').addEventListener('click', (e) => {
+      e.preventDefault();
       e.stopPropagation();
       toggleEmojiPicker();
     });
-    el('emojiCloseBtn').addEventListener('click', hideEmojiPicker);
+    el('emojiCloseBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideEmojiPicker();
+    });
     el('emojiSearch').addEventListener('input', () => {
       state.emoji.query = el('emojiSearch').value || '';
       renderEmojiGrid();
     });
-    document.addEventListener('click', (e) => {
+    // Close when clicking outside; ignore the toggle button itself.
+    document.addEventListener('pointerdown', (e) => {
       if (!state.emoji.open) return;
       const picker = el('emojiPicker');
       const btn = el('emojiBtn');
+      if (!picker || !btn) return;
       if (picker.contains(e.target) || btn.contains(e.target)) return;
       hideEmojiPicker();
     });
