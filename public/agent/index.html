@@ -772,7 +772,7 @@
       chats: [],
       shortcuts: [],
       labels: [],
-      labelColors: ['#128c7e', '#027eb5', '#c4530a', '#b42318', '#6941c6', '#067647', '#363f72', '#b54708'],
+      labelColors: ['#128c7e', '#027eb5', '#c4530a', '#b42318', '#6941c6', '#067647', '#363f72', '#b54708', '#ca8a04'],
       selectedLabelColor: '#128c7e',
       filterLabelId: 'all',
       filterUnread: false,
@@ -1643,6 +1643,28 @@
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+    }
+
+    /** Dark text on light colours (e.g. yellow) so pills stay readable. */
+    function labelPillStyle(color) {
+      const hex = String(color || '').replace('#', '');
+      let ink = '#fff';
+      if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        if (luma > 0.62) ink = '#111b21';
+      }
+      return 'background:' + escapeHtml(color) + ';color:' + ink + ';';
+    }
+
+    function labelPillHtml(label) {
+      return (
+        '<span class="label-pill" style="' + labelPillStyle(label.color) + '">' +
+          escapeHtml(label.name) +
+        '</span>'
+      );
     }
 
     /** One-line slash-menu preview; keep real newlines in stored shortcut text. */

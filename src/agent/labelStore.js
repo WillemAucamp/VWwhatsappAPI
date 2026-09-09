@@ -13,6 +13,7 @@ const LABEL_COLORS = [
   '#067647',
   '#363f72',
   '#b54708',
+  '#ca8a04', // yellow
 ];
 
 const DEFAULT_LABELS = [
