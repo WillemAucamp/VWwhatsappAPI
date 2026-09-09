@@ -489,6 +489,7 @@ const STATES = {
     softDecline: false,
     quiet: true,
     notifyAgent: true,
+    agentTakeover: true,
   },
 
   HUMAN_HANDOVER: {
@@ -500,6 +501,7 @@ const STATES = {
     softDecline: false,
     quiet: true,
     notifyAgent: true,
+    agentTakeover: true,
   },
 
   /**

@@ -166,7 +166,18 @@ async function testMessageStoreAndApis() {
     const session = await sessionStore.get('27821234567');
     assert.strictEqual(session.status, 'quiet');
     assert.strictEqual(session.agentTakenOver, true);
-    assert.ok(outbound.some((o) => o.payload.text === 'Hi from desk'));
+    const deskReplies = outbound.filter((o) => o.payload.text === 'Hi from desk');
+    assert.strictEqual(deskReplies.length, 1, 'agent reply must Graph-send exactly once');
+    // Takeover from /reply is silent — no extra bot notice.
+    assert.ok(
+      !outbound.some(
+        (o) =>
+          o.payload.meta &&
+          o.payload.meta.source === 'agent_takeover' &&
+          o.payload.text &&
+          o.payload.text.includes("I've got you")
+      )
+    );
 
     await fetch(`http://127.0.0.1:${port}/agent/api/chats/27821234567/release`, {
       method: 'POST',

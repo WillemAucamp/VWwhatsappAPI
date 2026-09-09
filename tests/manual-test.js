@@ -457,6 +457,19 @@ async function testReleaseResumesWhereLeftOff() {
   assert.strictEqual(session.agentTakenOver, true);
   assert.strictEqual(session.interruptedFrom, 'EMPLOYED_INCOME_CHECK');
 
+  // While staff holds the chat: no menus / quiet notices / restarts.
+  const beforeHold = h.messages.length;
+  await h.say(wa, 'hello');
+  await h.say(wa, 'hi there can you help?');
+  await h.say(wa, 'restart');
+  assert.strictEqual((await h.store.get(wa)).status, 'quiet');
+  assert.strictEqual((await h.store.get(wa)).agentTakenOver, true);
+  assert.strictEqual(
+    h.messages.length,
+    beforeHold,
+    'bot must not send anything while agentTakenOver'
+  );
+
   await h.engine.releaseToBot(wa);
   session = await h.store.get(wa);
   assert.strictEqual(session.agentTakenOver, false);

@@ -256,7 +256,8 @@ function createAgentRouter({
   router.post('/api/chats/:wa/takeover', requireAuth, async (req, res) => {
     try {
       const wa = String(req.params.wa || '').replace(/\D/g, '');
-      const result = await engine.takeOver(wa);
+      // Silent: staff takeover must not send any bot WhatsApp message.
+      const result = await engine.takeOver(wa, { silent: true });
       res.json({ ok: true, ...result });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });

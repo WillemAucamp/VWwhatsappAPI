@@ -261,6 +261,7 @@ class FsmEngine {
   nextFollowUpDueAt(session, followUpConfig = config.followUp) {
     if (!session || !followUpConfig.enabled) return null;
     if (session.status !== 'active') return null;
+    if (session.agentTakenOver) return null;
     if (!session.currentState || !session.lastBotMessageAt) return null;
     if (session.followUpsExhausted) return null;
     const state = STATES[session.currentState];
@@ -291,6 +292,9 @@ class FsmEngine {
 
     const session = await this.sessionStore.get(waNumber);
     if (!session) return { sent: false, reason: 'no_session' };
+    if (session.agentTakenOver || session.status === 'quiet') {
+      return { sent: false, reason: 'agent_held' };
+    }
 
     const dueAt = this.nextFollowUpDueAt(session, followUpConfig);
     if (dueAt == null) return { sent: false, reason: 'not_eligible' };
@@ -1078,6 +1082,15 @@ class FsmEngine {
 
     if (session.status === 'quiet') {
       await this._flushPendingLead(session);
+      // Staff (or bot-marked) takeover: no menus, no quiet notices, no restart
+      // on hi/hello until Release. Only retry an undelivered terminal body
+      // (e.g. failed HUMAN_HANDOVER notice) so the customer still gets it once.
+      if (session.agentTakenOver) {
+        if (session.pendingTerminalOutbound) {
+          return this._retryTerminalOutbound(session);
+        }
+        return { session, quiet: true, agentHeld: true };
+      }
       if (session.pendingTerminalOutbound) {
         return this._retryTerminalOutbound(session);
       }

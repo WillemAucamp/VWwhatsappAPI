@@ -783,6 +783,7 @@
       editingShortcutId: null,
       editingLabelId: null,
       assignDraft: [],
+      sending: false,
     };
 
     const el = (id) => document.getElementById(id);
@@ -1184,6 +1185,8 @@
     async function sendReply() {
       const text = el('replyBox').value.trim();
       if (!state.selected || !text) return;
+      if (state.sending) return;
+      state.sending = true;
       hideSlashMenu();
       el('threadError').textContent = '';
       el('sendBtn').disabled = true;
@@ -1198,6 +1201,7 @@
       } catch (err) {
         el('threadError').textContent = err.data && err.data.error ? err.data.error : err.message;
       } finally {
+        state.sending = false;
         el('sendBtn').disabled = false;
       }
     }
