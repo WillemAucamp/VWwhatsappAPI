@@ -141,6 +141,26 @@ async function testMessageStoreAndApis() {
     });
     assert.strictEqual(created.shortcut.key, 'thanks');
 
+    const multilineBody = [
+      'How vehicle finance works',
+      '',
+      '🏛️ The dealership doesn\'t decide your instalment.',
+      '',
+      '👉 Your age',
+      '👉 Whether you pay on time',
+    ].join('\n');
+    const multi = await fetch(`http://127.0.0.1:${port}/agent/api/shortcuts`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ key: 'finance', text: multilineBody + '\r\n' }),
+    }).then(async (r) => {
+      assert.strictEqual(r.status, 201);
+      return r.json();
+    });
+    assert.ok(multi.shortcut.text.includes('\n\n'));
+    assert.ok(multi.shortcut.text.includes('👉 Your age\n👉 Whether you pay on time'));
+    assert.strictEqual(multi.shortcut.text.includes('\r'), false);
+
     const updated = await fetch(
       `http://127.0.0.1:${port}/agent/api/shortcuts/${created.shortcut.id}`,
       {
@@ -156,6 +176,10 @@ async function testMessageStoreAndApis() {
       { method: 'DELETE', headers: { Authorization: 'Bearer desk-secret' } }
     );
     assert.strictEqual(del.status, 200);
+    await fetch(
+      `http://127.0.0.1:${port}/agent/api/shortcuts/${multi.shortcut.id}`,
+      { method: 'DELETE', headers: { Authorization: 'Bearer desk-secret' } }
+    );
 
     // Labels
     const labels = await fetch(`http://127.0.0.1:${port}/agent/api/labels`, {

@@ -496,6 +496,17 @@
       grid-template-columns: 1fr 1fr;
       gap: 10px;
     }
+    .modal textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+      line-height: 1.45;
+      resize: vertical;
+      min-height: 140px;
+      white-space: pre-wrap;
+    }
     @media (max-width: 520px) {
       .form-row.inline { grid-template-columns: 1fr; }
     }
@@ -620,15 +631,14 @@
       <h3>Message shortcuts</h3>
       <p class="modal-sub">Create replies you can insert by typing <strong>/</strong> in the chat box (like WhatsApp Business).</p>
       <form id="shortcutForm">
-        <div class="form-row inline">
-          <div>
-            <label for="shortcutKey">Shortcut</label>
-            <input id="shortcutKey" type="text" placeholder="greeting" maxlength="40" required />
-          </div>
-          <div>
-            <label for="shortcutText">Message</label>
-            <input id="shortcutText" type="text" placeholder="Hi! How can I help…" required />
-          </div>
+        <div class="form-row">
+          <label for="shortcutKey">Shortcut</label>
+          <input id="shortcutKey" type="text" placeholder="greeting" maxlength="40" required />
+        </div>
+        <div class="form-row">
+          <label for="shortcutText">Message</label>
+          <textarea id="shortcutText" rows="8" placeholder="Hi!&#10;&#10;How can I help…" required></textarea>
+          <p class="modal-sub" style="margin:6px 0 0;">Line breaks are kept when you send the shortcut on WhatsApp.</p>
         </div>
         <div class="modal-actions" style="margin-top:0;">
           <button type="submit" id="shortcutSaveBtn">Add shortcut</button>
@@ -1074,7 +1084,7 @@
         return (
           '<button type="button" class="slash-item ' + active + '" data-id="' + s.id + '" role="option">' +
             '<span class="key">/' + escapeHtml(s.key) + '</span>' +
-            '<span class="preview-text">' + escapeHtml(s.text) + '</span>' +
+            '<span class="preview-text">' + escapeHtml(previewShortcutText(s.text)) + '</span>' +
           '</button>'
         );
       }).join('');
@@ -1098,12 +1108,15 @@
       const value = box.value;
       const before = value.slice(0, state.slash.start);
       const after = value.slice(state.slash.end);
-      const insert = item.text;
+      const insert = String(item.text || '').replace(/\r\n/g, '\n');
       const needsSpace = before && !/\s$/.test(before) ? ' ' : '';
       box.value = before + needsSpace + insert + after;
       const pos = (before + needsSpace + insert).length;
       box.focus();
       box.setSelectionRange(pos, pos);
+      // Grow the composer so multi-line shortcuts are visible before send.
+      box.style.height = 'auto';
+      box.style.height = Math.min(box.scrollHeight, 220) + 'px';
       hideSlashMenu();
     }
 
@@ -1423,6 +1436,15 @@
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+    }
+
+    /** One-line slash-menu preview; keep real newlines in stored shortcut text. */
+    function previewShortcutText(text) {
+      return String(text || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\s*\n+\s*/g, ' · ')
+        .replace(/\s+/g, ' ')
+        .trim();
     }
 
     (async function boot() {

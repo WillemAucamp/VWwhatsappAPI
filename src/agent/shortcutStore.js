@@ -30,6 +30,17 @@ function normalizeKey(key) {
     .replace(/[^a-z0-9_-]/g, '');
 }
 
+/** Preserve internal blank lines; only normalise CRLF and trim ends. */
+function normalizeShortcutText(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[^\S\n]+$/gm, '')
+    .replace(/^\n+/, '')
+    .replace(/\n+$/, '')
+    .trimEnd();
+}
+
 function createShortcutStore(filePath = config.agent.shortcutsPath) {
   const file = path.resolve(filePath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -87,7 +98,7 @@ function createShortcutStore(filePath = config.agent.shortcutsPath) {
   async function create({ key, text } = {}) {
     return withLock(async () => {
       const normalized = normalizeKey(key);
-      const body = String(text || '').trim();
+      const body = normalizeShortcutText(text);
       if (!normalized) {
         const err = new Error('shortcut_key_required');
         err.status = 400;
@@ -131,7 +142,7 @@ function createShortcutStore(filePath = config.agent.shortcutsPath) {
           ? normalizeKey(key)
           : current.key;
       const nextText =
-        text != null ? String(text).trim() : current.text;
+        text != null ? normalizeShortcutText(text) : current.text;
       if (!nextKey) {
         const err = new Error('shortcut_key_required');
         err.status = 400;
