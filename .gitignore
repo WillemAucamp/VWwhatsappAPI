@@ -1,0 +1,12 @@
+node_modules/
+.env
+data/sessions/*
+!data/sessions/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
+data/transcripts/*
+!data/transcripts/.gitkeep
+data/agent/*
+!data/agent/.gitkeep
+*.log
+.DS_Store
