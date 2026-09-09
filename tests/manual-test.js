@@ -369,6 +369,23 @@ async function testOffMenuWhenSessionMissingOrSoftClosed() {
     hHello.messages.some((m) => m.meta && m.meta.stateId === 'GREETING')
   );
 
+  // First message can literally be anything — still main menu (not handover).
+  const hAny = createHarness('first_msg_anything');
+  const waAny = '27000000115';
+  await hAny.say(waAny, 'how much is a Polo?');
+  assert.strictEqual((await hAny.store.get(waAny)).currentState, 'GREETING');
+  const hHelpFirst = createHarness('first_msg_help');
+  const waHelpFirst = '27000000116';
+  await hHelpFirst.say(waHelpFirst, 'help');
+  assert.strictEqual(
+    (await hHelpFirst.store.get(waHelpFirst)).currentState,
+    'GREETING',
+    'even "help" as the very first message must show the main menu'
+  );
+  assert.ok(
+    !hHelpFirst.messages.some((m) => m.meta && m.meta.stateId === 'HUMAN_HANDOVER')
+  );
+
   // Soft-closed + gibberish → recovery (hi still reopens greeting).
   const h2 = createHarness('off_menu_soft');
   const wa2 = '27000000111';

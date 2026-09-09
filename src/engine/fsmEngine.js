@@ -1112,17 +1112,12 @@ class FsmEngine {
     }
 
     if (!session.currentState || session.status === 'new') {
-      if (matchesKeywordList(normalized, config.fsm.helpIntentKeywords)) {
-        session.status = 'active';
-        session.path = [];
-        return this._routeToHuman(session, null);
-      }
-
-      // Brand-new lead (or no active step): always open the main menu unless
-      // they already tapped a known option. Never send "haven't chosen an
-      // option" — they have not been shown a menu yet.
-      if (session.status === 'new' || !session.path || session.path.length === 0) {
-        this._resetSessionForFreshStart(session);
+      // First inbound ever for this number: always show the main menu.
+      // Free text can be anything ("Hello!", questions, gibberish, even
+      // "help") — never off-menu recovery and never skip straight to a
+      // later step unless they tapped an interactive button reply id.
+      this._resetSessionForFreshStart(session);
+      if (replyId) {
         const destination = resolveGreetingDestination(normalized, replyId);
         if (destination) {
           session.path = [ENTRY_STATE];
@@ -1135,10 +1130,8 @@ class FsmEngine {
           }
           return this._enterState(session, destination);
         }
-        return this._enterState(session, ENTRY_STATE);
       }
-
-      return this._beginFromMainMenuIntent(session, normalized, replyId);
+      return this._enterState(session, ENTRY_STATE);
     }
 
     if (matchesKeywordList(normalized, config.fsm.helpIntentKeywords)) {
