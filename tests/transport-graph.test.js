@@ -236,6 +236,52 @@ async function testImageUploadThenSend() {
   }
 }
 
+async function testLargeImageSendsAsDocument() {
+  const snap = { ...config.whatsapp };
+  config.whatsapp.token = 'test-token';
+  config.whatsapp.phoneNumberId = '123456';
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, options) => {
+    const href = String(url);
+    calls.push({ href, options });
+    if (href.includes('/media')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 'media.big' }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ messages: [{ id: 'wamid.doc' }] }),
+    };
+  };
+  try {
+    // Just over Meta's 5MB inline image cap.
+    const big = Buffer.alloc(5 * 1024 * 1024 + 10, 1);
+    await cloudApiSendMessage('27821234567', {
+      type: 'image',
+      mediaBuffer: big,
+      mimeType: 'image/jpeg',
+      filename: 'big.jpg',
+      text: 'Large photo',
+    });
+    assert.strictEqual(calls.length, 2);
+    const sendBody = JSON.parse(calls[1].options.body);
+    assert.strictEqual(sendBody.type, 'document');
+    assert.strictEqual(sendBody.document.id, 'media.big');
+    assert.strictEqual(sendBody.document.caption, 'Large photo');
+    assert.strictEqual(sendBody.document.filename, 'big.jpg');
+    // eslint-disable-next-line no-console
+    console.log('✓ images over 5MB send as Graph type=document');
+  } finally {
+    global.fetch = originalFetch;
+    restore(snap);
+  }
+}
+
 async function main() {
   await testTemplateGraphBody();
   await testTextViaTemplateNameOnSendMessage();
@@ -244,6 +290,7 @@ async function main() {
   await testAuthErrorIncludesTokenHint();
   await testTextDoesNotDuplicateLinkAlreadyInBody();
   await testImageUploadThenSend();
+  await testLargeImageSendsAsDocument();
   // eslint-disable-next-line no-console
   console.log('\ntransport graph tests passed.');
 }

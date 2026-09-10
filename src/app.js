@@ -79,8 +79,8 @@ function createApp(overrides = {}) {
   const app = express();
   app.use(
     express.json({
-      // Agent desk paste-image sends base64 (~4/3 of binary; WhatsApp image cap 5MB).
-      limit: '7mb',
+      // Agent desk paste-image sends base64 (~4/3 of binary; desk allows up to 16MB).
+      limit: '24mb',
       verify: (req, _res, buf) => {
         req.rawBody = Buffer.from(buf);
       },
@@ -138,7 +138,9 @@ function createApp(overrides = {}) {
         // Agent composer emoji picker (desk UI only).
         emojiPicker: 'agent-emoji-picker-2026-09-09',
         // Paste image from clipboard → WhatsApp media send.
-        pasteImage: 'agent-paste-image-2026-09-10',
+        pasteImage: 'agent-multi-image-2026-09-10',
+        // Inbound customer image/document → desk transcript.
+        inboundMedia: 'agent-inbound-media-2026-09-10',
       },
     });
   });

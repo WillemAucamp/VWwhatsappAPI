@@ -217,6 +217,36 @@ function createAgentRouter({
     }
   });
 
+  router.get('/api/chats/:wa/messages/:id/media', requireAuth, async (req, res) => {
+    try {
+      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      const id = String(req.params.id || '');
+      if (!wa || !id) {
+        return res.status(400).json({ error: 'wa_and_id_required' });
+      }
+      if (!messageStore || typeof messageStore.readMedia !== 'function') {
+        return res.status(501).json({ error: 'media_not_supported' });
+      }
+      const media = await messageStore.readMedia(wa, id);
+      if (!media || !media.buffer) {
+        return res.status(404).json({ error: 'media_not_found' });
+      }
+      const filename = String(media.filename || 'file').replace(/[/\\]/g, '_');
+      res.setHeader('Content-Type', media.mimeType || 'application/octet-stream');
+      res.setHeader(
+        'Content-Disposition',
+        (media.mediaKind === 'image' ? 'inline' : 'attachment') +
+          '; filename="' +
+          filename.replace(/"/g, '') +
+          '"'
+      );
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      return res.send(Buffer.from(media.buffer));
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
   router.put('/api/chats/:wa/labels', requireAuth, express.json(), async (req, res) => {
     try {
       const wa = String(req.params.wa || '').replace(/\D/g, '');
@@ -288,7 +318,7 @@ function createAgentRouter({
   router.post(
     '/api/chats/:wa/reply-media',
     requireAuth,
-    express.json({ limit: '6mb' }),
+    express.json({ limit: '24mb' }),
     async (req, res) => {
       try {
         const wa = String(req.params.wa || '').replace(/\D/g, '');

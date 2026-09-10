@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 /**
  * Cloud Postgres / Supabase-backed transcript store for the agent desk.
  * Same shape as the file JSONL store: append / listMessages / listChats.
+ * Inbound media bytes are stored in BYTEA so they survive Render disk wipes.
  */
 
 const CREATE_TABLE_SQL = `
@@ -23,8 +24,16 @@ const CREATE_INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS chat_messages_wa_at_idx
   ON chat_messages (wa_number, at DESC)`;
 
+const MEDIA_COLUMNS_SQL = [
+  'ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_kind TEXT',
+  'ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_mime TEXT',
+  'ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_filename TEXT',
+  'ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_byte_length INTEGER',
+  'ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_bytes BYTEA',
+];
+
 function mapRow(row) {
-  return {
+  const out = {
     id: row.id,
     waNumber: row.wa_number,
     direction: row.direction,
@@ -34,6 +43,15 @@ function mapRow(row) {
     wamid: row.wamid,
     at: row.at instanceof Date ? row.at.toISOString() : String(row.at),
   };
+  if (row.media_kind) {
+    out.mediaKind = row.media_kind;
+    out.mediaMime = row.media_mime || null;
+    out.mediaFilename = row.media_filename || null;
+    out.mediaByteLength =
+      row.media_byte_length != null ? Number(row.media_byte_length) : null;
+    out.hasMedia = true;
+  }
+  return out;
 }
 
 /**
@@ -111,6 +129,11 @@ function createPostgresMessageStore(connectionString) {
       ready = pool
         .query(CREATE_TABLE_SQL)
         .then(() => pool.query(CREATE_INDEX_SQL))
+        .then(async () => {
+          for (const sql of MEDIA_COLUMNS_SQL) {
+            await pool.query(sql);
+          }
+        })
         .then(() => undefined)
         .catch((err) => {
           ready = null;
@@ -141,11 +164,23 @@ function createPostgresMessageStore(connectionString) {
       replyId: message.replyId || null,
       wamid: message.wamid || null,
       at: message.at || new Date().toISOString(),
+      mediaKind: message.mediaKind || null,
+      mediaMime: message.mediaMime || message.mimeType || null,
+      mediaFilename: message.mediaFilename || message.filename || null,
+      mediaByteLength:
+        message.mediaByteLength != null
+          ? Number(message.mediaByteLength)
+          : message.mediaBuffer
+            ? message.mediaBuffer.length
+            : null,
+      mediaBuffer: message.mediaBuffer || null,
     };
     await pool.query(
       `INSERT INTO chat_messages
-        (id, wa_number, direction, source, text, reply_id, wamid, at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz)
+        (id, wa_number, direction, source, text, reply_id, wamid, at,
+         media_kind, media_mime, media_filename, media_byte_length, media_bytes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz,
+         $9, $10, $11, $12, $13)
        ON CONFLICT (id) DO NOTHING`,
       [
         row.id,
@@ -156,15 +191,34 @@ function createPostgresMessageStore(connectionString) {
         row.replyId,
         row.wamid,
         row.at,
+        row.mediaKind,
+        row.mediaMime,
+        row.mediaFilename,
+        row.mediaByteLength,
+        row.mediaBuffer,
       ]
     );
-    return row;
+    return mapRow({
+      id: row.id,
+      wa_number: row.waNumber,
+      direction: row.direction,
+      source: row.source,
+      text: row.text,
+      reply_id: row.replyId,
+      wamid: row.wamid,
+      at: row.at,
+      media_kind: row.mediaKind,
+      media_mime: row.mediaMime,
+      media_filename: row.mediaFilename,
+      media_byte_length: row.mediaByteLength,
+    });
   }
 
   async function listMessages(waNumber, { limit = 200 } = {}) {
     await ensureSchema();
     const { rows } = await pool.query(
-      `SELECT id, wa_number, direction, source, text, reply_id, wamid, at
+      `SELECT id, wa_number, direction, source, text, reply_id, wamid, at,
+              media_kind, media_mime, media_filename, media_byte_length
        FROM (
          SELECT *
          FROM chat_messages
@@ -176,6 +230,25 @@ function createPostgresMessageStore(connectionString) {
       [String(waNumber), limit]
     );
     return rows.map(mapRow);
+  }
+
+  async function readMedia(waNumber, messageId) {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT media_kind, media_mime, media_filename, media_bytes
+       FROM chat_messages
+       WHERE wa_number = $1 AND id = $2
+       LIMIT 1`,
+      [String(waNumber), String(messageId)]
+    );
+    const row = rows[0];
+    if (!row || !row.media_kind || !row.media_bytes) return null;
+    return {
+      buffer: row.media_bytes,
+      mimeType: row.media_mime || 'application/octet-stream',
+      filename: row.media_filename || 'file',
+      mediaKind: row.media_kind,
+    };
   }
 
   async function listChats({ lastReadByWa = {} } = {}) {
@@ -238,6 +311,7 @@ function createPostgresMessageStore(connectionString) {
     append,
     listMessages,
     listChats,
+    readMedia,
     close,
     ping,
     backend: 'postgres',
