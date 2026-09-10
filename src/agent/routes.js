@@ -7,6 +7,10 @@ const config = require('../config');
 const { createShortcutStore } = require('./shortcutStore');
 const { createLabelStore } = require('./labelStore');
 const { createChatReadStore } = require('./chatReadStore');
+const {
+  inferDeskLabelNames,
+  syncInferredDeskLabels,
+} = require('./deskAutoLabels');
 
 function timingSafeEqualStr(a, b) {
   const left = Buffer.from(String(a || ''));
@@ -18,6 +22,49 @@ function timingSafeEqualStr(a, b) {
 function sendStoreError(res, err) {
   const status = err && err.status ? err.status : 500;
   return res.status(status).json({ error: err.message || String(err) });
+}
+
+function publicLabels(labelIds, labelById) {
+  return (labelIds || [])
+    .map((id) => labelById.get(id))
+    .filter(Boolean)
+    .map((l) => ({ id: l.id, name: l.name, color: l.color }));
+}
+
+/**
+ * Attach funnel labels from the live session and/or transcript.
+ * First scan of a chat with no hints is remembered empty for this process
+ * so the inbox does not re-read every transcript on each refresh.
+ */
+function createAutoLabelSync({ labels, messageStore }) {
+  const scannedEmpty = new Set();
+
+  async function syncChat(waNumber, { session, messages, lastText } = {}) {
+    const wa = String(waNumber || '').replace(/\D/g, '');
+    if (!wa) return [];
+    let hints = { session, messages, lastText };
+    let inferred = inferDeskLabelNames(hints);
+    if (
+      !inferred.length &&
+      messages == null &&
+      !scannedEmpty.has(wa) &&
+      messageStore &&
+      typeof messageStore.listMessages === 'function'
+    ) {
+      const loaded = await messageStore.listMessages(wa, { limit: 150 });
+      hints = { session, messages: loaded, lastText };
+      inferred = inferDeskLabelNames(hints);
+      if (!inferred.length) scannedEmpty.add(wa);
+    }
+    if (!inferred.length) {
+      return labels.getChatLabelIds(wa);
+    }
+    scannedEmpty.delete(wa);
+    await syncInferredDeskLabels(labels, wa, hints);
+    return labels.getChatLabelIds(wa);
+  }
+
+  return { syncChat };
 }
 
 function createAgentRouter({
@@ -35,6 +82,7 @@ function createAgentRouter({
   const shortcuts = shortcutStore || createShortcutStore();
   const labels = labelStore || createLabelStore();
   const chatReads = chatReadStore || createChatReadStore();
+  const autoLabels = createAutoLabelSync({ labels, messageStore });
 
   function requireAuth(req, res, next) {
     if (!enabled) {
@@ -118,22 +166,23 @@ function createAgentRouter({
 
   router.get('/api/chats', requireAuth, async (_req, res) => {
     try {
-      const [readState, labelBundle] = await Promise.all([
+      const [readState, allLabels] = await Promise.all([
         typeof chatReads.getState === 'function'
           ? chatReads.getState()
           : chatReads.getAll().then((reads) => ({ reads, forcedUnread: {} })),
-        labels.getChatLabelsMap(),
+        labels.listLabels(),
       ]);
       const readsMap = readState.reads || readState;
       const forcedUnread = readState.forcedUnread || {};
       const chats = await messageStore.listChats({ lastReadByWa: readsMap });
-      const labelById = new Map(
-        (labelBundle.labels || []).map((l) => [l.id, l])
-      );
+      const labelById = new Map((allLabels || []).map((l) => [l.id, l]));
       const enriched = [];
       for (const chat of chats) {
         const session = await sessionStore.get(chat.waNumber);
-        const labelIds = labelBundle.chatLabels[chat.waNumber] || [];
+        const labelIds = await autoLabels.syncChat(chat.waNumber, {
+          session,
+          lastText: chat.lastText,
+        });
         let unreadCount = Number(chat.unreadCount) || 0;
         if (forcedUnread[chat.waNumber]) {
           unreadCount = Math.max(unreadCount, 1);
@@ -146,10 +195,7 @@ function createAgentRouter({
           currentState: session ? session.currentState : null,
           agentTakenOver: Boolean(session && session.agentTakenOver),
           labelIds,
-          labels: labelIds
-            .map((id) => labelById.get(id))
-            .filter(Boolean)
-            .map((l) => ({ id: l.id, name: l.name, color: l.color })),
+          labels: publicLabels(labelIds, labelById),
         });
       }
       res.json({ chats: enriched });
@@ -177,12 +223,12 @@ function createAgentRouter({
   router.get('/api/chats/:wa', requireAuth, async (req, res) => {
     try {
       const wa = String(req.params.wa || '').replace(/\D/g, '');
-      const [messages, session, labelIds, allLabels] = await Promise.all([
+      const [messages, session, allLabels] = await Promise.all([
         messageStore.listMessages(wa),
         sessionStore.get(wa),
-        labels.getChatLabelIds(wa),
         labels.listLabels(),
       ]);
+      const labelIds = await autoLabels.syncChat(wa, { session, messages });
       // Opening a thread marks it read for the agent desk (bot path untouched).
       let lastReadAt = null;
       try {
@@ -197,10 +243,7 @@ function createAgentRouter({
         messages,
         lastReadAt,
         labelIds,
-        labels: labelIds
-          .map((id) => labelById.get(id))
-          .filter(Boolean)
-          .map((l) => ({ id: l.id, name: l.name, color: l.color })),
+        labels: publicLabels(labelIds, labelById),
         session: session
           ? {
               status: session.status,

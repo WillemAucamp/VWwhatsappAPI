@@ -156,6 +156,100 @@ async function testGoodCreditDoesNotTag() {
   console.log('✓ qualifying answers do not tag until Yes, send it');
 }
 
+async function testInferFromSessionPath() {
+  const { inferDeskLabelNames } = require('../src/agent/deskAutoLabels');
+  assert.deepStrictEqual(
+    inferDeskLabelNames({
+      session: {
+        currentState: 'LICENSE_NO_HANDOVER',
+        lastExitReason: 'no_license',
+        path: ['GREETING', 'EMPLOYED_INCOME_CHECK', 'LICENSE_CHECK', 'LICENSE_NO_HANDOVER'],
+      },
+    }),
+    ['No License']
+  );
+  assert.deepStrictEqual(
+    inferDeskLabelNames({
+      session: {
+        currentState: 'SEND_LINK',
+        lastExitReason: 'qualified_self_serve',
+        path: ['FINAL_CONSENT', 'SEND_LINK'],
+      },
+    }),
+    ['App-Link sent']
+  );
+  // eslint-disable-next-line no-console
+  console.log('✓ infer labels from session path / exit reason');
+}
+
+async function testInferFromTranscriptWithoutSession() {
+  const { inferDeskLabelNames } = require('../src/agent/deskAutoLabels');
+  const licenseNo = inferDeskLabelNames({
+    messages: [
+      {
+        direction: 'out',
+        source: 'bot',
+        text: "Do you hold a valid driver's license?",
+      },
+      { direction: 'in', source: 'customer', text: 'No' },
+    ],
+  });
+  assert.deepStrictEqual(licenseNo, ['No License']);
+
+  const unqualified = inferDeskLabelNames({
+    messages: [
+      {
+        direction: 'out',
+        source: 'bot',
+        text: "Ah, unfortunately we wouldn't be able to move forward just yet, but the good news is you can definitely build towards it to get your dream car!",
+      },
+    ],
+  });
+  assert.deepStrictEqual(unqualified, ['Unqualified']);
+
+  const consentOnly = inferDeskLabelNames({
+    messages: [
+      {
+        direction: 'out',
+        source: 'bot',
+        text: 'To take the next step, I can send over a short, simple application form.\n\nReady for me to send it?',
+      },
+    ],
+  });
+  assert.deepStrictEqual(consentOnly, []);
+
+  const sent = inferDeskLabelNames({
+    messages: [
+      {
+        direction: 'out',
+        source: 'bot',
+        text: 'Click on the link below to see what you qualify for, calculate your estimated repayments, and explore the best current specials for you:',
+      },
+    ],
+  });
+  assert.deepStrictEqual(sent, ['App-Link sent']);
+  // eslint-disable-next-line no-console
+  console.log('✓ infer labels from transcript when session is gone');
+}
+
+async function testSyncPersistsInferredLabels() {
+  const { syncInferredDeskLabels } = require('../src/agent/deskAutoLabels');
+  const labels = tmpLabelStore();
+  const wa = '27821119999';
+  await syncInferredDeskLabels(labels, wa, {
+    messages: [
+      {
+        direction: 'out',
+        source: 'bot',
+        text: 'Here is the quick plan to get your score where it needs to be:',
+      },
+    ],
+  });
+  assert.deepStrictEqual(await labelNamesFor(labels, wa), ['Bad Credit']);
+  // eslint-disable-next-line no-console
+  console.log('✓ inferred transcript labels are persisted on the chat');
+}
+
 async function main() {
   await testUnqualifiedOnEmploymentNo();
   await testNoLicenseOnLicenseNo();
@@ -164,6 +258,9 @@ async function main() {
   await testAdditiveAndCaseInsensitive();
   await testMissingLabelDoesNotThrow();
   await testGoodCreditDoesNotTag();
+  await testInferFromSessionPath();
+  await testInferFromTranscriptWithoutSession();
+  await testSyncPersistsInferredLabels();
   // eslint-disable-next-line no-console
   console.log('\ndesk auto-label tests passed.');
 }

@@ -348,6 +348,22 @@ async function testMessageStoreAndApis() {
     ).then((r) => r.json());
     assert.deepStrictEqual(thread.labelIds.sort(), [cemented.id, recreated.label.id].sort());
 
+    await messageStore.append({
+      waNumber: '27829990001',
+      direction: 'out',
+      source: 'bot',
+      text: "Unfortunately a license is a must for vehicle finance — the only times you can use someone else's license would be for the following reasons:",
+    });
+    const chatsInferred = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    const inferredChat = chatsInferred.chats.find((c) => c.waNumber === '27829990001');
+    assert.ok(inferredChat, 'transcript-only chat is listed');
+    assert.ok(
+      inferredChat.labels.some((l) => l.name === 'No License'),
+      'No License is applied from the bot transcript without a live session'
+    );
+
     // Paste-image media reply (mocked Graph send).
     const tinyPngBase64 =
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
