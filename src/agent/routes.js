@@ -73,6 +73,11 @@ function createAgentRouter({
     });
   });
 
+  router.use(
+    '/static',
+    express.static(path.join(__dirname, '../../public/agent'))
+  );
+
   router.get('/api/status', (_req, res) => {
     const diagnostics = require('../webhook/diagnostics');
     const snap = diagnostics.snapshot();
@@ -137,7 +142,7 @@ function createAgentRouter({
           ...chat,
           unreadCount,
           forcedUnread: Boolean(forcedUnread[chat.waNumber]),
-          status: session ? session.status : 'unknown',
+          status: session ? session.status : 'bot',
           currentState: session ? session.currentState : null,
           agentTakenOver: Boolean(session && session.agentTakenOver),
           labelIds,

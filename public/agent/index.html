@@ -1301,6 +1301,19 @@
       return deskChatMatchesFilters(chat, state, chatUnreadCount(chat));
     }
 
+    /** Never paint the raw "unknown" session fallback; that is the bot. */
+    function chatListStatusBadge(chat) {
+      const badge =
+        typeof deskStatusBadge === 'function' ? deskStatusBadge(chat) : null;
+      if (badge && String(badge.text).toLowerCase() !== 'unknown') return badge;
+      if (chat && chat.agentTakenOver) return { text: 'agent', cls: 'takeover' };
+      if (chat && chat.lastSource === 'agent') return { text: 'agent', cls: 'takeover' };
+      const status = chat && chat.status ? String(chat.status) : '';
+      if (status === 'quiet') return { text: 'quiet', cls: 'quiet' };
+      if (status === 'soft_closed') return { text: 'soft_closed', cls: '' };
+      return { text: 'bot', cls: 'bot' };
+    }
+
     function renderChatList() {
       const list = el('chatList');
       const chats = state.chats.filter(chatMatchesFilters);
@@ -1319,7 +1332,7 @@
         const active = state.selected === c.waNumber ? 'active' : '';
         const unreadCls = unread ? ' unread' : '';
         const badges = [];
-        const statusBadge = deskStatusBadge(c);
+        const statusBadge = chatListStatusBadge(c);
         if (statusBadge) {
           badges.push(
             '<span class="badge' +

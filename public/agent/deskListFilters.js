@@ -36,15 +36,20 @@
 
   /**
    * Who/what to show next to the phone number.
-   * Takeover wins; otherwise map the FSM status. Missing sessions (`unknown`)
-   * are bot-handled chats whose session expired or was never created.
+   * Takeover (or last agent message) wins. Missing sessions used to be
+   * labelled `unknown`; those are bot-handled chats.
+   * Never display the string "unknown".
    */
   function deskStatusBadge(chat) {
     if (chat && chat.agentTakenOver) return { text: 'agent', cls: 'takeover' };
+    if (chat && chat.lastSource === 'agent') return { text: 'agent', cls: 'takeover' };
     const status = chat && chat.status ? String(chat.status) : '';
     if (status === 'quiet') return { text: 'quiet', cls: 'quiet' };
-    if (!status) return null;
-    if (status === 'unknown') return { text: 'bot', cls: 'bot' };
+    if (status === 'soft_closed') return { text: 'soft_closed', cls: '' };
+    if (status === 'unknown' || status === 'bot' || !status) {
+      return { text: 'bot', cls: 'bot' };
+    }
+    if (status === 'new' || status === 'active') return { text: 'bot', cls: 'bot' };
     return { text: status, cls: '' };
   }
 

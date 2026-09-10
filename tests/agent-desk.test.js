@@ -166,8 +166,8 @@ async function testMessageStoreAndApis() {
     const otherAfterBot = chatsAfterBot.chats.find((c) => c.waNumber === '27829998877');
     assert.strictEqual(otherAfterBot.lastSource, 'bot');
     assert.ok(otherAfterBot.unreadCount >= 1);
-    // No live session → API still reports unknown; the desk maps that pill to "bot".
-    assert.strictEqual(otherAfterBot.status, 'unknown');
+    // No live session → this is the bot, not an "unknown" speaker.
+    assert.strictEqual(otherAfterBot.status, 'bot');
     assert.strictEqual(otherAfterBot.agentTakenOver, false);
 
     assert.deepStrictEqual(chats.chats[0].labelIds, []);

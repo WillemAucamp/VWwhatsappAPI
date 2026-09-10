@@ -15,17 +15,22 @@ function testStatusBadges() {
     text: 'agent',
     cls: 'takeover',
   });
+  assert.deepStrictEqual(deskStatusBadge({ lastSource: 'agent', status: 'unknown' }), {
+    text: 'agent',
+    cls: 'takeover',
+  });
   assert.deepStrictEqual(deskStatusBadge({ status: 'quiet' }), { text: 'quiet', cls: 'quiet' });
   assert.deepStrictEqual(deskStatusBadge({ status: 'unknown' }), { text: 'bot', cls: 'bot' });
+  assert.deepStrictEqual(deskStatusBadge({ status: 'bot' }), { text: 'bot', cls: 'bot' });
+  assert.deepStrictEqual(deskStatusBadge({}), { text: 'bot', cls: 'bot' });
   assert.deepStrictEqual(deskStatusBadge({ status: 'soft_closed' }), {
     text: 'soft_closed',
     cls: '',
   });
-  assert.deepStrictEqual(deskStatusBadge({ status: 'active' }), { text: 'active', cls: '' });
-  assert.deepStrictEqual(deskStatusBadge({ status: 'new' }), { text: 'new', cls: '' });
-  assert.strictEqual(deskStatusBadge({}), null);
+  assert.deepStrictEqual(deskStatusBadge({ status: 'active' }), { text: 'bot', cls: 'bot' });
+  assert.deepStrictEqual(deskStatusBadge({ status: 'new' }), { text: 'bot', cls: 'bot' });
   // eslint-disable-next-line no-console
-  console.log('✓ unknown status displays as bot; other FSM pills unchanged');
+  console.log('✓ unknown/missing/active session displays as bot; never unknown');
 }
 
 function testAgentFilter() {
@@ -106,6 +111,11 @@ function testDeskHtmlWiresHelper() {
   assert.ok(html.includes('filter-bar-wrap'), 'filter chips must sit in a scroll wrap');
   assert.ok(html.includes('filterScrollRight'), 'overflowing labels need a scroll-right control');
   assert.ok(html.includes('min-width: 0'), 'filter bar must be able to shrink so chips scroll');
+  assert.ok(html.includes('chatListStatusBadge'), 'chat list must use chatListStatusBadge');
+  assert.ok(
+    html.includes("toLowerCase() !== 'unknown'"),
+    'chat list must refuse to paint unknown pills'
+  );
   assert.ok(
     !/escapeHtml\(c\.status\)/.test(html),
     'raw session status must not be shown as the pill text'
