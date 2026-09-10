@@ -187,6 +187,55 @@ async function testTextDoesNotDuplicateLinkAlreadyInBody() {
   });
 }
 
+async function testImageUploadThenSend() {
+  const snap = { ...config.whatsapp };
+  config.whatsapp.token = 'test-token';
+  config.whatsapp.phoneNumberId = '123456';
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, options) => {
+    const href = String(url);
+    calls.push({ href, options });
+    if (href.includes('/media')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 'media.abc' }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ messages: [{ id: 'wamid.img' }] }),
+    };
+  };
+  try {
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64'
+    );
+    const result = await cloudApiSendMessage('27821234567', {
+      type: 'image',
+      mediaBuffer: png,
+      mimeType: 'image/png',
+      text: 'Stock shot',
+    });
+    assert.strictEqual(result.messages[0].id, 'wamid.img');
+    assert.strictEqual(calls.length, 2);
+    assert.ok(calls[0].href.includes('/123456/media'));
+    assert.ok(calls[0].options.body instanceof FormData);
+    const sendBody = JSON.parse(calls[1].options.body);
+    assert.strictEqual(sendBody.type, 'image');
+    assert.strictEqual(sendBody.image.id, 'media.abc');
+    assert.strictEqual(sendBody.image.caption, 'Stock shot');
+    // eslint-disable-next-line no-console
+    console.log('✓ image send uploads media then Graph type=image');
+  } finally {
+    global.fetch = originalFetch;
+    restore(snap);
+  }
+}
+
 async function main() {
   await testTemplateGraphBody();
   await testTextViaTemplateNameOnSendMessage();
@@ -194,6 +243,7 @@ async function main() {
   await testInteractiveListGraphBody();
   await testAuthErrorIncludesTokenHint();
   await testTextDoesNotDuplicateLinkAlreadyInBody();
+  await testImageUploadThenSend();
   // eslint-disable-next-line no-console
   console.log('\ntransport graph tests passed.');
 }

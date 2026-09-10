@@ -345,8 +345,49 @@ async function testMessageStoreAndApis() {
     ).then((r) => r.json());
     assert.deepStrictEqual(thread.labelIds.sort(), [vip.id, recreated.label.id].sort());
 
+    // Paste-image media reply (mocked Graph send).
+    const tinyPngBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const mediaReply = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27821234567/reply-media`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          imageBase64: tinyPngBase64,
+          mimeType: 'image/png',
+          filename: 'dot.png',
+          caption: 'Here is the stock photo',
+        }),
+      }
+    );
+    const mediaBody = await mediaReply.json();
+    assert.strictEqual(mediaReply.status, 200, JSON.stringify(mediaBody));
+    assert.strictEqual(mediaBody.ok, true);
+    assert.strictEqual(mediaBody.message.text, 'Here is the stock photo');
+    const imageSends = outbound.filter(
+      (o) => o.payload && o.payload.type === 'image' && o.payload.mimeType === 'image/png'
+    );
+    assert.strictEqual(imageSends.length, 1);
+    assert.ok(Buffer.isBuffer(imageSends[0].payload.mediaBuffer));
+    assert.ok(imageSends[0].payload.mediaBuffer.length > 0);
+    assert.strictEqual(imageSends[0].payload.text, 'Here is the stock photo');
+
+    const mediaNoCaption = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27821234567/reply-media`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          imageBase64: tinyPngBase64,
+          mimeType: 'image/png',
+        }),
+      }
+    ).then((r) => r.json());
+    assert.strictEqual(mediaNoCaption.message.text, '[Image]');
+
     // eslint-disable-next-line no-console
-    console.log('✓ agent desk auth, reply, shortcuts, and labels');
+    console.log('✓ agent desk auth, reply, media reply, shortcuts, and labels');
   } finally {
     server.close();
   }

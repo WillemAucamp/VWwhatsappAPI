@@ -279,6 +279,86 @@ function createAgentRouter({
     }
   });
 
+  // Paste-image sends from the desk (base64 JSON; keep text /reply unchanged).
+  router.post(
+    '/api/chats/:wa/reply-media',
+    requireAuth,
+    express.json({ limit: '6mb' }),
+    async (req, res) => {
+      try {
+        const wa = String(req.params.wa || '').replace(/\D/g, '');
+        const caption =
+          req.body && req.body.caption != null
+            ? String(req.body.caption).trim()
+            : req.body && req.body.text != null
+              ? String(req.body.text).trim()
+              : '';
+        const imageBase64 =
+          req.body && req.body.imageBase64 != null
+            ? String(req.body.imageBase64).replace(/^data:[^;]+;base64,/, '')
+            : '';
+        const mimeType =
+          (req.body && (req.body.mimeType || req.body.mediaMimeType)) || 'image/png';
+        const filename =
+          (req.body && req.body.filename) || undefined;
+        if (!wa || !imageBase64) {
+          return res.status(400).json({ error: 'wa_and_image_required' });
+        }
+
+        let buffer;
+        try {
+          buffer = Buffer.from(imageBase64, 'base64');
+        } catch (_) {
+          return res.status(400).json({ error: 'invalid_image_base64' });
+        }
+        if (!buffer.length) {
+          return res.status(400).json({ error: 'empty_image' });
+        }
+
+        if (engine && typeof engine.takeOver === 'function') {
+          await engine.takeOver(wa, { silent: true });
+        }
+
+        const result = await sendMessage(wa, {
+          type: 'image',
+          mediaBuffer: buffer,
+          mimeType,
+          filename,
+          text: caption,
+          meta: { source: 'agent', stateId: null },
+        });
+        const wamid =
+          result &&
+          result.messages &&
+          result.messages[0] &&
+          result.messages[0].id
+            ? result.messages[0].id
+            : null;
+        const text = caption || '[Image]';
+
+        res.json({
+          ok: true,
+          message: {
+            waNumber: wa,
+            direction: 'out',
+            source: 'agent',
+            text,
+            wamid,
+            at: new Date().toISOString(),
+          },
+          graph: result,
+        });
+      } catch (err) {
+        const status = err && err.status >= 400 && err.status < 600 ? err.status : 502;
+        res.status(status).json({
+          error: err.message || String(err),
+          code: err.code || undefined,
+          response: err.response || undefined,
+        });
+      }
+    }
+  );
+
   router.post('/api/chats/:wa/takeover', requireAuth, async (req, res) => {
     try {
       const wa = String(req.params.wa || '').replace(/\D/g, '');

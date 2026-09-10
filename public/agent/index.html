@@ -482,6 +482,40 @@
       align-items: flex-end;
     }
     .composer-row textarea { flex: 1; }
+    .attach-preview {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .attach-preview.hidden { display: none; }
+    .attach-preview img {
+      width: 56px;
+      height: 56px;
+      object-fit: cover;
+      border-radius: 8px;
+      background: #f0f2f5;
+    }
+    .attach-preview .attach-meta {
+      flex: 1;
+      min-width: 0;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .attach-preview .attach-meta strong {
+      display: block;
+      color: var(--ink);
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .attach-preview .attach-clear {
+      flex-shrink: 0;
+      padding: 6px 10px;
+      border-radius: 8px;
+    }
     .emoji-toggle {
       flex-shrink: 0;
       width: 44px;
@@ -795,7 +829,15 @@
           <div id="emojiCats" class="emoji-cats" role="tablist" aria-label="Emoji categories"></div>
           <div id="emojiGrid" class="emoji-grid" role="listbox" aria-label="Emojis"></div>
         </div>
-        <p class="composer-hint">Type <strong>/</strong> for shortcuts · use 😀 for emoji</p>
+        <p class="composer-hint">Type <strong>/</strong> for shortcuts · paste an image to send a photo · use 😀 for emoji</p>
+        <div id="attachPreview" class="attach-preview hidden" aria-live="polite">
+          <img id="attachThumb" alt="Attachment preview" />
+          <div class="attach-meta">
+            <strong id="attachName">Image</strong>
+            <span id="attachSize"></span>
+          </div>
+          <button type="button" class="secondary attach-clear" id="attachClearBtn">Remove</button>
+        </div>
         <div class="composer-row">
           <button type="button" class="emoji-toggle" id="emojiBtn" title="Insert emoji" aria-label="Insert emoji" disabled>😀</button>
           <textarea id="replyBox" rows="2" placeholder="Type a message" disabled></textarea>
@@ -897,6 +939,7 @@
       threadLabelIds: [],
       slash: { open: false, query: '', start: -1, end: -1, active: 0, matches: [] },
       emoji: { open: false, categoryId: 'smileys', query: '' },
+      pendingImage: null,
       editingShortcutId: null,
       editingLabelId: null,
       assignDraft: [],
@@ -1188,7 +1231,9 @@
       }).join('');
       list.querySelectorAll('.chat-item').forEach((btn) => {
         btn.addEventListener('click', () => {
-          state.selected = btn.getAttribute('data-wa');
+          const next = btn.getAttribute('data-wa');
+          if (next !== state.selected) clearPendingImage();
+          state.selected = next;
           renderChatList();
           loadThread(state.selected);
         });
@@ -1224,7 +1269,10 @@
       el('labelsBtnBar').disabled = !on;
       el('markUnreadBtn').disabled = !on;
       el('markUnreadBtnBar').disabled = !on;
-      if (!on) hideEmojiPicker();
+      if (!on) {
+        hideEmojiPicker();
+        clearPendingImage();
+      }
     }
 
     function renderThreadLabels(labels) {
@@ -1324,7 +1372,9 @@
 
     async function sendReply() {
       const text = el('replyBox').value.trim();
-      if (!state.selected || !text) return;
+      const pending = state.pendingImage;
+      if (!state.selected) return;
+      if (!pending && !text) return;
       if (state.sending) return;
       state.sending = true;
       hideSlashMenu();
@@ -1332,10 +1382,23 @@
       el('threadError').textContent = '';
       el('sendBtn').disabled = true;
       try {
-        await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply', {
-          method: 'POST',
-          body: JSON.stringify({ text }),
-        });
+        if (pending) {
+          await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply-media', {
+            method: 'POST',
+            body: JSON.stringify({
+              imageBase64: pending.base64,
+              mimeType: pending.mimeType,
+              filename: pending.filename,
+              caption: text,
+            }),
+          });
+          clearPendingImage();
+        } else {
+          await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply', {
+            method: 'POST',
+            body: JSON.stringify({ text }),
+          });
+        }
         el('replyBox').value = '';
         await loadThread(state.selected);
         await loadChats(true);
@@ -1346,6 +1409,100 @@
         el('sendBtn').disabled = false;
       }
     }
+
+    function clearPendingImage() {
+      if (state.pendingImage && state.pendingImage.objectUrl) {
+        try { URL.revokeObjectURL(state.pendingImage.objectUrl); } catch (_) {}
+      }
+      state.pendingImage = null;
+      el('attachPreview').classList.add('hidden');
+      el('attachThumb').removeAttribute('src');
+      el('attachName').textContent = 'Image';
+      el('attachSize').textContent = '';
+    }
+
+    function formatBytes(n) {
+      if (!n && n !== 0) return '';
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function setPendingImage({ blob, mimeType, filename, base64 }) {
+      clearPendingImage();
+      const objectUrl = URL.createObjectURL(blob);
+      state.pendingImage = {
+        blob,
+        mimeType,
+        filename: filename || 'image.png',
+        base64,
+        objectUrl,
+        size: blob.size || 0,
+      };
+      el('attachThumb').src = objectUrl;
+      el('attachName').textContent = state.pendingImage.filename;
+      el('attachSize').textContent = formatBytes(state.pendingImage.size);
+      el('attachPreview').classList.remove('hidden');
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          const comma = result.indexOf(',');
+          resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.onerror = () => reject(reader.error || new Error('read_failed'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function acceptImageFile(file) {
+      if (!file || !String(file.type || '').startsWith('image/')) {
+        el('threadError').textContent = 'Only image files can be pasted (JPEG, PNG, WebP).';
+        return;
+      }
+      const mime = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(mime)) {
+        el('threadError').textContent = 'Only JPEG, PNG, or WebP images are supported.';
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        el('threadError').textContent = 'Image must be under 5MB.';
+        return;
+      }
+      el('threadError').textContent = '';
+      const base64 = await fileToBase64(file);
+      const filename = file.name || (mime === 'image/png' ? 'paste.png' : mime === 'image/webp' ? 'paste.webp' : 'paste.jpg');
+      setPendingImage({ blob: file, mimeType: mime, filename, base64 });
+    }
+
+    el('attachClearBtn').addEventListener('click', clearPendingImage);
+    el('replyBox').addEventListener('paste', async (e) => {
+      if (el('replyBox').disabled) return;
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items || !items.length) return;
+      let imageItem = null;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item && item.kind === 'file' && String(item.type || '').startsWith('image/')) {
+          imageItem = item;
+          break;
+        }
+      }
+      if (!imageItem) return;
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      hideSlashMenu();
+      hideEmojiPicker();
+      try {
+        await acceptImageFile(file);
+      } catch (err) {
+        el('threadError').textContent = err.message || 'Could not read pasted image.';
+      }
+    });
 
     function onComposerInput() {
       const box = el('replyBox');

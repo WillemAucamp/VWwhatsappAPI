@@ -30,7 +30,17 @@ function createApp(overrides = {}) {
     const result = await baseSend(to, payload);
     if (messageStore) {
       try {
-        const text = joinTextAndLink(payload.text, payload.link);
+        const isImage =
+          payload.type === 'image' ||
+          Boolean(payload.mediaId) ||
+          Boolean(payload.mediaBuffer) ||
+          Boolean(payload.imageBase64);
+        const joined = joinTextAndLink(payload.text, payload.link);
+        const text = isImage
+          ? joined && String(joined).trim()
+            ? String(joined).trim()
+            : '[Image]'
+          : joined;
         const source =
           (payload.meta && payload.meta.source) ||
           (payload.meta && payload.meta.quiet ? 'bot' : 'bot');
@@ -68,7 +78,8 @@ function createApp(overrides = {}) {
   const app = express();
   app.use(
     express.json({
-      limit: '1mb',
+      // Agent desk paste-image sends base64 (~4/3 of binary; WhatsApp image cap 5MB).
+      limit: '7mb',
       verify: (req, _res, buf) => {
         req.rawBody = Buffer.from(buf);
       },
@@ -125,6 +136,8 @@ function createApp(overrides = {}) {
         messageStore: messageStore && messageStore.backend ? messageStore.backend : 'unknown',
         // Agent composer emoji picker (desk UI only).
         emojiPicker: 'agent-emoji-picker-2026-09-09',
+        // Paste image from clipboard → WhatsApp media send.
+        pasteImage: 'agent-paste-image-2026-09-10',
       },
     });
   });

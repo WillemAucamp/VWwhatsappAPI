@@ -4,13 +4,49 @@ const config = require('../config');
 
 /**
  * Cloud API Graph /messages (Coexistence number).
- * Supports text, templates, and interactive (reply buttons / lists).
- * Never put internal fields (mediaSlot, meta) on Graph bodies.
+ * Supports text, templates, interactive (reply buttons / lists), and images.
+ * Never put internal fields (mediaSlot, meta, mediaBuffer) on Graph bodies.
  */
+
+const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function messagesUrl() {
   const { graphBaseUrl, apiVersion, phoneNumberId } = config.whatsapp;
   return `${graphBaseUrl}/${apiVersion}/${phoneNumberId}/messages`;
+}
+
+function mediaUrl() {
+  const { graphBaseUrl, apiVersion, phoneNumberId } = config.whatsapp;
+  return `${graphBaseUrl}/${apiVersion}/${phoneNumberId}/media`;
+}
+
+function normalizeImageMime(mimeType) {
+  const mime = String(mimeType || '')
+    .trim()
+    .toLowerCase()
+    .split(';')[0];
+  if (mime === 'image/jpg') return 'image/jpeg';
+  return mime;
+}
+
+function assertImagePayload({ mimeType, byteLength }) {
+  const mime = normalizeImageMime(mimeType);
+  if (!IMAGE_MIME_TYPES.has(mime)) {
+    const err = new Error(
+      'Unsupported image type. Use JPEG, PNG, or WebP (WhatsApp image limits).'
+    );
+    err.code = 'WHATSAPP_MEDIA_TYPE_UNSUPPORTED';
+    err.status = 400;
+    throw err;
+  }
+  if (!byteLength || byteLength > MAX_IMAGE_BYTES) {
+    const err = new Error('Image must be under 5MB.');
+    err.code = 'WHATSAPP_MEDIA_TOO_LARGE';
+    err.status = 400;
+    throw err;
+  }
+  return mime;
 }
 
 function digitsOnly(to) {
@@ -237,6 +273,68 @@ async function cloudApiSendInteractive(to, { text, link, interactive } = {}) {
 }
 
 /**
+ * Upload binary media to Graph, return media id for immediate send.
+ * @param {{ buffer: Buffer, mimeType: string, filename?: string }} opts
+ */
+async function uploadMedia({ buffer, mimeType, filename } = {}) {
+  const { token } = requireCredentials();
+  const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
+  const mime = assertImagePayload({ mimeType, byteLength: bytes.length });
+  const name =
+    filename ||
+    (mime === 'image/png' ? 'image.png' : mime === 'image/webp' ? 'image.webp' : 'image.jpg');
+
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', mime);
+  form.append('file', new Blob([bytes], { type: mime }), name);
+
+  const res = await fetch(mediaUrl(), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const graph = (data && data.error) || {};
+    const detail = graph.message ? ` (${graph.message})` : '';
+    const err = new Error(`WhatsApp media upload failed: ${res.status}${detail}`);
+    err.status = res.status;
+    err.code = graph.code != null ? graph.code : null;
+    err.response = data;
+    throw err;
+  }
+  const id = data && data.id ? String(data.id) : '';
+  if (!id) {
+    const err = new Error('WhatsApp media upload returned no id');
+    err.code = 'WHATSAPP_MEDIA_ID_MISSING';
+    err.response = data;
+    throw err;
+  }
+  return { id, mimeType: mime };
+}
+
+async function cloudApiSendImage(to, { mediaId, caption } = {}) {
+  requireCredentials();
+  if (!mediaId) {
+    const err = new Error('image mediaId required');
+    err.code = 'WHATSAPP_MEDIA_ID_MISSING';
+    throw err;
+  }
+  const image = { id: String(mediaId) };
+  const cap = caption != null ? String(caption).trim() : '';
+  if (cap) image.caption = cap.slice(0, 1024);
+
+  return graphPost({
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: digitsOnly(to),
+    type: 'image',
+    image,
+  });
+}
+
+/**
  * @param {string} to E.164 WhatsApp number (digits)
  * @param {object} payload Transport-agnostic payload
  */
@@ -261,6 +359,29 @@ async function cloudApiSendMessage(to, payload = {}) {
       link: payload.link,
       interactive: payload.interactive,
     });
+  }
+
+  if (
+    payload.type === 'image' ||
+    payload.mediaId ||
+    payload.mediaBuffer ||
+    payload.imageBase64
+  ) {
+    let mediaId = payload.mediaId ? String(payload.mediaId) : '';
+    if (!mediaId) {
+      let buffer = payload.mediaBuffer;
+      if (!buffer && payload.imageBase64) {
+        buffer = Buffer.from(String(payload.imageBase64), 'base64');
+      }
+      const uploaded = await uploadMedia({
+        buffer,
+        mimeType: payload.mimeType || payload.mediaMimeType,
+        filename: payload.filename,
+      });
+      mediaId = uploaded.id;
+    }
+    const caption = joinTextAndLink(payload.text, payload.link) || payload.caption || '';
+    return cloudApiSendImage(toDigits, { mediaId, caption });
   }
 
   const bodyText = joinTextAndLink(payload.text, payload.link);
@@ -584,6 +705,8 @@ module.exports = {
   cloudApiSendMessage,
   cloudApiSendTemplate,
   cloudApiSendInteractive,
+  cloudApiSendImage,
+  uploadMedia,
   buildInteractiveGraph,
   joinTextAndLink,
   graphGet,
@@ -596,4 +719,6 @@ module.exports = {
   ensureCatalogVisible,
   prepareCatalogForMessaging,
   notifyAgent,
+  IMAGE_MIME_TYPES,
+  MAX_IMAGE_BYTES,
 };
