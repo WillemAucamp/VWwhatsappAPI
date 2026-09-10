@@ -56,9 +56,33 @@ function getSharedPool(connectionString) {
   return pool;
 }
 
+/**
+ * Desk settings (shortcuts / labels / unread) must survive redeploys.
+ * Prefer Postgres whenever DATABASE_URL is set — even if MESSAGE_STORE=file —
+ * so staff edits are not wiped and reseeded with code defaults.
+ */
+function resolveDeskSettingsBackend(opts = {}) {
+  const databaseUrl =
+    opts.databaseUrl != null
+      ? opts.databaseUrl
+      : require('../config').agent.databaseUrl;
+  if (opts.backend) {
+    const backend =
+      String(opts.backend).toLowerCase() === 'postgres' ? 'postgres' : 'file';
+    return { backend, databaseUrl };
+  }
+  if (databaseUrl) {
+    return { backend: 'postgres', databaseUrl };
+  }
+  return { backend: 'file', databaseUrl: '' };
+}
+
 /** Resolve file vs postgres the same way message transcripts do. */
 function resolveAgentStoreBackend(opts = {}) {
-  const databaseUrl = opts.databaseUrl || require('../config').agent.databaseUrl;
+  const databaseUrl =
+    opts.databaseUrl != null
+      ? opts.databaseUrl
+      : require('../config').agent.databaseUrl;
   const configured =
     opts.backend ||
     require('../config').agent.messageStore ||
@@ -74,4 +98,5 @@ module.exports = {
   normalizeDatabaseUrl,
   getSharedPool,
   resolveAgentStoreBackend,
+  resolveDeskSettingsBackend,
 };

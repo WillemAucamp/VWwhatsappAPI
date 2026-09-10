@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { getSharedPool, resolveAgentStoreBackend } = require('./pg');
+const { getSharedPool, resolveDeskSettingsBackend } = require('./pg');
 
 const LABEL_COLORS = [
   '#128c7e',
@@ -120,25 +120,33 @@ function createFileLabelStore(filePath = config.agent.labelsPath) {
         throw err;
       }
       const data = await readAllUnlocked();
-      if (
-        data.labels.some(
-          (l) => l.name.toLowerCase() === labelName.toLowerCase()
-        )
-      ) {
-        const err = new Error('label_name_exists');
-        err.status = 409;
-        throw err;
+      const existingIdx = data.labels.findIndex(
+        (l) => l.name.toLowerCase() === labelName.toLowerCase()
+      );
+      const now = new Date().toISOString();
+      data.meta = data.meta || {};
+      data.meta[META_SEEDED] = true;
+      // Same name as a default (or prior) label → replace it permanently.
+      if (existingIdx >= 0) {
+        const current = data.labels[existingIdx];
+        const row = {
+          ...current,
+          name: labelName,
+          color: normalizeColor(color, current.color),
+          updatedAt: now,
+        };
+        data.labels[existingIdx] = row;
+        await writeAllUnlocked(data);
+        return row;
       }
       const used = data.labels.length % LABEL_COLORS.length;
       const row = {
         id: `lb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
         name: labelName,
         color: normalizeColor(color, LABEL_COLORS[used]),
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
       };
       data.labels.push(row);
-      data.meta = data.meta || {};
-      data.meta[META_SEEDED] = true;
       await writeAllUnlocked(data);
       return row;
     });
@@ -424,14 +432,27 @@ CREATE TABLE IF NOT EXISTS agent_chat_labels (
         err.status = 400;
         throw err;
       }
-      const clash = await pool.query(
-        `SELECT 1 FROM agent_labels WHERE lower(name) = lower($1)`,
+      const existing = await pool.query(
+        `SELECT id, name, color, updated_at FROM agent_labels WHERE lower(name) = lower($1)`,
         [labelName]
       );
-      if (clash.rowCount) {
-        const err = new Error('label_name_exists');
-        err.status = 409;
-        throw err;
+      const updatedAt = new Date().toISOString();
+      if (existing.rowCount) {
+        const current = mapLabelRow(existing.rows[0]);
+        const nextColor = normalizeColor(color, current.color);
+        await pool.query(
+          `UPDATE agent_labels
+           SET name = $2, color = $3, updated_at = $4::timestamptz
+           WHERE id = $1`,
+          [current.id, labelName, nextColor, updatedAt]
+        );
+        await setMeta(META_SEEDED, '1');
+        return {
+          id: current.id,
+          name: labelName,
+          color: nextColor,
+          updatedAt,
+        };
       }
       const { rows: countRows } = await pool.query(
         `SELECT COUNT(*)::int AS n FROM agent_labels`
@@ -441,7 +462,7 @@ CREATE TABLE IF NOT EXISTS agent_chat_labels (
         id: `lb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
         name: labelName,
         color: normalizeColor(color, LABEL_COLORS[used]),
-        updatedAt: new Date().toISOString(),
+        updatedAt,
       };
       await pool.query(
         `INSERT INTO agent_labels (id, name, color, updated_at)
@@ -598,7 +619,7 @@ function createLabelStore(options) {
     return createFileLabelStore(options);
   }
   const opts = options || {};
-  const { backend, databaseUrl } = resolveAgentStoreBackend(opts);
+  const { backend, databaseUrl } = resolveDeskSettingsBackend(opts);
   if (backend === 'postgres') {
     return createPostgresLabelStore(databaseUrl, opts);
   }

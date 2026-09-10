@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { getSharedPool, resolveAgentStoreBackend } = require('./pg');
+const { getSharedPool, resolveDeskSettingsBackend } = require('./pg');
 
 /**
  * Agent-desk-only "last opened" cursors per WhatsApp number.
@@ -307,7 +307,7 @@ function createChatReadStore(options) {
     return createFileChatReadStore(options);
   }
   const opts = options || {};
-  const { backend, databaseUrl } = resolveAgentStoreBackend(opts);
+  const { backend, databaseUrl } = resolveDeskSettingsBackend(opts);
   if (backend === 'postgres') {
     return createPostgresChatReadStore(databaseUrl, opts);
   }

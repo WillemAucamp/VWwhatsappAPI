@@ -313,11 +313,13 @@ function createAgentRouter({
 
   router.post('/api/shortcuts', requireAuth, express.json(), async (req, res) => {
     try {
+      const before = await shortcuts.list();
       const row = await shortcuts.create({
         key: req.body && req.body.key,
         text: req.body && req.body.text,
       });
-      res.status(201).json({ shortcut: row });
+      const replaced = before.some((s) => s.id === row.id);
+      res.status(replaced ? 200 : 201).json({ shortcut: row, replaced });
     } catch (err) {
       return sendStoreError(res, err);
     }
@@ -356,11 +358,13 @@ function createAgentRouter({
 
   router.post('/api/labels', requireAuth, express.json(), async (req, res) => {
     try {
+      const before = await labels.listLabels();
       const row = await labels.createLabel({
         name: req.body && req.body.name,
         color: req.body && req.body.color,
       });
-      res.status(201).json({ label: row });
+      const replaced = before.some((l) => l.id === row.id);
+      res.status(replaced ? 200 : 201).json({ label: row, replaced });
     } catch (err) {
       return sendStoreError(res, err);
     }

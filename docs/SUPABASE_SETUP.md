@@ -2,7 +2,9 @@
 
 The agent desk can store WhatsApp transcripts **and** your desk settings (shortcuts, labels, unread cursors) in **Supabase** so they survive Render redeploys. You do **not** install Postgres on your laptop.
 
-Without `DATABASE_URL`, shortcuts/labels live in local `data/agent/*.json` files. On ephemeral hosts those files reset on every deploy and the desk re-seeds defaults — which looks like the API “undid” your edits.
+Desk settings (shortcuts, labels, unread) **always** use Postgres when `DATABASE_URL` is set — even if `MESSAGE_STORE=file`. That way your custom shortcuts/labels replace the defaults permanently and survive Render redeploys.
+
+Saving a shortcut with an existing key (e.g. `greeting`) or a label with an existing name (e.g. `VIP`) **replaces** that entry instead of failing or leaving the old default in place.
 
 ## What to do next (project already created)
 

@@ -142,7 +142,65 @@ async function testLabelAndReadEditsSurviveReopen() {
   console.log('✓ labels and unread cursors persist; empty labels do not reseed');
 }
 
-async function testFactoryUsesPostgresWhenConfigured() {
+async function testReplacingDefaultsSticks() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-replace-'));
+  const scPath = path.join(dir, 'shortcuts.json');
+  const lbPath = path.join(dir, 'labels.json');
+
+  const shortcuts = createShortcutStore(scPath);
+  const seeded = await shortcuts.list();
+  assert.ok(seeded.some((s) => s.key === 'greeting'));
+
+  // Adding the same key as a default replaces that default permanently.
+  const replaced = await shortcuts.create({
+    key: 'greeting',
+    text: 'Custom Melrose greeting — keep this.',
+  });
+  assert.strictEqual(replaced.key, 'greeting');
+  assert.strictEqual(replaced.text, 'Custom Melrose greeting — keep this.');
+
+  const again = createShortcutStore(scPath);
+  const after = (await again.list()).find((s) => s.key === 'greeting');
+  assert.strictEqual(after.text, 'Custom Melrose greeting — keep this.');
+  assert.strictEqual(
+    after.id,
+    replaced.id,
+    'replacing a default must keep the same id'
+  );
+
+  const labels = createLabelStore(lbPath);
+  await labels.listLabels();
+  const vip = await labels.createLabel({
+    name: 'VIP',
+    color: '#ca8a04',
+  });
+  assert.strictEqual(vip.name, 'VIP');
+  assert.strictEqual(vip.color, '#ca8a04');
+  const labelsAgain = createLabelStore(lbPath);
+  const vipAgain = (await labelsAgain.listLabels()).find((l) => l.name === 'VIP');
+  assert.strictEqual(vipAgain.color, '#ca8a04');
+  assert.strictEqual(vipAgain.id, vip.id);
+
+  // eslint-disable-next-line no-console
+  console.log('✓ adding over a default key/name replaces it permanently');
+}
+
+async function testSettingsPreferPostgresWhenDatabaseUrlSet() {
+  // Even if MESSAGE_STORE=file, desk settings must use Postgres whenever a
+  // databaseUrl is provided — otherwise Render redeploys reseed defaults.
+  const sc = createShortcutStore({
+    databaseUrl: 'postgresql://u:p@localhost:5432/db',
+  });
+  assert.strictEqual(
+    sc.backend,
+    'postgres',
+    'DATABASE_URL must force settingsStore=postgres even when MESSAGE_STORE=file'
+  );
+  const lb = createLabelStore({
+    databaseUrl: 'postgresql://u:p@localhost:5432/db',
+  });
+  assert.strictEqual(lb.backend, 'postgres');
+
   assert.throws(
     () => createShortcutStore({ backend: 'postgres', databaseUrl: '' }),
     /DATABASE_URL/
@@ -157,14 +215,14 @@ async function testFactoryUsesPostgresWhenConfigured() {
   );
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-persist-file-'));
-  const sc = createShortcutStore({
+  const fileStore = createShortcutStore({
     backend: 'file',
     filePath: path.join(dir, 's.json'),
   });
-  assert.strictEqual(sc.backend, 'file');
+  assert.strictEqual(fileStore.backend, 'file');
 
   // eslint-disable-next-line no-console
-  console.log('✓ desk settings factories honor backend selection');
+  console.log('✓ desk settings use Postgres whenever DATABASE_URL is set');
 }
 
 async function main() {
@@ -172,7 +230,8 @@ async function main() {
   await testDeletingAllShortcutsDoesNotReseed();
   await testCollapsedRepairRunsOnlyOnce();
   await testLabelAndReadEditsSurviveReopen();
-  await testFactoryUsesPostgresWhenConfigured();
+  await testReplacingDefaultsSticks();
+  await testSettingsPreferPostgresWhenDatabaseUrlSet();
 }
 
 main().catch((err) => {

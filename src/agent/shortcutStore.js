@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { getSharedPool, resolveAgentStoreBackend } = require('./pg');
+const { getSharedPool, resolveDeskSettingsBackend } = require('./pg');
 
 const DEFAULT_SHORTCUTS = [
   {
@@ -164,20 +164,29 @@ function createFileShortcutStore(filePath = config.agent.shortcutsPath) {
         throw err;
       }
       const data = await readAllUnlocked();
-      if (data.shortcuts.some((s) => s.key === normalized)) {
-        const err = new Error('shortcut_key_exists');
-        err.status = 409;
-        throw err;
+      // Same key as a default (or prior) shortcut → replace it permanently.
+      const existingIdx = data.shortcuts.findIndex((s) => s.key === normalized);
+      const now = new Date().toISOString();
+      data.meta = data.meta || {};
+      data.meta[META_SEEDED] = true;
+      if (existingIdx >= 0) {
+        const row = {
+          ...data.shortcuts[existingIdx],
+          key: normalized,
+          text: body,
+          updatedAt: now,
+        };
+        data.shortcuts[existingIdx] = row;
+        await writeAllUnlocked(data);
+        return row;
       }
       const row = {
         id: `sc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
         key: normalized,
         text: body,
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
       };
       data.shortcuts.push(row);
-      data.meta = data.meta || {};
-      data.meta[META_SEEDED] = true;
       await writeAllUnlocked(data);
       return row;
     });
@@ -408,19 +417,26 @@ CREATE TABLE IF NOT EXISTS agent_shortcuts (
         throw err;
       }
       const existing = await pool.query(
-        `SELECT 1 FROM agent_shortcuts WHERE key = $1`,
+        `SELECT id, key, text, updated_at FROM agent_shortcuts WHERE key = $1`,
         [normalized]
       );
+      const updatedAt = new Date().toISOString();
       if (existing.rowCount) {
-        const err = new Error('shortcut_key_exists');
-        err.status = 409;
-        throw err;
+        const current = mapShortcutRow(existing.rows[0]);
+        await pool.query(
+          `UPDATE agent_shortcuts
+           SET text = $2, updated_at = $3::timestamptz
+           WHERE id = $1`,
+          [current.id, body, updatedAt]
+        );
+        await setMeta(META_SEEDED, '1');
+        return { id: current.id, key: normalized, text: body, updatedAt };
       }
       const row = {
         id: `sc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
         key: normalized,
         text: body,
-        updatedAt: new Date().toISOString(),
+        updatedAt,
       };
       await pool.query(
         `INSERT INTO agent_shortcuts (id, key, text, updated_at)
@@ -517,7 +533,7 @@ function createShortcutStore(options) {
     return createFileShortcutStore(options);
   }
   const opts = options || {};
-  const { backend, databaseUrl } = resolveAgentStoreBackend(opts);
+  const { backend, databaseUrl } = resolveDeskSettingsBackend(opts);
   if (backend === 'postgres') {
     return createPostgresShortcutStore(databaseUrl, opts);
   }
