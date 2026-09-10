@@ -33,13 +33,23 @@ function publicLabels(labelIds, labelById) {
 
 /**
  * Attach funnel labels from the live session and/or transcript.
- * First scan of a chat with no hints is remembered empty for this process
- * so the inbox does not re-read every transcript on each refresh.
+ * Inbox list must stay light: never scan full transcripts there (that timed
+ * out on Render and made the desk look empty). Thread open may scan once;
+ * empty scans are remembered for this process.
  */
 function createAutoLabelSync({ labels, messageStore }) {
   const scannedEmpty = new Set();
 
-  async function syncChat(waNumber, { session, messages, lastText } = {}) {
+  async function syncChat(
+    waNumber,
+    {
+      session,
+      messages,
+      lastText,
+      allowTranscriptScan = true,
+      existingLabelIds,
+    } = {}
+  ) {
     const wa = String(waNumber || '').replace(/\D/g, '');
     if (!wa) return [];
     let hints = { session, messages, lastText };
@@ -47,6 +57,7 @@ function createAutoLabelSync({ labels, messageStore }) {
     if (
       !inferred.length &&
       messages == null &&
+      allowTranscriptScan &&
       !scannedEmpty.has(wa) &&
       messageStore &&
       typeof messageStore.listMessages === 'function'
@@ -57,6 +68,7 @@ function createAutoLabelSync({ labels, messageStore }) {
       if (!inferred.length) scannedEmpty.add(wa);
     }
     if (!inferred.length) {
+      if (Array.isArray(existingLabelIds)) return existingLabelIds;
       return labels.getChatLabelIds(wa);
     }
     scannedEmpty.delete(wa);
@@ -126,9 +138,19 @@ function createAgentRouter({
     express.static(path.join(__dirname, '../../public/agent'))
   );
 
-  router.get('/api/status', (_req, res) => {
+  router.get('/api/status', async (_req, res) => {
     const diagnostics = require('../webhook/diagnostics');
     const snap = diagnostics.snapshot();
+    let chatCount = null;
+    let chatListError = null;
+    try {
+      if (messageStore && typeof messageStore.listChats === 'function') {
+        const chats = await messageStore.listChats();
+        chatCount = Array.isArray(chats) ? chats.length : null;
+      }
+    } catch (err) {
+      chatListError = err && err.message ? err.message : String(err);
+    }
     res.json({
       enabled,
       passwordConfigured: Boolean(password),
@@ -136,6 +158,9 @@ function createAgentRouter({
       sessionStorePath: config.session.storePath,
       lastSendError: snap.lastSendError || null,
       webhookSignatureRejects: snap.postRejectedSignature || 0,
+      chatCount,
+      chatListError,
+      inboxList: 'light-no-transcript-scan-2026-09-10',
     });
   });
 
@@ -166,37 +191,62 @@ function createAgentRouter({
 
   router.get('/api/chats', requireAuth, async (_req, res) => {
     try {
-      const [readState, allLabels] = await Promise.all([
+      const [readState, labelBundle] = await Promise.all([
         typeof chatReads.getState === 'function'
           ? chatReads.getState()
           : chatReads.getAll().then((reads) => ({ reads, forcedUnread: {} })),
-        labels.listLabels(),
+        labels.getChatLabelsMap(),
       ]);
       const readsMap = readState.reads || readState;
       const forcedUnread = readState.forcedUnread || {};
       const chats = await messageStore.listChats({ lastReadByWa: readsMap });
-      const labelById = new Map((allLabels || []).map((l) => [l.id, l]));
+      const allLabels = labelBundle.labels || [];
+      const labelById = new Map(allLabels.map((l) => [l.id, l]));
       const enriched = [];
       for (const chat of chats) {
-        const session = await sessionStore.get(chat.waNumber);
-        const labelIds = await autoLabels.syncChat(chat.waNumber, {
-          session,
-          lastText: chat.lastText,
-        });
-        let unreadCount = Number(chat.unreadCount) || 0;
-        if (forcedUnread[chat.waNumber]) {
-          unreadCount = Math.max(unreadCount, 1);
+        const existingLabelIds = labelBundle.chatLabels[chat.waNumber] || [];
+        try {
+          const session = await sessionStore.get(chat.waNumber);
+          let labelIds = existingLabelIds;
+          try {
+            // Inbox only: session + last preview text. Full transcript scan
+            // belongs on thread open — otherwise N chats × 150 rows times out
+            // and the desk shows an empty list.
+            labelIds = await autoLabels.syncChat(chat.waNumber, {
+              session,
+              lastText: chat.lastText,
+              allowTranscriptScan: false,
+              existingLabelIds,
+            });
+          } catch (_) {
+            labelIds = existingLabelIds;
+          }
+          let unreadCount = Number(chat.unreadCount) || 0;
+          if (forcedUnread[chat.waNumber]) {
+            unreadCount = Math.max(unreadCount, 1);
+          }
+          enriched.push({
+            ...chat,
+            unreadCount,
+            forcedUnread: Boolean(forcedUnread[chat.waNumber]),
+            status: session ? session.status : 'bot',
+            currentState: session ? session.currentState : null,
+            agentTakenOver: Boolean(session && session.agentTakenOver),
+            labelIds,
+            labels: publicLabels(labelIds, labelById),
+          });
+        } catch (_) {
+          enriched.push({
+            ...chat,
+            unreadCount: Number(chat.unreadCount) || 0,
+            forcedUnread: Boolean(forcedUnread[chat.waNumber]),
+            status: 'bot',
+            currentState: null,
+            agentTakenOver: false,
+            labelIds: existingLabelIds,
+            labels: publicLabels(existingLabelIds, labelById),
+          });
         }
-        enriched.push({
-          ...chat,
-          unreadCount,
-          forcedUnread: Boolean(forcedUnread[chat.waNumber]),
-          status: session ? session.status : 'bot',
-          currentState: session ? session.currentState : null,
-          agentTakenOver: Boolean(session && session.agentTakenOver),
-          labelIds,
-          labels: publicLabels(labelIds, labelById),
-        });
       }
       res.json({ chats: enriched });
     } catch (err) {

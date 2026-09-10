@@ -364,6 +364,54 @@ async function testMessageStoreAndApis() {
       'No License is applied from the bot transcript without a live session'
     );
 
+    // Inbox must not load every transcript (that timed out live and blanked the desk).
+    // When the preview is not the labeling bot line, labels wait for thread open.
+    let listMessageCalls = 0;
+    const realListMessages = messageStore.listMessages.bind(messageStore);
+    messageStore.listMessages = async (...args) => {
+      listMessageCalls += 1;
+      return realListMessages(...args);
+    };
+    await messageStore.append({
+      waNumber: '27829990002',
+      direction: 'out',
+      source: 'bot',
+      text: "Unfortunately a license is a must for vehicle finance — the only times you can use someone else's license would be for the following reasons:",
+    });
+    await messageStore.append({
+      waNumber: '27829990002',
+      direction: 'in',
+      source: 'customer',
+      text: 'ok thanks',
+    });
+    listMessageCalls = 0;
+    const inboxNoScan = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    }).then((r) => r.json());
+    assert.strictEqual(listMessageCalls, 0, 'GET /api/chats must not listMessages');
+    const buried = inboxNoScan.chats.find((c) => c.waNumber === '27829990002');
+    assert.ok(buried, 'chat with buried bot line is still listed');
+    assert.ok(
+      !buried.labels.some((l) => l.name === 'No License'),
+      'inbox does not scan older transcript lines'
+    );
+    const threadScan = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27829990002`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    ).then((r) => r.json());
+    assert.ok(listMessageCalls >= 1, 'opening a thread may scan the transcript');
+    assert.ok(
+      threadScan.labels.some((l) => l.name === 'No License'),
+      'No License is applied when the thread is opened'
+    );
+
+    const status = await fetch(`http://127.0.0.1:${port}/agent/api/status`).then((r) =>
+      r.json()
+    );
+    assert.ok(typeof status.chatCount === 'number');
+    assert.ok(status.chatCount >= 2);
+    assert.strictEqual(status.inboxList, 'light-no-transcript-scan-2026-09-10');
+
     // Paste-image media reply (mocked Graph send).
     const tinyPngBase64 =
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';

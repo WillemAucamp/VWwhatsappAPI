@@ -1436,9 +1436,19 @@
         state.chats = data.chats || [];
         renderLabelFilters();
         renderChatList();
+        if (el('threadError').textContent === 'Could not refresh chat list.') {
+          el('threadError').textContent = '';
+        }
       } catch (err) {
-        if (!silent) el('threadError').textContent = err.message;
+        // Keep the last good list on poll failure so a 500 does not wipe numbers.
         if (err.status === 401) showLogin();
+        if (!silent) {
+          el('threadError').textContent = err.message;
+        } else if (state.chats && state.chats.length) {
+          el('threadError').textContent = 'Could not refresh chat list.';
+        } else {
+          el('threadError').textContent = err.message || 'Could not load chats.';
+        }
       }
     }
 
