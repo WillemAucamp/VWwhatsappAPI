@@ -250,6 +250,56 @@ async function testSyncPersistsInferredLabels() {
   console.log('✓ inferred transcript labels are persisted on the chat');
 }
 
+async function testBackfillWorkerDoesNotUseInboxList() {
+  const { createLabelBackfill } = require('../src/agent/labelBackfill');
+  const { createMessageStore } = require('../src/agent/messageStore');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-backfill-'));
+  const messages = createMessageStore(path.join(dir, 'tx'));
+  const labels = tmpLabelStore();
+  const wa = '27821118888';
+  await messages.append({
+    waNumber: wa,
+    direction: 'out',
+    source: 'bot',
+    text: "Unfortunately a license is a must for vehicle finance — the only times you can use someone else's license would be for the following reasons:",
+  });
+  messages.listChats = async () => {
+    throw new Error('backfill must not call listChats');
+  };
+  const worker = createLabelBackfill({
+    labelStore: labels,
+    messageStore: messages,
+    sessionStore: { listAll: async () => [] },
+    options: { batch: 2, tickMs: 2000, intervalMs: 60000 },
+  });
+  const result = await worker.tick();
+  assert.ok(result.applied >= 1, JSON.stringify(result));
+  assert.deepStrictEqual(await labelNamesFor(labels, wa), ['No License']);
+  // eslint-disable-next-line no-console
+  console.log('✓ background backfill labels a chat without GET /api/chats');
+}
+
+async function testBackfillSkipsWhenEmergency() {
+  const { createLabelBackfill } = require('../src/agent/labelBackfill');
+  const config = require('../src/config');
+  const prev = config.agent.deskEmergency;
+  config.agent.deskEmergency = true;
+  try {
+    const worker = createLabelBackfill({
+      labelStore: tmpLabelStore(),
+      messageStore: { listWaNumbers: async () => ['2782'], listMessages: async () => [] },
+      sessionStore: { listAll: async () => [] },
+    });
+    const result = await worker.tick();
+    assert.strictEqual(result.skipped, true);
+    assert.strictEqual(result.reason, 'disabled');
+  } finally {
+    config.agent.deskEmergency = prev;
+  }
+  // eslint-disable-next-line no-console
+  console.log('✓ backfill skips when AGENT_DESK_EMERGENCY is on');
+}
+
 async function main() {
   await testUnqualifiedOnEmploymentNo();
   await testNoLicenseOnLicenseNo();
@@ -261,6 +311,8 @@ async function main() {
   await testInferFromSessionPath();
   await testInferFromTranscriptWithoutSession();
   await testSyncPersistsInferredLabels();
+  await testBackfillWorkerDoesNotUseInboxList();
+  await testBackfillSkipsWhenEmergency();
   // eslint-disable-next-line no-console
   console.log('\ndesk auto-label tests passed.');
 }

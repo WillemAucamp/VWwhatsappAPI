@@ -184,7 +184,8 @@ function createPostgresMessageStore(connectionString) {
       `SELECT id, wa_number, direction, source, text, reply_id, wamid, at,
               media_kind, media_mime, media_filename, media_byte_length
        FROM (
-         SELECT *
+         SELECT id, wa_number, direction, source, text, reply_id, wamid, at,
+                media_kind, media_mime, media_filename, media_byte_length
          FROM chat_messages
          WHERE wa_number = $1
          ORDER BY at DESC
@@ -288,11 +289,26 @@ function createPostgresMessageStore(connectionString) {
     // Shared pool is also used by labels/shortcuts/reads — do not shut it.
   }
 
+  async function listWaNumbers({ limit = 20, after = '' } = {}) {
+    await ensureSchema();
+    const cap = Math.max(1, Number(limit) || 20);
+    const { rows } = await pool.query(
+      `SELECT DISTINCT wa_number
+         FROM chat_messages
+        WHERE ($1 = '' OR wa_number > $1)
+        ORDER BY wa_number
+        LIMIT $2`,
+      [String(after || ''), cap]
+    );
+    return rows.map((row) => normalizeWa(row.wa_number)).filter(Boolean);
+  }
+
   return {
     append,
     listMessages,
     listChats,
     countChats,
+    listWaNumbers,
     readMedia,
     close,
     ping,

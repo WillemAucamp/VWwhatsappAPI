@@ -3,6 +3,7 @@
 const config = require('./config');
 const { createApp } = require('./app');
 const { FollowUpScheduler } = require('./followup/scheduler');
+const { createLabelBackfill } = require('./agent/labelBackfill');
 const { formatReadinessReport, getMetaReadiness } = require('./meta/readiness');
 
 const app = createApp();
@@ -12,6 +13,13 @@ const followUpScheduler = new FollowUpScheduler({
 });
 
 app.locals.followUpScheduler = followUpScheduler;
+
+const labelBackfill = createLabelBackfill({
+  labelStore: app.locals.labelStore,
+  messageStore: app.locals.messageStore,
+  sessionStore: app.locals.sessionStore,
+});
+app.locals.labelBackfill = labelBackfill;
 
 const server = app.listen(config.port, () => {
   // eslint-disable-next-line no-console
@@ -40,6 +48,7 @@ const server = app.listen(config.port, () => {
   // eslint-disable-next-line no-console
   console.log(formatReadinessReport(getMetaReadiness()));
   followUpScheduler.start();
+  labelBackfill.start();
 
   // Link Meta catalog to this WABA (when WABA id is set) and show it on the number.
   if (config.whatsapp.token && config.whatsapp.phoneNumberId) {
@@ -79,6 +88,9 @@ function shutdown(signal) {
   // eslint-disable-next-line no-console
   console.log(`[wa-prequal] ${signal} — shutting down`);
   followUpScheduler.stop();
+  if (labelBackfill && typeof labelBackfill.stop === 'function') {
+    labelBackfill.stop();
+  }
   server.close(() => process.exit(0));
 }
 

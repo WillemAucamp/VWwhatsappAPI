@@ -190,11 +190,24 @@ function createFileMessageStore(
     return names.filter((name) => name.endsWith('.jsonl')).length;
   }
 
+  async function listWaNumbers({ limit = 20, after = '' } = {}) {
+    const names = await fs.promises.readdir(root);
+    const afterKey = String(after || '');
+    const ids = names
+      .filter((name) => name.endsWith('.jsonl'))
+      .map((name) => name.slice(0, -'.jsonl'.length))
+      .filter((id) => id && id > afterKey)
+      .sort();
+    const cap = Math.max(1, Number(limit) || 20);
+    return ids.slice(0, cap);
+  }
+
   return {
     append,
     listMessages,
     listChats,
     countChats,
+    listWaNumbers,
     readMedia,
     root,
     mediaRoot,

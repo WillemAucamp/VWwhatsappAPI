@@ -59,6 +59,13 @@ const config = {
       String(process.env.AGENT_DESK_EMERGENCY || '').toLowerCase() === 'true',
     inboxEnrichMs: intEnv('AGENT_DESK_INBOX_ENRICH_MS', 1500),
     inboxListMs: intEnv('AGENT_DESK_INBOX_LIST_MS', 8000),
+    // Off-request-thread funnel label backfill. Never runs on GET /api/chats.
+    labelBackfillEnabled:
+      String(process.env.AGENT_DESK_LABEL_BACKFILL || 'true').toLowerCase() !==
+      'false',
+    labelBackfillIntervalMs: intEnv('AGENT_DESK_LABEL_BACKFILL_MS', 20000),
+    labelBackfillBatch: intEnv('AGENT_DESK_LABEL_BACKFILL_BATCH', 2),
+    labelBackfillTickMs: intEnv('AGENT_DESK_LABEL_BACKFILL_TICK_MS', 1500),
   },
 
 

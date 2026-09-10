@@ -311,19 +311,27 @@ function createAgentRouter({
   router.get('/api/chats/:wa', requireAuth, async (req, res) => {
     try {
       const wa = String(req.params.wa || '').replace(/\D/g, '');
-      const [messages, session, allLabels] = await Promise.all([
+      const [messages, session] = await Promise.all([
         messageStore.listMessages(wa),
         sessionStore.get(wa),
-        labels.listLabels(),
       ]);
       let labelIds = [];
+      let allLabels = [];
       try {
+        allLabels = await labels.listLabels();
         labelIds = await autoLabels.syncChat(wa, { session, messages });
       } catch (_) {
         try {
           labelIds = await labels.getChatLabelIds(wa);
         } catch {
           labelIds = [];
+        }
+        if (!allLabels.length) {
+          try {
+            allLabels = await labels.listLabels();
+          } catch {
+            allLabels = [];
+          }
         }
       }
       // Opening a thread marks it read for the agent desk (bot path untouched).

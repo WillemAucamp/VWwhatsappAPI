@@ -471,6 +471,65 @@ async function testMessageStoreAndApis() {
   }
 }
 
+async function testThreadOpenReturnsWhenLabelWriteFails() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-thread-label-'));
+  const messageStore = createMessageStore(dir);
+  await messageStore.append({
+    waNumber: '27820008888',
+    direction: 'in',
+    source: 'customer',
+    text: 'hello from customer',
+  });
+  const inner = createLabelStore(path.join(dir, 'labels.json'));
+  const labelStore = {
+    listLabels: (...args) => inner.listLabels(...args),
+    createLabel: (...args) => inner.createLabel(...args),
+    updateLabel: (...args) => inner.updateLabel(...args),
+    removeLabel: (...args) => inner.removeLabel(...args),
+    getChatLabelIds: (...args) => inner.getChatLabelIds(...args),
+    getChatLabelsMap: (...args) => inner.getChatLabelsMap(...args),
+    setChatLabels: (...args) => inner.setChatLabels(...args),
+    addChatLabelByName: async () => {
+      throw new Error('label write boom');
+    },
+    colors: inner.colors,
+  };
+  const sessionStore = new MemorySessionStore();
+  const engine = new FsmEngine({
+    sessionStore,
+    leadLogger: new CapturingLogger(),
+    sendMessage: async () => ({ messages: [{ id: 'wamid.out' }] }),
+    notifyAgent: async () => ({ delivered: false }),
+  });
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/agent',
+    createAgentRouter({
+      engine,
+      sessionStore,
+      messageStore,
+      shortcutStore: createShortcutStore(path.join(dir, 'shortcuts.json')),
+      labelStore,
+      chatReadStore: createChatReadStore(path.join(dir, 'chat_reads.json')),
+      sendMessage: async () => ({ messages: [{ id: 'wamid.out' }] }),
+    })
+  );
+  const { server, port } = await listen(app);
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/agent/api/chats/27820008888`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    });
+    const body = await res.json();
+    assert.strictEqual(res.status, 200, JSON.stringify(body));
+    assert.ok(body.messages.some((m) => m.text === 'hello from customer'));
+    // eslint-disable-next-line no-console
+    console.log('✓ thread open still returns messages when label write fails');
+  } finally {
+    server.close();
+  }
+}
+
 async function testInboxSurvivesHangingLabels() {
   const prevEnrich = config.agent.inboxEnrichMs;
   config.agent.inboxEnrichMs = 80;
@@ -494,6 +553,7 @@ async function testInboxSurvivesHangingLabels() {
     getChatLabelsMap: () => new Promise(() => {}),
     colors: inner.colors,
   };
+  messageStore.listMessages = () => new Promise(() => {});
   const sessionStore = new MemorySessionStore();
   const engine = new FsmEngine({
     sessionStore,
@@ -526,7 +586,7 @@ async function testInboxSurvivesHangingLabels() {
     assert.ok(body.chats.find((c) => c.waNumber === '27820009999'));
     assert.ok(Date.now() - started < 2000, 'hanging labels must not block the inbox');
     // eslint-disable-next-line no-console
-    console.log('✓ inbox list returns while label map hangs');
+    console.log('✓ inbox list returns while label map and listMessages hang');
   } finally {
     config.agent.inboxEnrichMs = prevEnrich;
     server.close();
@@ -535,6 +595,7 @@ async function testInboxSurvivesHangingLabels() {
 
 async function main() {
   await testMessageStoreAndApis();
+  await testThreadOpenReturnsWhenLabelWriteFails();
   await testInboxSurvivesHangingLabels();
   // eslint-disable-next-line no-console
   console.log('\nagent desk tests passed.');
