@@ -9,7 +9,9 @@ const config = require('../config');
  */
 
 const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** Desk / inbound accept up to 16MB. Meta inline image send is still 5MB. */
+const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
+const GRAPH_INLINE_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function messagesUrl() {
   const { graphBaseUrl, apiVersion, phoneNumberId } = config.whatsapp;
@@ -41,7 +43,7 @@ function assertImagePayload({ mimeType, byteLength }) {
     throw err;
   }
   if (!byteLength || byteLength > MAX_IMAGE_BYTES) {
-    const err = new Error('Image must be under 5MB.');
+    const err = new Error('Image must be under 16MB.');
     err.code = 'WHATSAPP_MEDIA_TOO_LARGE';
     err.status = 400;
     throw err;
@@ -334,6 +336,27 @@ async function cloudApiSendImage(to, { mediaId, caption } = {}) {
   });
 }
 
+async function cloudApiSendDocument(to, { mediaId, caption, filename } = {}) {
+  requireCredentials();
+  if (!mediaId) {
+    const err = new Error('document mediaId required');
+    err.code = 'WHATSAPP_MEDIA_ID_MISSING';
+    throw err;
+  }
+  const document = { id: String(mediaId) };
+  const cap = caption != null ? String(caption).trim() : '';
+  if (cap) document.caption = cap.slice(0, 1024);
+  if (filename) document.filename = String(filename).slice(0, 240);
+
+  return graphPost({
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: digitsOnly(to),
+    type: 'document',
+    document,
+  });
+}
+
 /**
  * @param {string} to E.164 WhatsApp number (digits)
  * @param {object} payload Transport-agnostic payload
@@ -363,24 +386,44 @@ async function cloudApiSendMessage(to, payload = {}) {
 
   if (
     payload.type === 'image' ||
+    payload.type === 'document' ||
     payload.mediaId ||
     payload.mediaBuffer ||
     payload.imageBase64
   ) {
+    let buffer = payload.mediaBuffer;
+    if (!buffer && payload.imageBase64) {
+      buffer = Buffer.from(String(payload.imageBase64), 'base64');
+    }
     let mediaId = payload.mediaId ? String(payload.mediaId) : '';
+    const mimeType = payload.mimeType || payload.mediaMimeType;
+    const filename = payload.filename;
     if (!mediaId) {
-      let buffer = payload.mediaBuffer;
-      if (!buffer && payload.imageBase64) {
-        buffer = Buffer.from(String(payload.imageBase64), 'base64');
-      }
       const uploaded = await uploadMedia({
         buffer,
-        mimeType: payload.mimeType || payload.mediaMimeType,
-        filename: payload.filename,
+        mimeType,
+        filename,
       });
       mediaId = uploaded.id;
     }
     const caption = joinTextAndLink(payload.text, payload.link) || payload.caption || '';
+    // Meta inline images max out at 5MB; larger desk pastes go as documents.
+    const asDocument =
+      payload.type === 'document' ||
+      (buffer && buffer.length > GRAPH_INLINE_IMAGE_BYTES);
+    if (asDocument) {
+      return cloudApiSendDocument(toDigits, {
+        mediaId,
+        caption,
+        filename:
+          filename ||
+          (normalizeImageMime(mimeType) === 'image/png'
+            ? 'image.png'
+            : normalizeImageMime(mimeType) === 'image/webp'
+              ? 'image.webp'
+              : 'image.jpg'),
+      });
+    }
     return cloudApiSendImage(toDigits, { mediaId, caption });
   }
 
@@ -744,6 +787,7 @@ module.exports = {
   cloudApiSendTemplate,
   cloudApiSendInteractive,
   cloudApiSendImage,
+  cloudApiSendDocument,
   uploadMedia,
   downloadMedia,
   buildInteractiveGraph,
@@ -760,4 +804,5 @@ module.exports = {
   notifyAgent,
   IMAGE_MIME_TYPES,
   MAX_IMAGE_BYTES,
+  GRAPH_INLINE_IMAGE_BYTES,
 };

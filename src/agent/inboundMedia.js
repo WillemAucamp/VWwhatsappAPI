@@ -19,7 +19,7 @@ const DOCUMENT_MIME_TYPES = new Set([
   'text/plain',
 ]);
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
 const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
 
 function normalizeMime(mimeType) {
@@ -78,7 +78,7 @@ function assertInboundMedia({ kind, mimeType, byteLength }) {
       throw err;
     }
     if (!byteLength || byteLength > MAX_IMAGE_BYTES) {
-      const err = new Error('Inbound image must be under 5MB');
+      const err = new Error('Inbound image must be under 16MB');
       err.code = 'INBOUND_MEDIA_TOO_LARGE';
       err.status = 413;
       throw err;

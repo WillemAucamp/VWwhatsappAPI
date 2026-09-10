@@ -1537,8 +1537,8 @@
         el('threadError').textContent = 'Only JPEG, PNG, or WebP images are supported.';
         return;
       }
-      if (file.size > 5 * 1024 * 1024) {
-        el('threadError').textContent = 'Image must be under 5MB.';
+      if (file.size > 16 * 1024 * 1024) {
+        el('threadError').textContent = 'Image must be under 16MB.';
         return;
       }
       el('threadError').textContent = '';
