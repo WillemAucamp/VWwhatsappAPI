@@ -1,6 +1,6 @@
 'use strict';
 
-const { Pool } = require('pg');
+const { getSharedPool, normalizeDatabaseUrl } = require('./pg');
 
 /**
  * Cloud Postgres / Supabase-backed transcript store for the agent desk.
@@ -54,34 +54,6 @@ function mapRow(row) {
   return out;
 }
 
-/**
- * Supabase passwords often include ! @ # etc. If those are left raw in the
- * URI, some hosts (Render env parsing / URL libraries) reject the string.
- * Re-encode only the password segment when needed.
- */
-function encodePassword(password) {
-  // encodeURIComponent leaves ! ' ( ) * unescaped; percent-encode those too.
-  return encodeURIComponent(password).replace(
-    /[!'()*]/g,
-    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`
-  );
-}
-
-function normalizeDatabaseUrl(connectionString) {
-  const raw = String(connectionString || '').trim();
-  if (!raw) return raw;
-  const m = raw.match(/^(postgres(?:ql)?:\/\/)([^:/?@]+):([^@]+)@(.+)$/i);
-  if (!m) return raw;
-  const [, scheme, user, password, rest] = m;
-  let decoded = password;
-  try {
-    decoded = decodeURIComponent(password);
-  } catch {
-    decoded = password;
-  }
-  return `${scheme}${user}:${encodePassword(decoded)}@${rest}`;
-}
-
 function normalizeWa(wa) {
   return String(wa || '').replace(/\D/g, '');
 }
@@ -112,15 +84,7 @@ function createPostgresMessageStore(connectionString) {
     throw new Error('DATABASE_URL is required for MESSAGE_STORE=postgres');
   }
 
-  const normalizedUrl = normalizeDatabaseUrl(connectionString);
-  const pool = new Pool({
-    connectionString: normalizedUrl,
-    ssl: normalizedUrl.includes('localhost')
-      ? undefined
-      : { rejectUnauthorized: false },
-    max: 5,
-    connectionTimeoutMillis: 15000,
-  });
+  const pool = getSharedPool(connectionString);
 
   let ready = null;
   function ensureSchema() {
@@ -251,45 +215,62 @@ function createPostgresMessageStore(connectionString) {
     };
   }
 
+  async function countChats() {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT COUNT(DISTINCT wa_number)::int AS n FROM chat_messages`
+    );
+    return rows[0] && rows[0].n != null ? Number(rows[0].n) : 0;
+  }
+
   async function listChats({ lastReadByWa = {} } = {}) {
     await ensureSchema();
     const reads = normalizeReadsMap(lastReadByWa);
-    const readsJson = JSON.stringify(reads);
+    // Two set-based scans beat N correlated COUNTs against BYTEA rows.
+    // Do not select media_bytes — TOAST would stall the inbox.
     const { rows } = await pool.query(
-      `SELECT DISTINCT ON (wa_number)
-         wa_number,
-         at,
-         text,
-         direction,
-         source,
-         (SELECT COUNT(*)::int FROM chat_messages c2 WHERE c2.wa_number = c.wa_number) AS message_count,
-         (SELECT COUNT(*)::int
-            FROM chat_messages c_in
-           WHERE c_in.wa_number = c.wa_number
-             AND c_in.direction = 'in'
-         ) AS inbound_total,
-         (SELECT COUNT(*)::int
-            FROM chat_messages c3
-           WHERE c3.wa_number = c.wa_number
-             AND c3.direction = 'in'
-             AND ($1::jsonb ->> regexp_replace(c.wa_number, '\\D', '', 'g')) IS NOT NULL
-             AND c3.at > (($1::jsonb ->> regexp_replace(c.wa_number, '\\D', '', 'g'))::timestamptz)
-         ) AS unread_after_read
-       FROM chat_messages c
-       ORDER BY wa_number, at DESC`,
-      [readsJson]
+      `SELECT
+         latest.wa_number,
+         latest.at,
+         latest.text,
+         latest.direction,
+         latest.source,
+         counts.message_count,
+         counts.inbound_total
+       FROM (
+         SELECT DISTINCT ON (wa_number)
+           wa_number, at, text, direction, source
+         FROM chat_messages
+         ORDER BY wa_number, at DESC
+       ) latest
+       JOIN (
+         SELECT
+           wa_number,
+           COUNT(*)::int AS message_count,
+           COUNT(*) FILTER (WHERE direction = 'in')::int AS inbound_total
+         FROM chat_messages
+         GROUP BY wa_number
+       ) counts ON counts.wa_number = latest.wa_number`
     );
     return rows
       .map((row) => {
         const wa = normalizeWa(row.wa_number);
         const since = reads[wa] || null;
-        // Never opened: count every inbound message so bot replies don't hide unread.
-        let unreadCount = since
-          ? row.unread_after_read || 0
-          : row.inbound_total || 0;
+        const lastAt =
+          row.at instanceof Date ? row.at.toISOString() : String(row.at);
+        const customerLast =
+          row.direction === 'in' || row.source === 'customer';
+        let unreadCount;
+        if (!since) {
+          unreadCount = row.inbound_total || 0;
+        } else if (customerLast && String(lastAt) > String(since)) {
+          unreadCount = 1;
+        } else {
+          unreadCount = 0;
+        }
         const chat = {
           waNumber: wa || String(row.wa_number || ''),
-          lastAt: row.at instanceof Date ? row.at.toISOString() : String(row.at),
+          lastAt,
           lastText: row.text,
           lastDirection: row.direction,
           lastSource: row.source,
@@ -304,13 +285,14 @@ function createPostgresMessageStore(connectionString) {
   }
 
   async function close() {
-    await pool.end();
+    // Shared pool is also used by labels/shortcuts/reads — do not shut it.
   }
 
   return {
     append,
     listMessages,
     listChats,
+    countChats,
     readMedia,
     close,
     ping,

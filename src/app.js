@@ -145,7 +145,8 @@ function createApp(overrides = {}) {
           labelStore && labelStore.backend ? labelStore.backend : 'file',
         labelsCatalog: 'cemented-2026-09-10',
         // Inbox list must not scan every transcript (blank desk on timeout).
-        inboxList: 'light-no-transcript-scan-2026-09-10',
+        inboxList: 'raw-list-2026-09-10',
+        emergency: Boolean(config.agent.deskEmergency),
       },
     });
   });

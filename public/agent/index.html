@@ -897,11 +897,13 @@
           <button type="button" class="icon-btn" id="menuBtn" aria-label="Menu" title="Menu">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
           </button>
-          <button type="button" class="fab" id="refreshBtn" aria-label="Refresh chats" title="Refresh">
+          <button type="button" class="fab" id="newMsgBtn" aria-label="Message a number" title="Message a number">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
           </button>
           <div id="sideMenu" class="menu hidden" role="menu">
             <button type="button" id="menuRefresh" role="menuitem">Refresh</button>
+            <button type="button" id="menuEmergencyMsg" role="menuitem">Emergency message…</button>
+            <button type="button" id="menuEmergencyInbox" role="menuitem">Emergency inbox</button>
             <button type="button" id="menuShortcuts" role="menuitem">Manage shortcuts</button>
             <button type="button" id="menuLabels" role="menuitem">Manage labels</button>
             <button type="button" id="logoutBtn" role="menuitem">Log out</button>
@@ -909,6 +911,7 @@
         </div>
       </div>
       <div id="authBanner" class="banner danger hidden"></div>
+      <div id="inboxBanner" class="banner hidden"></div>
       <div class="search-bar">
         <input id="chatSearch" type="search" inputmode="tel" autocomplete="off" placeholder="Search number" aria-label="Search chats by number" />
       </div>
@@ -1045,6 +1048,29 @@
     </div>
   </div>
 
+  <!-- Emergency / new message by number -->
+  <div id="emergencyModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal">
+      <h3>Message a number</h3>
+      <p class="modal-sub">Works even when the chat list is empty. Takes over the bot for that number so you can still reach the customer.</p>
+      <form id="emergencyForm">
+        <div class="form-row">
+          <label for="emergencyWa">WhatsApp number</label>
+          <input id="emergencyWa" type="tel" inputmode="tel" autocomplete="off" placeholder="2782…" required />
+        </div>
+        <div class="form-row">
+          <label for="emergencyText">Message</label>
+          <textarea id="emergencyText" rows="5" placeholder="Hi, this is VW Melrose…" required></textarea>
+        </div>
+        <div class="error" id="emergencyError"></div>
+        <div class="modal-actions">
+          <button type="button" class="secondary" id="closeEmergencyModal">Cancel</button>
+          <button type="submit" id="emergencySendBtn">Send</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script src="/agent/static/emojis.js"></script>
   <script src="/agent/static/deskListFilters.js"></script>
   <script>
@@ -1069,6 +1095,7 @@
       editingLabelId: null,
       assignDraft: [],
       sending: false,
+      emergencyInbox: localStorage.getItem('agentEmergencyInbox') === '1',
     };
 
     const el = (id) => document.getElementById(id);
@@ -1079,21 +1106,38 @@
         options.headers || {}
       );
       if (state.token) headers.Authorization = 'Bearer ' + state.token;
-      const res = await fetch('/agent' + path, { ...options, headers, credentials: 'same-origin' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const err = new Error(data.error || res.statusText);
-        err.status = res.status;
-        err.data = data;
+      const timeoutMs = options.timeoutMs || 12000;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      const fetchOpts = { ...options, headers, credentials: 'same-origin', signal: ctrl.signal };
+      delete fetchOpts.timeoutMs;
+      try {
+        const res = await fetch('/agent' + path, fetchOpts);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = new Error(data.error || res.statusText);
+          err.status = res.status;
+          err.data = data;
+          throw err;
+        }
+        return data;
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          const timeout = new Error('Chat list timed out');
+          timeout.status = 408;
+          throw timeout;
+        }
         throw err;
+      } finally {
+        clearTimeout(timer);
       }
-      return data;
     }
 
     async function showApp() {
       el('login').classList.add('hidden');
       el('app').classList.remove('hidden');
       refreshAuthBanner();
+      el('chatList').innerHTML = '<div class="empty" style="margin:24px auto;">Loading chats…</div>';
       await loadDeskMeta();
       await loadChats();
       if (state.poll) clearInterval(state.poll);
@@ -1176,9 +1220,15 @@
     }
     el('logoutBtn').addEventListener('click', doLogout);
     el('menuRefresh').addEventListener('click', () => { closeMenus(); loadChats(); });
-    el('refreshBtn').addEventListener('click', () => loadChats());
     el('menuShortcuts').addEventListener('click', () => { closeMenus(); openShortcutsModal(); });
     el('menuLabels').addEventListener('click', () => { closeMenus(); openLabelsModal(); });
+    el('newMsgBtn').addEventListener('click', () => openEmergencyModal());
+    el('menuEmergencyMsg').addEventListener('click', () => { closeMenus(); openEmergencyModal(); });
+    el('menuEmergencyInbox').addEventListener('click', () => {
+      closeMenus();
+      setEmergencyInbox(!state.emergencyInbox);
+      loadChats();
+    });
 
     async function loadDeskMeta() {
       try {
@@ -1430,25 +1480,144 @@
       });
     }
 
-    async function loadChats(silent) {
+    function setInboxBanner(text, danger) {
+      const banner = el('inboxBanner');
+      if (!banner) return;
+      if (!text) {
+        banner.classList.add('hidden');
+        banner.textContent = '';
+        return;
+      }
+      banner.textContent = text;
+      banner.classList.toggle('danger', Boolean(danger));
+      banner.classList.remove('hidden');
+    }
+
+    function setEmergencyInbox(on) {
+      state.emergencyInbox = Boolean(on);
+      localStorage.setItem('agentEmergencyInbox', state.emergencyInbox ? '1' : '0');
+      const btn = el('menuEmergencyInbox');
+      if (btn) btn.textContent = state.emergencyInbox ? 'Emergency inbox (on)' : 'Emergency inbox';
+    }
+
+    function openEmergencyModal(prefillWa) {
+      el('emergencyError').textContent = '';
+      if (prefillWa) el('emergencyWa').value = String(prefillWa).replace(/\D/g, '');
+      el('emergencyModal').classList.remove('hidden');
+      el('emergencyWa').focus();
+    }
+
+    function closeEmergencyModal() {
+      el('emergencyModal').classList.add('hidden');
+    }
+
+    el('closeEmergencyModal').addEventListener('click', closeEmergencyModal);
+    el('emergencyModal').addEventListener('click', (e) => {
+      if (e.target === el('emergencyModal')) closeEmergencyModal();
+    });
+    el('emergencyForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      el('emergencyError').textContent = '';
+      const wa = String(el('emergencyWa').value || '').replace(/\D/g, '');
+      const text = String(el('emergencyText').value || '').trim();
+      if (!wa || !text) {
+        el('emergencyError').textContent = 'Number and message are required.';
+        return;
+      }
+      const btn = el('emergencySendBtn');
+      btn.disabled = true;
       try {
-        const data = await api('/api/chats');
+        await api('/api/chats/' + wa + '/reply', {
+          method: 'POST',
+          body: JSON.stringify({ text }),
+          timeoutMs: 20000,
+        });
+        closeEmergencyModal();
+        el('emergencyText').value = '';
+        state.selected = wa;
+        await loadChats();
+        await loadThread(wa);
+      } catch (err) {
+        el('emergencyError').textContent = err.message || 'Send failed';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    async function loadChats(silent) {
+      if (!silent && !state.chats.length) {
+        el('chatList').innerHTML = '<div class="empty" style="margin:24px auto;">Loading chats…</div>';
+      }
+      const qs = state.emergencyInbox ? '?emergency=1' : '';
+      try {
+        let data = await api('/api/chats' + qs, { timeoutMs: 10000 });
+        if ((!data.chats || !data.chats.length) && !state.emergencyInbox) {
+          let stored = 0;
+          try {
+            const status = await api('/api/status', { timeoutMs: 5000 });
+            stored = Number(status.chatCount) || 0;
+          } catch (_) {}
+          if (stored > 0) {
+            setEmergencyInbox(true);
+            data = await api('/api/chats?emergency=1', { timeoutMs: 10000 });
+            setInboxBanner(
+              stored + ' chats are stored. Inbox switched to emergency list so numbers stay visible.',
+              true
+            );
+          }
+        }
         state.chats = data.chats || [];
         renderLabelFilters();
         renderChatList();
+        if (state.emergencyInbox && state.chats.length) {
+          setInboxBanner(
+            'Emergency inbox is on — numbers load without labels/unread extras. Message a number from + if a chat is missing.',
+            false
+          );
+        } else if (!state.emergencyInbox) {
+          setInboxBanner('');
+        }
         if (el('threadError').textContent === 'Could not refresh chat list.') {
           el('threadError').textContent = '';
         }
+        const menu = el('menuEmergencyInbox');
+        if (menu) menu.textContent = state.emergencyInbox ? 'Emergency inbox (on)' : 'Emergency inbox';
       } catch (err) {
-        // Keep the last good list on poll failure so a 500 does not wipe numbers.
         if (err.status === 401) showLogin();
+        if (!state.emergencyInbox) {
+          try {
+            setEmergencyInbox(true);
+            const data = await api('/api/chats?emergency=1', { timeoutMs: 10000 });
+            state.chats = data.chats || [];
+            renderLabelFilters();
+            renderChatList();
+            setInboxBanner(
+              'Full inbox failed (' + (err.message || 'timeout') + '). Showing emergency list. Use + to message a number.',
+              true
+            );
+            return;
+          } catch (_) {}
+        }
+        let stored = '';
+        try {
+          const status = await api('/api/status', { timeoutMs: 5000 });
+          if (status.chatCount) stored = ' Postgres still has ' + status.chatCount + ' chats.';
+        } catch (_) {}
+        const msg = (err.message || 'Could not load chats.') + stored + ' Use + to message a number.';
         if (!silent) {
-          el('threadError').textContent = err.message;
+          el('threadError').textContent = msg;
+          if (!state.chats.length) {
+            el('chatList').innerHTML =
+              '<div class="empty" style="margin:24px auto;">' +
+              escapeHtml(msg) +
+              '</div>';
+          }
         } else if (state.chats && state.chats.length) {
           el('threadError').textContent = 'Could not refresh chat list.';
         } else {
-          el('threadError').textContent = err.message || 'Could not load chats.';
+          el('threadError').textContent = msg;
         }
+        setInboxBanner(msg, true);
       }
     }
 

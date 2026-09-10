@@ -185,10 +185,16 @@ function createFileMessageStore(
     return chats;
   }
 
+  async function countChats() {
+    const names = await fs.promises.readdir(root);
+    return names.filter((name) => name.endsWith('.jsonl')).length;
+  }
+
   return {
     append,
     listMessages,
     listChats,
+    countChats,
     readMedia,
     root,
     mediaRoot,

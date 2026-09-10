@@ -31,6 +31,24 @@ function publicLabels(labelIds, labelById) {
     .map((l) => ({ id: l.id, name: l.name, color: l.color }));
 }
 
+function withTimeout(promise, ms, fallback) {
+  const wait = Number(ms);
+  if (!promise || !(wait > 0)) return Promise.resolve(fallback);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), wait);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      }
+    );
+  });
+}
+
 /**
  * Attach funnel labels from the live session and/or transcript.
  * Inbox list must stay light: never scan full transcripts there (that timed
@@ -144,7 +162,9 @@ function createAgentRouter({
     let chatCount = null;
     let chatListError = null;
     try {
-      if (messageStore && typeof messageStore.listChats === 'function') {
+      if (messageStore && typeof messageStore.countChats === 'function') {
+        chatCount = await messageStore.countChats();
+      } else if (messageStore && typeof messageStore.listChats === 'function') {
         const chats = await messageStore.listChats();
         chatCount = Array.isArray(chats) ? chats.length : null;
       }
@@ -160,7 +180,8 @@ function createAgentRouter({
       webhookSignatureRejects: snap.postRejectedSignature || 0,
       chatCount,
       chatListError,
-      inboxList: 'light-no-transcript-scan-2026-09-10',
+      inboxList: 'raw-list-2026-09-10',
+      emergency: Boolean(config.agent.deskEmergency),
     });
   });
 
@@ -189,66 +210,83 @@ function createAgentRouter({
     res.json({ ok: true });
   });
 
-  router.get('/api/chats', requireAuth, async (_req, res) => {
+  router.get('/api/chats', requireAuth, async (req, res) => {
     try {
-      const [readState, labelBundle] = await Promise.all([
-        typeof chatReads.getState === 'function'
-          ? chatReads.getState()
-          : chatReads.getAll().then((reads) => ({ reads, forcedUnread: {} })),
-        labels.getChatLabelsMap(),
-      ]);
-      const readsMap = readState.reads || readState;
-      const forcedUnread = readState.forcedUnread || {};
-      const chats = await messageStore.listChats({ lastReadByWa: readsMap });
-      const allLabels = labelBundle.labels || [];
-      const labelById = new Map(allLabels.map((l) => [l.id, l]));
-      const enriched = [];
-      for (const chat of chats) {
-        const existingLabelIds = labelBundle.chatLabels[chat.waNumber] || [];
-        try {
-          const session = await sessionStore.get(chat.waNumber);
-          let labelIds = existingLabelIds;
-          try {
-            // Inbox only: session + last preview text. Full transcript scan
-            // belongs on thread open — otherwise N chats × 150 rows times out
-            // and the desk shows an empty list.
-            labelIds = await autoLabels.syncChat(chat.waNumber, {
-              session,
-              lastText: chat.lastText,
-              allowTranscriptScan: false,
-              existingLabelIds,
-            });
-          } catch (_) {
-            labelIds = existingLabelIds;
+      const emergency =
+        Boolean(config.agent.deskEmergency) ||
+        String((req.query && req.query.emergency) || '') === '1';
+      const enrichMs = Number(config.agent.inboxEnrichMs) || 1500;
+      const listMs = Number(config.agent.inboxListMs) || 8000;
+
+      let readsMap = {};
+      let forcedUnread = {};
+      let labelBundle = { labels: [], chatLabels: {} };
+      const sessionByWa = new Map();
+
+      if (!emergency) {
+        const [readState, labelsMap, sessions] = await Promise.all([
+          withTimeout(
+            typeof chatReads.getState === 'function'
+              ? chatReads.getState()
+              : chatReads.getAll().then((reads) => ({ reads, forcedUnread: {} })),
+            enrichMs,
+            null
+          ),
+          withTimeout(labels.getChatLabelsMap(), enrichMs, null),
+          sessionStore && typeof sessionStore.listAll === 'function'
+            ? withTimeout(sessionStore.listAll(), enrichMs, null)
+            : Promise.resolve(null),
+        ]);
+        if (readState) {
+          readsMap = readState.reads || readState;
+          forcedUnread = readState.forcedUnread || {};
+        }
+        if (labelsMap && typeof labelsMap === 'object') {
+          labelBundle = labelsMap;
+        }
+        if (Array.isArray(sessions)) {
+          for (const session of sessions) {
+            const wa = String((session && session.waNumber) || '').replace(/\D/g, '');
+            if (wa) sessionByWa.set(wa, session);
           }
-          let unreadCount = Number(chat.unreadCount) || 0;
-          if (forcedUnread[chat.waNumber]) {
-            unreadCount = Math.max(unreadCount, 1);
-          }
-          enriched.push({
-            ...chat,
-            unreadCount,
-            forcedUnread: Boolean(forcedUnread[chat.waNumber]),
-            status: session ? session.status : 'bot',
-            currentState: session ? session.currentState : null,
-            agentTakenOver: Boolean(session && session.agentTakenOver),
-            labelIds,
-            labels: publicLabels(labelIds, labelById),
-          });
-        } catch (_) {
-          enriched.push({
-            ...chat,
-            unreadCount: Number(chat.unreadCount) || 0,
-            forcedUnread: Boolean(forcedUnread[chat.waNumber]),
-            status: 'bot',
-            currentState: null,
-            agentTakenOver: false,
-            labelIds: existingLabelIds,
-            labels: publicLabels(existingLabelIds, labelById),
-          });
         }
       }
-      res.json({ chats: enriched });
+
+      let chats = await withTimeout(
+        messageStore.listChats({ lastReadByWa: readsMap }),
+        listMs,
+        null
+      );
+      if (!Array.isArray(chats)) {
+        chats = await withTimeout(messageStore.listChats(), listMs, []);
+      }
+      if (!Array.isArray(chats)) chats = [];
+
+      const labelById = new Map((labelBundle.labels || []).map((l) => [l.id, l]));
+      const enriched = chats.map((chat) => {
+        const existingLabelIds = (labelBundle.chatLabels &&
+          labelBundle.chatLabels[chat.waNumber]) || [];
+        const session = sessionByWa.get(chat.waNumber) || null;
+        let unreadCount = Number(chat.unreadCount) || 0;
+        if (forcedUnread[chat.waNumber]) {
+          unreadCount = Math.max(unreadCount, 1);
+        }
+        return {
+          ...chat,
+          unreadCount,
+          forcedUnread: Boolean(forcedUnread[chat.waNumber]),
+          status: session ? session.status : 'bot',
+          currentState: session ? session.currentState : null,
+          agentTakenOver: Boolean(session && session.agentTakenOver),
+          labelIds: existingLabelIds,
+          labels: publicLabels(existingLabelIds, labelById),
+        };
+      });
+      res.json({
+        chats: enriched,
+        emergency,
+        inbox: 'raw-list-2026-09-10',
+      });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });
     }
@@ -278,7 +316,16 @@ function createAgentRouter({
         sessionStore.get(wa),
         labels.listLabels(),
       ]);
-      const labelIds = await autoLabels.syncChat(wa, { session, messages });
+      let labelIds = [];
+      try {
+        labelIds = await autoLabels.syncChat(wa, { session, messages });
+      } catch (_) {
+        try {
+          labelIds = await labels.getChatLabelIds(wa);
+        } catch {
+          labelIds = [];
+        }
+      }
       // Opening a thread marks it read for the agent desk (bot path untouched).
       let lastReadAt = null;
       try {

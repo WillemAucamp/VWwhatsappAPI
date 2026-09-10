@@ -54,6 +54,11 @@ const config = {
     // file | postgres — defaults to postgres when DATABASE_URL is set (Supabase).
     messageStore: (process.env.MESSAGE_STORE || '').toLowerCase(),
     databaseUrl: process.env.DATABASE_URL || '',
+    // Skip unread/label/session enrichment on the inbox list (Render emergency).
+    deskEmergency:
+      String(process.env.AGENT_DESK_EMERGENCY || '').toLowerCase() === 'true',
+    inboxEnrichMs: intEnv('AGENT_DESK_INBOX_ENRICH_MS', 1500),
+    inboxListMs: intEnv('AGENT_DESK_INBOX_LIST_MS', 8000),
   },
 
 

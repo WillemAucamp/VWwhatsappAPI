@@ -359,9 +359,13 @@ async function testMessageStoreAndApis() {
     }).then((r) => r.json());
     const inferredChat = chatsInferred.chats.find((c) => c.waNumber === '27829990001');
     assert.ok(inferredChat, 'transcript-only chat is listed');
+    const threadInferred = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27829990001`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    ).then((r) => r.json());
     assert.ok(
-      inferredChat.labels.some((l) => l.name === 'No License'),
-      'No License is applied from the bot transcript without a live session'
+      threadInferred.labels.some((l) => l.name === 'No License'),
+      'No License is applied when the thread is opened'
     );
 
     // Inbox must not load every transcript (that timed out live and blanked the desk).
@@ -410,7 +414,14 @@ async function testMessageStoreAndApis() {
     );
     assert.ok(typeof status.chatCount === 'number');
     assert.ok(status.chatCount >= 2);
-    assert.strictEqual(status.inboxList, 'light-no-transcript-scan-2026-09-10');
+    assert.strictEqual(status.inboxList, 'raw-list-2026-09-10');
+
+    const emergencyList = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats?emergency=1`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    ).then((r) => r.json());
+    assert.strictEqual(emergencyList.emergency, true);
+    assert.ok(emergencyList.chats.find((c) => c.waNumber === '27821234567'));
 
     // Paste-image media reply (mocked Graph send).
     const tinyPngBase64 =
@@ -460,8 +471,71 @@ async function testMessageStoreAndApis() {
   }
 }
 
+async function testInboxSurvivesHangingLabels() {
+  const prevEnrich = config.agent.inboxEnrichMs;
+  config.agent.inboxEnrichMs = 80;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-hang-'));
+  const messageStore = createMessageStore(dir);
+  await messageStore.append({
+    waNumber: '27820009999',
+    direction: 'in',
+    source: 'customer',
+    text: 'hello',
+  });
+  const inner = createLabelStore(path.join(dir, 'labels.json'));
+  const labelStore = {
+    listLabels: (...args) => inner.listLabels(...args),
+    createLabel: (...args) => inner.createLabel(...args),
+    updateLabel: (...args) => inner.updateLabel(...args),
+    removeLabel: (...args) => inner.removeLabel(...args),
+    getChatLabelIds: (...args) => inner.getChatLabelIds(...args),
+    setChatLabels: (...args) => inner.setChatLabels(...args),
+    addChatLabelByName: (...args) => inner.addChatLabelByName(...args),
+    getChatLabelsMap: () => new Promise(() => {}),
+    colors: inner.colors,
+  };
+  const sessionStore = new MemorySessionStore();
+  const engine = new FsmEngine({
+    sessionStore,
+    leadLogger: new CapturingLogger(),
+    sendMessage: async () => ({ messages: [{ id: 'wamid.out' }] }),
+    notifyAgent: async () => ({ delivered: false }),
+  });
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/agent',
+    createAgentRouter({
+      engine,
+      sessionStore,
+      messageStore,
+      shortcutStore: createShortcutStore(path.join(dir, 'shortcuts.json')),
+      labelStore,
+      chatReadStore: createChatReadStore(path.join(dir, 'chat_reads.json')),
+      sendMessage: async () => ({ messages: [{ id: 'wamid.out' }] }),
+    })
+  );
+  const { server, port } = await listen(app);
+  const started = Date.now();
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
+      headers: { Authorization: 'Bearer desk-secret' },
+    });
+    const body = await res.json();
+    assert.strictEqual(res.status, 200, JSON.stringify(body));
+    assert.ok(body.chats.find((c) => c.waNumber === '27820009999'));
+    assert.ok(Date.now() - started < 2000, 'hanging labels must not block the inbox');
+    // eslint-disable-next-line no-console
+    console.log('✓ inbox list returns while label map hangs');
+  } finally {
+    config.agent.inboxEnrichMs = prevEnrich;
+    server.close();
+  }
+}
+
 async function main() {
   await testMessageStoreAndApis();
+  await testInboxSurvivesHangingLabels();
   // eslint-disable-next-line no-console
   console.log('\nagent desk tests passed.');
 }
