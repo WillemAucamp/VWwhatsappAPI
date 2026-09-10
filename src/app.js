@@ -138,6 +138,8 @@ function createApp(overrides = {}) {
         emojiPicker: 'agent-emoji-picker-2026-09-09',
         // Paste image from clipboard → WhatsApp media send.
         pasteImage: 'agent-paste-image-2026-09-10',
+        // Inbound customer image/document → desk transcript.
+        inboundMedia: 'agent-inbound-media-2026-09-10',
       },
     });
   });

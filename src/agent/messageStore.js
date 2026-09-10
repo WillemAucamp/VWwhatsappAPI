@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { createPostgresMessageStore } = require('./postgresMessageStore');
+const { extensionForMime } = require('./inboundMedia');
 
 /**
  * Per-number transcript for the agent desk.
@@ -15,13 +16,35 @@ const { createPostgresMessageStore } = require('./postgresMessageStore');
  * - postgres: Supabase / any Postgres via DATABASE_URL
  */
 
-function createFileMessageStore(dir = config.agent.transcriptPath) {
+function createFileMessageStore(
+  dir = config.agent.transcriptPath,
+  mediaDir = config.agent.mediaPath
+) {
   const root = path.resolve(dir);
+  const mediaRoot = path.resolve(mediaDir);
   fs.mkdirSync(root, { recursive: true });
+  fs.mkdirSync(mediaRoot, { recursive: true });
 
   function fileFor(waNumber) {
     const safe = String(waNumber).replace(/[^a-zA-Z0-9_+-]/g, '_');
     return path.join(root, `${safe}.jsonl`);
+  }
+
+  function publicMediaFields(row) {
+    if (!row || !row.mediaKind) return row;
+    const { mediaBuffer, ...rest } = row;
+    return {
+      ...rest,
+      hasMedia: true,
+    };
+  }
+
+  async function writeMediaFile(id, mimeType, buffer) {
+    const ext = extensionForMime(mimeType);
+    const rel = `${String(id).replace(/[^a-zA-Z0-9_-]/g, '_')}.${ext}`;
+    const abs = path.join(mediaRoot, rel);
+    await fs.promises.writeFile(abs, buffer);
+    return { mediaPath: rel, abs };
   }
 
   async function append(message) {
@@ -39,8 +62,29 @@ function createFileMessageStore(dir = config.agent.transcriptPath) {
       wamid: message.wamid || null,
       at: message.at || new Date().toISOString(),
     };
+    if (message.mediaKind) {
+      row.mediaKind = String(message.mediaKind);
+      row.mediaMime = message.mediaMime || message.mimeType || null;
+      row.mediaFilename = message.mediaFilename || message.filename || null;
+      row.mediaByteLength =
+        message.mediaByteLength != null
+          ? Number(message.mediaByteLength)
+          : message.mediaBuffer
+            ? message.mediaBuffer.length
+            : null;
+      if (message.mediaBuffer && message.mediaBuffer.length) {
+        const saved = await writeMediaFile(
+          row.id,
+          row.mediaMime || 'application/octet-stream',
+          message.mediaBuffer
+        );
+        row.mediaPath = saved.mediaPath;
+      } else if (message.mediaPath) {
+        row.mediaPath = String(message.mediaPath);
+      }
+    }
     await fs.promises.appendFile(fileFor(waNumber), `${JSON.stringify(row)}\n`, 'utf8');
-    return row;
+    return publicMediaFields(row);
   }
 
   async function listMessages(waNumber, { limit = 200 } = {}) {
@@ -49,13 +93,45 @@ function createFileMessageStore(dir = config.agent.transcriptPath) {
     const raw = await fs.promises.readFile(file, 'utf8');
     const lines = raw.split('\n').filter(Boolean);
     const sliced = lines.slice(Math.max(0, lines.length - limit));
-    return sliced.map((line) => {
+    return sliced
+      .map((line) => {
+        try {
+          return publicMediaFields(JSON.parse(line));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  }
+
+  async function findMessage(waNumber, messageId) {
+    const file = fileFor(waNumber);
+    if (!fs.existsSync(file)) return null;
+    const raw = await fs.promises.readFile(file, 'utf8');
+    const lines = raw.split('\n').filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
       try {
-        return JSON.parse(line);
+        const row = JSON.parse(lines[i]);
+        if (row && row.id === messageId) return row;
       } catch {
-        return null;
+        // skip
       }
-    }).filter(Boolean);
+    }
+    return null;
+  }
+
+  async function readMedia(waNumber, messageId) {
+    const row = await findMessage(waNumber, messageId);
+    if (!row || !row.mediaKind || !row.mediaPath) return null;
+    const abs = path.join(mediaRoot, path.basename(row.mediaPath));
+    if (!abs.startsWith(mediaRoot) || !fs.existsSync(abs)) return null;
+    const buffer = await fs.promises.readFile(abs);
+    return {
+      buffer,
+      mimeType: row.mediaMime || 'application/octet-stream',
+      filename: row.mediaFilename || path.basename(abs),
+      mediaKind: row.mediaKind,
+    };
   }
 
   async function listChats({ lastReadByWa = {} } = {}) {
@@ -109,7 +185,15 @@ function createFileMessageStore(dir = config.agent.transcriptPath) {
     return chats;
   }
 
-  return { append, listMessages, listChats, root, backend: 'file' };
+  return {
+    append,
+    listMessages,
+    listChats,
+    readMedia,
+    root,
+    mediaRoot,
+    backend: 'file',
+  };
 }
 
 function normalizeWa(wa) {
@@ -169,7 +253,10 @@ function createMessageStore(options) {
     return createPostgresMessageStore(databaseUrl);
   }
 
-  return createFileMessageStore(opts.transcriptPath || config.agent.transcriptPath);
+  return createFileMessageStore(
+    opts.transcriptPath || config.agent.transcriptPath,
+    opts.mediaPath || config.agent.mediaPath
+  );
 }
 
 module.exports = { createMessageStore, createFileMessageStore };

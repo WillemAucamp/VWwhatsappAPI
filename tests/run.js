@@ -17,6 +17,7 @@ const files = [
   'scheduler-terminal-outbound-retry.test.js',
   'followup-inbound-race.test.js',
   'webhook-dedupe.test.js',
+  'inbound-media.test.js',
   'followup-tick-isolation.test.js',
   'meta-readiness.test.js',
   'transport-graph.test.js',

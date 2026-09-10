@@ -448,6 +448,44 @@ async function graphGet(path, fields) {
 }
 
 /**
+ * Download media bytes for an inbound WhatsApp media id.
+ * GET /{media-id} → temporary URL, then GET URL with Bearer token.
+ */
+async function downloadMedia(mediaId) {
+  const { token } = requireCredentials();
+  const id = String(mediaId || '').trim();
+  if (!id) {
+    const err = new Error('media id required');
+    err.code = 'WHATSAPP_MEDIA_ID_MISSING';
+    throw err;
+  }
+  const meta = await graphGet(id);
+  const url = meta && meta.url ? String(meta.url) : '';
+  if (!url) {
+    const err = new Error('WhatsApp media metadata missing url');
+    err.code = 'WHATSAPP_MEDIA_URL_MISSING';
+    err.response = meta;
+    throw err;
+  }
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = new Error(`WhatsApp media download failed: ${res.status}`);
+    err.status = res.status;
+    err.code = 'WHATSAPP_MEDIA_DOWNLOAD_FAILED';
+    throw err;
+  }
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return {
+    buffer,
+    mimeType: meta.mime_type || null,
+    fileSize: meta.file_size != null ? Number(meta.file_size) : buffer.length,
+    sha256: meta.sha256 || null,
+  };
+}
+
+/**
  * Low-level Graph POST to an arbitrary path (not only /messages).
  * @param {string} path e.g. "{phoneNumberId}/whatsapp_commerce_settings"
  * @param {object|null} body JSON body (null → query-only POST)
@@ -707,6 +745,7 @@ module.exports = {
   cloudApiSendInteractive,
   cloudApiSendImage,
   uploadMedia,
+  downloadMedia,
   buildInteractiveGraph,
   joinTextAndLink,
   graphGet,
