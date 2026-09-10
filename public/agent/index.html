@@ -204,18 +204,71 @@
     }
     .menu button:hover:not(:disabled) { background: var(--line-soft); }
 
+    .filter-bar-wrap {
+      position: relative;
+      min-width: 0;
+      background: #fff;
+      border-bottom: 1px solid var(--line-soft);
+    }
     .filter-bar {
       padding: 8px 12px 10px;
-      border-bottom: 1px solid var(--line-soft);
       display: flex;
       flex-wrap: nowrap;
       gap: 8px;
       background: #fff;
       overflow-x: auto;
+      overflow-y: hidden;
+      min-width: 0;
+      max-width: 100%;
       -webkit-overflow-scrolling: touch;
-      scrollbar-width: none;
+      overscroll-behavior-x: contain;
+      scrollbar-width: thin;
+      scrollbar-color: #c5c9cc transparent;
     }
-    .filter-bar::-webkit-scrollbar { display: none; }
+    .filter-bar::-webkit-scrollbar { height: 6px; }
+    .filter-bar::-webkit-scrollbar-track { background: transparent; }
+    .filter-bar::-webkit-scrollbar-thumb {
+      background: #c5c9cc;
+      border-radius: 999px;
+    }
+    .filter-bar-wrap.can-scroll-left::before,
+    .filter-bar-wrap.can-scroll-right::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 6px;
+      width: 36px;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .filter-bar-wrap.can-scroll-left::before {
+      left: 0;
+      background: linear-gradient(to right, #fff, rgba(255,255,255,0));
+    }
+    .filter-bar-wrap.can-scroll-right::after {
+      right: 0;
+      background: linear-gradient(to left, #fff, rgba(255,255,255,0));
+    }
+    .filter-scroll-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(calc(-50% - 2px));
+      z-index: 2;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: #54656f;
+      box-shadow: 0 1px 4px rgba(11, 20, 26, 0.12);
+      display: inline-grid;
+      place-items: center;
+    }
+    .filter-scroll-btn.left { left: 6px; }
+    .filter-scroll-btn.right { right: 6px; }
+    .filter-scroll-btn:hover { background: #f5f6f6; }
+    .filter-scroll-btn svg { width: 16px; height: 16px; fill: currentColor; pointer-events: none; }
     .search-bar {
       padding: 8px 12px 0;
       background: #fff;
@@ -796,7 +849,15 @@
       <div class="search-bar">
         <input id="chatSearch" type="search" inputmode="tel" autocomplete="off" placeholder="Search number" aria-label="Search chats by number" />
       </div>
-      <div class="filter-bar" id="labelFilters"></div>
+      <div class="filter-bar-wrap" id="filterBarWrap">
+        <button type="button" class="filter-scroll-btn left hidden" id="filterScrollLeft" aria-label="Show earlier labels" title="More labels">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+        </button>
+        <div class="filter-bar" id="labelFilters"></div>
+        <button type="button" class="filter-scroll-btn right hidden" id="filterScrollRight" aria-label="Show more labels" title="More labels">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.59 16.59 10 18l6-6-6-6-1.41 1.41L13.17 12z"/></svg>
+        </button>
+      </div>
       <div id="chatList"></div>
 
     </aside>
@@ -1111,6 +1172,51 @@
       return n;
     }
 
+    function updateFilterScrollHints() {
+      const bar = el('labelFilters');
+      const wrap = el('filterBarWrap');
+      const left = el('filterScrollLeft');
+      const right = el('filterScrollRight');
+      if (!bar || !wrap || !left || !right) return;
+      const max = Math.max(0, bar.scrollWidth - bar.clientWidth);
+      const sl = bar.scrollLeft;
+      const canLeft = sl > 2;
+      const canRight = sl < max - 2;
+      left.classList.toggle('hidden', !canLeft);
+      right.classList.toggle('hidden', !canRight);
+      wrap.classList.toggle('can-scroll-left', canLeft);
+      wrap.classList.toggle('can-scroll-right', canRight);
+    }
+
+    function bindFilterBarScroll() {
+      const bar = el('labelFilters');
+      if (!bar || bar.dataset.scrollBound) return;
+      bar.dataset.scrollBound = '1';
+      bar.addEventListener(
+        'wheel',
+        (e) => {
+          if (bar.scrollWidth <= bar.clientWidth + 2) return;
+          if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+          bar.scrollLeft += e.deltaY;
+          e.preventDefault();
+        },
+        { passive: false }
+      );
+      bar.addEventListener('scroll', updateFilterScrollHints, { passive: true });
+      window.addEventListener('resize', updateFilterScrollHints);
+      const step = () => Math.max(160, Math.floor(bar.clientWidth * 0.7));
+      el('filterScrollLeft').addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        bar.scrollBy({ left: -step(), behavior: 'smooth' });
+      });
+      el('filterScrollRight').addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        bar.scrollBy({ left: step(), behavior: 'smooth' });
+      });
+    }
+
     function renderLabelFilters() {
       const bar = el('labelFilters');
       const unreadTotal = countUnreadChats(state.filterLabelId);
@@ -1150,6 +1256,7 @@
           kind: 'label',
         })),
       ];
+      const keepLeft = bar.scrollLeft;
       bar.innerHTML = chips.map((c) => {
         const active = c.active ? 'active' : '';
         const dot = c.color
@@ -1164,6 +1271,7 @@
           '</button>'
         );
       }).join('');
+      bar.scrollLeft = keepLeft;
       bar.querySelectorAll('.filter-chip').forEach((btn) => {
         btn.addEventListener('click', (e) => {
           e.preventDefault();
@@ -1185,6 +1293,8 @@
           renderChatList();
         });
       });
+      bindFilterBarScroll();
+      updateFilterScrollHints();
     }
 
     function chatMatchesFilters(chat) {

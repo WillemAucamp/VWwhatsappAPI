@@ -103,7 +103,9 @@ function testDeskHtmlWiresHelper() {
   );
   assert.ok(html.includes("kind === 'agent'"), 'Agent chip must be wired');
   assert.ok(html.includes('filterAgent'), 'filterAgent state must exist');
-  assert.ok(html.includes('deskStatusBadge'), 'chat list must use deskStatusBadge');
+  assert.ok(html.includes('filter-bar-wrap'), 'filter chips must sit in a scroll wrap');
+  assert.ok(html.includes('filterScrollRight'), 'overflowing labels need a scroll-right control');
+  assert.ok(html.includes('min-width: 0'), 'filter bar must be able to shrink so chips scroll');
   assert.ok(
     !/escapeHtml\(c\.status\)/.test(html),
     'raw session status must not be shown as the pill text'
