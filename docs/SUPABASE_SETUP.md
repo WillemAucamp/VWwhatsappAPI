@@ -1,6 +1,10 @@
-# Persist chat history on Supabase (free cloud Postgres)
+# Persist agent desk data on Supabase (free cloud Postgres)
 
-The agent desk can store WhatsApp transcripts in **Supabase** so history survives Render redeploys. You do **not** install Postgres on your laptop.
+The agent desk can store WhatsApp transcripts **and** your desk settings (shortcuts, labels, unread cursors) in **Supabase** so they survive Render redeploys. You do **not** install Postgres on your laptop.
+
+Desk settings (shortcuts, labels, unread) **always** use Postgres when `DATABASE_URL` is set — even if `MESSAGE_STORE=file`. That way your custom shortcuts/labels replace the defaults permanently and survive Render redeploys.
+
+Saving a shortcut with an existing key (e.g. `greeting`) or a label with an existing name (e.g. `VIP`) **replaces** that entry instead of failing or leaving the old default in place.
 
 ## What to do next (project already created)
 
@@ -23,7 +27,7 @@ The agent desk can store WhatsApp transcripts in **Supabase** so history survive
    - The bot also auto-encodes on connect, but Render is more reliable if you paste the encoded URI.
    - Forgot it? Same page → **Reset database password**, then update the URI.
 
-You do **not** create tables by hand — on first message the bot creates `chat_messages`.
+You do **not** create tables by hand — on first use the bot creates `chat_messages`, `agent_shortcuts`, `agent_labels`, `agent_chat_labels`, `agent_chat_reads`, and `agent_desk_meta`.
 
 ### 2. Paste it into Render
 
@@ -38,10 +42,12 @@ Save → **Manual Deploy** (or wait for auto-deploy of this branch).
 
 ### 3. Confirm
 
-1. Open `https://your-host/health` → `agentDesk.messageStore` should be `"postgres"`.
-2. Send a WhatsApp message (or reply from `/agent`).
-3. Open `/agent` — the chat should remain **after the next Render deploy**.
-4. Optional: Supabase → **Table Editor** → `chat_messages`.
+1. Open `https://your-host/health` → `agentDesk.messageStore` and `agentDesk.settingsStore` should both be `"postgres"`.
+2. Send a WhatsApp message (or reply from `/agent`). Edit a shortcut or label in the desk.
+3. Open `/agent` after the next Render deploy — chats **and** your shortcut/label edits should still be there.
+4. Optional: Supabase → **Table Editor** → `chat_messages` / `agent_shortcuts` / `agent_labels`.
+
+Desk settings only change when you (or staff) explicitly create/update/delete them in `/agent`. Redeploys and restarts do not rewrite them once they live in Postgres.
 
 ## Troubleshooting
 

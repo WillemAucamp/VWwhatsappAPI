@@ -125,6 +125,12 @@ function createApp(overrides = {}) {
         messageStore: messageStore && messageStore.backend ? messageStore.backend : 'unknown',
         // Agent composer emoji picker (desk UI only).
         emojiPicker: 'agent-emoji-picker-2026-09-09',
+        // Shortcuts / labels / unread: prefer Postgres whenever DATABASE_URL is set
+        // so desk edits replace defaults permanently and survive redeploys.
+        settingsStore:
+          shortcutStore && shortcutStore.backend
+            ? shortcutStore.backend
+            : 'unknown',
       },
     });
   });
