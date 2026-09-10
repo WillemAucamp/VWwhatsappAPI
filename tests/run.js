@@ -22,6 +22,7 @@ const files = [
   'transport-graph.test.js',
   'catalog-product-list.test.js',
   'agent-desk.test.js',
+  'desk-list-filters.test.js',
   'message-store.test.js',
 ];
 

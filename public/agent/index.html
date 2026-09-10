@@ -357,6 +357,7 @@
     }
     .badge.takeover { background: rgba(37, 211, 102, 0.18); color: var(--green-deep); }
     .badge.quiet { background: #e7f3ff; color: #027eb5; }
+    .badge.bot { background: #e8eaed; color: #444746; }
     .label-pill {
       display: inline-block;
       font-size: 0.68rem;
@@ -923,6 +924,7 @@
   </div>
 
   <script src="/agent/static/emojis.js"></script>
+  <script src="/agent/static/deskListFilters.js"></script>
   <script>
     const state = {
       token: sessionStorage.getItem('agentToken') || '',
@@ -935,6 +937,7 @@
       selectedLabelColor: '#128c7e',
       filterLabelId: 'all',
       filterUnread: false,
+      filterAgent: false,
       chatSearch: '',
       threadLabelIds: [],
       slash: { open: false, query: '', start: -1, end: -1, active: 0, matches: [] },
@@ -1074,13 +1077,23 @@
     }
 
     function countChatsForLabel(labelId) {
-      return state.chats.reduce((n, c) => (chatHasLabel(c, labelId) ? n + 1 : n), 0);
+      return state.chats.reduce((n, c) => (deskChatHasLabel(c, labelId) ? n + 1 : n), 0);
     }
 
     function countUnreadChats(labelId) {
       return state.chats.reduce((n, c) => {
         if (chatUnreadCount(c) <= 0) return n;
-        if (labelId && labelId !== 'all' && !chatHasLabel(c, labelId)) return n;
+        if (labelId && labelId !== 'all' && !deskChatHasLabel(c, labelId)) return n;
+        if (state.filterAgent && !c.agentTakenOver) return n;
+        return n + 1;
+      }, 0);
+    }
+
+    function countAgentChats(labelId) {
+      return state.chats.reduce((n, c) => {
+        if (!c.agentTakenOver) return n;
+        if (labelId && labelId !== 'all' && !deskChatHasLabel(c, labelId)) return n;
+        if (state.filterUnread && chatUnreadCount(c) <= 0) return n;
         return n + 1;
       }, 0);
     }
@@ -1101,7 +1114,8 @@
     function renderLabelFilters() {
       const bar = el('labelFilters');
       const unreadTotal = countUnreadChats(state.filterLabelId);
-      const allActive = !state.filterUnread && state.filterLabelId === 'all';
+      const agentTotal = countAgentChats(state.filterLabelId);
+      const allActive = !state.filterUnread && !state.filterAgent && state.filterLabelId === 'all';
       const chips = [
         {
           id: 'all',
@@ -1118,6 +1132,14 @@
           count: unreadTotal || null,
           active: state.filterUnread,
           kind: 'unread',
+        },
+        {
+          id: 'agent',
+          name: 'Agent',
+          color: '#25d366',
+          count: agentTotal || null,
+          active: state.filterAgent,
+          kind: 'agent',
         },
         ...state.labels.map((l) => ({
           id: l.id,
@@ -1150,9 +1172,12 @@
           const id = btn.getAttribute('data-filter') || 'all';
           if (kind === 'all') {
             state.filterUnread = false;
+            state.filterAgent = false;
             state.filterLabelId = 'all';
           } else if (kind === 'unread') {
             state.filterUnread = !state.filterUnread;
+          } else if (kind === 'agent') {
+            state.filterAgent = !state.filterAgent;
           } else if (kind === 'label') {
             state.filterLabelId = state.filterLabelId === id ? 'all' : id;
           }
@@ -1162,30 +1187,8 @@
       });
     }
 
-    function chatHasLabel(chat, labelId) {
-      if (!labelId || labelId === 'all') return true;
-      if ((chat.labelIds || []).includes(labelId)) return true;
-      return (chat.labels || []).some((l) => l.id === labelId);
-    }
-
-    function digitsOnly(value) {
-      return String(value || '').replace(/\D/g, '');
-    }
-
-    function chatMatchesSearch(chat, query) {
-      const q = String(query || '').trim();
-      if (!q) return true;
-      const wa = String(chat.waNumber || '');
-      const qDigits = digitsOnly(q);
-      if (qDigits) return wa.includes(qDigits);
-      return ('+' + wa).toLowerCase().includes(q.toLowerCase());
-    }
-
     function chatMatchesFilters(chat) {
-      if (state.filterUnread && chatUnreadCount(chat) <= 0) return false;
-      if (state.filterLabelId !== 'all' && !chatHasLabel(chat, state.filterLabelId)) return false;
-      if (!chatMatchesSearch(chat, state.chatSearch)) return false;
-      return true;
+      return deskChatMatchesFilters(chat, state, chatUnreadCount(chat));
     }
 
     function renderChatList() {
@@ -1196,11 +1199,7 @@
         return;
       }
       if (!chats.length) {
-        let emptyMsg = 'No chats match these filters.';
-        if (state.chatSearch.trim()) emptyMsg = 'No chats match that number.';
-        else if (state.filterUnread && state.filterLabelId !== 'all') emptyMsg = 'No unread chats with this label.';
-        else if (state.filterUnread) emptyMsg = 'No unread chats.';
-        else if (state.filterLabelId !== 'all') emptyMsg = 'No chats with this label.';
+        const emptyMsg = deskFilterEmptyMessage(state);
         list.innerHTML = '<div class="empty" style="margin:24px auto;">' + emptyMsg + '</div>';
         return;
       }
@@ -1210,9 +1209,16 @@
         const active = state.selected === c.waNumber ? 'active' : '';
         const unreadCls = unread ? ' unread' : '';
         const badges = [];
-        if (c.agentTakenOver) badges.push('<span class="badge takeover">agent</span>');
-        else if (c.status === 'quiet') badges.push('<span class="badge quiet">quiet</span>');
-        else if (c.status) badges.push('<span class="badge">' + escapeHtml(c.status) + '</span>');
+        const statusBadge = deskStatusBadge(c);
+        if (statusBadge) {
+          badges.push(
+            '<span class="badge' +
+              (statusBadge.cls ? ' ' + statusBadge.cls : '') +
+              '">' +
+              escapeHtml(statusBadge.text) +
+              '</span>'
+          );
+        }
         const labelHtml = (c.labels || []).map((l) => labelPillHtml(l)).join('');
         const badgeCount = unreadCount > 99 ? '99+' : String(unreadCount);
         const metaHtml =
