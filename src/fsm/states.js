@@ -284,6 +284,7 @@ const STATES = {
     exitReason: 'not_ready_income_employment',
     softDecline: true,
     notifyAgent: false,
+    deskLabel: 'Unqualified',
   },
 
   // Legacy aliases so older in-progress sessions can still resume after deploy.
@@ -327,6 +328,7 @@ const STATES = {
     exitReason: 'employed_no',
     softDecline: true,
     notifyAgent: false,
+    deskLabel: 'Unqualified',
   },
 
   AFFORDABILITY_CHECK: {
@@ -366,6 +368,7 @@ const STATES = {
     exitReason: 'income_under_5k',
     softDecline: true,
     notifyAgent: false,
+    deskLabel: 'Unqualified',
   },
 
   LICENSE_CHECK: {
@@ -397,6 +400,7 @@ const STATES = {
     quiet: true,
     notifyAgent: true,
     agentTakeover: true,
+    deskLabel: 'No License',
   },
 
   CREDIT_CHECK: {
@@ -428,6 +432,7 @@ const STATES = {
     quiet: true,
     notifyAgent: true,
     agentTakeover: true,
+    deskLabel: 'Bad Credit',
   },
 
   FINAL_CONSENT: {
@@ -478,6 +483,7 @@ const STATES = {
     softDecline: true,
     sendLink: 'application',
     notifyAgent: false,
+    deskLabel: 'App Link Sent',
   },
 
   CONSENT_NO_HANDOVER: {

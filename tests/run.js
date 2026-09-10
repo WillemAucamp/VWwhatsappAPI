@@ -23,6 +23,7 @@ const files = [
   'catalog-product-list.test.js',
   'agent-desk.test.js',
   'desk-list-filters.test.js',
+  'desk-auto-labels.test.js',
   'message-store.test.js',
 ];
 

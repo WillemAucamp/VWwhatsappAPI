@@ -235,6 +235,42 @@ function createLabelStore(filePath = config.agent.labelsPath) {
     });
   }
 
+  /**
+   * Append an existing label by name without removing other tags.
+   * Missing labels are a no-op (bot flow must not create desk tags).
+   */
+  async function addChatLabelByName(waNumber, name) {
+    return withLock(async () => {
+      const wa = String(waNumber || '').replace(/\D/g, '');
+      const want = normalizeName(name);
+      if (!wa || !want) {
+        return { applied: false, reason: 'invalid' };
+      }
+      const data = await readAllUnlocked();
+      const label = data.labels.find(
+        (l) => String(l.name || '').toLowerCase() === want.toLowerCase()
+      );
+      if (!label) {
+        return { applied: false, reason: 'label_not_found', name: want };
+      }
+      const known = new Set(data.labels.map((l) => l.id));
+      const current = (data.chatLabels[wa] || []).filter((id) => known.has(id));
+      if (current.includes(label.id)) {
+        return {
+          applied: false,
+          reason: 'already_set',
+          waNumber: wa,
+          labelIds: current,
+          label,
+        };
+      }
+      const labelIds = current.concat(label.id);
+      data.chatLabels[wa] = labelIds;
+      await writeAllUnlocked(data);
+      return { applied: true, waNumber: wa, labelIds, label };
+    });
+  }
+
   return {
     listLabels,
     createLabel,
@@ -243,6 +279,7 @@ function createLabelStore(filePath = config.agent.labelsPath) {
     getChatLabelIds,
     getChatLabelsMap,
     setChatLabels,
+    addChatLabelByName,
     file,
     colors: LABEL_COLORS.slice(),
   };

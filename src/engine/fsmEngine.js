@@ -133,13 +133,21 @@ function linkForState(state) {
  * FSM engine — resolves session, matches help-intent / options, retries, escalates.
  */
 class FsmEngine {
-  constructor({ sessionStore, leadLogger, sendMessage, notifyAgent, options } = {}) {
+  constructor({
+    sessionStore,
+    leadLogger,
+    sendMessage,
+    notifyAgent,
+    options,
+    labelStore,
+  } = {}) {
     if (!sessionStore) throw new Error('sessionStore required');
     if (!leadLogger) throw new Error('leadLogger required');
     this.sessionStore = sessionStore;
     this.leadLogger = leadLogger;
     this.sendMessage = sendMessage || transport.sendMessage;
     this.notifyAgent = notifyAgent || transport.notifyAgent;
+    this.labelStore = labelStore || null;
     this.stubMarker = Boolean(options && options.stubMarker);
     this.nowFn = (options && options.nowFn) || (() => Date.now());
     /** @type {Map<string, Promise<void>>} */
@@ -686,6 +694,37 @@ class FsmEngine {
     return { session, state, resentTerminal: true };
   }
 
+  async _applyDeskLabel(session, state) {
+    const name = state && state.deskLabel;
+    if (
+      !name ||
+      !this.labelStore ||
+      typeof this.labelStore.addChatLabelByName !== 'function'
+    ) {
+      return;
+    }
+    try {
+      const result = await this.labelStore.addChatLabelByName(
+        session.waNumber,
+        name
+      );
+      if (result && result.reason === 'label_not_found') {
+        // eslint-disable-next-line no-console
+        console.warn('[fsm] desk label missing; chat not tagged', {
+          waNumber: session.waNumber,
+          name,
+        });
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[fsm] desk label failed', {
+        waNumber: session.waNumber,
+        name,
+        message: err && err.message ? err.message : String(err),
+      });
+    }
+  }
+
   async _finalizeTerminal(session, state) {
     const exitReason = state.exitReason;
     session.lastExitReason = exitReason;
@@ -699,6 +738,8 @@ class FsmEngine {
     if (state.agentTakeover) {
       session.agentTakenOver = true;
     }
+
+    await this._applyDeskLabel(session, state);
 
     const record = buildRecord({
       waNumber: session.waNumber,

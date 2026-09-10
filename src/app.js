@@ -73,6 +73,7 @@ function createApp(overrides = {}) {
       sendMessage: loggingSend,
       notifyAgent: overrides.notifyAgent,
       options: overrides.engineOptions,
+      labelStore,
     });
 
   const app = express();
