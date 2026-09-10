@@ -97,8 +97,8 @@ function createApp(overrides = {}) {
       ok: true,
       service: 'vw-whatsapp-prequal',
       build: {
-        // Bumped when SEND_LINK no longer duplicates the form URL.
-        fsm: 'fix-dup-form-link-2026-09-09',
+        // Bumped when OFF_MENU_RECOVERY hi/hello returns to main menu.
+        fsm: 'fix-offmenu-reopen-2026-09-10',
         copyKeys: meta.copy.total,
         commit:
           process.env.RENDER_GIT_COMMIT ||

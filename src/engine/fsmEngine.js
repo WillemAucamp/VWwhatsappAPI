@@ -1187,6 +1187,16 @@ class FsmEngine {
 
     const optionKey = resolveOptionKey(state, normalized, replyId);
     if (!optionKey) {
+      // On OFF_MENU_RECOVERY, reopen words (hi/hello/restart) mean Main-Menu —
+      // not a second off-option that escalates to HUMAN_HANDOVER. After
+      // agentTakeover holds, that escalation permanently ghosts the customer
+      // until staff Release.
+      if (
+        state.id === 'OFF_MENU_RECOVERY' &&
+        matchesKeywordList(normalized, config.fsm.reopenKeywords)
+      ) {
+        return this._enterState(session, ENTRY_STATE);
+      }
       // Info states with a fixed next: allow any non-help tap/text to continue
       // only when there are no options defined.
       if (
