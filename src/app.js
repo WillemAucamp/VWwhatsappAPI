@@ -137,7 +137,7 @@ function createApp(overrides = {}) {
         // Agent composer emoji picker (desk UI only).
         emojiPicker: 'agent-emoji-picker-2026-09-09',
         // Paste image from clipboard → WhatsApp media send.
-        pasteImage: 'agent-paste-image-16mb-2026-09-10',
+        pasteImage: 'agent-multi-image-2026-09-10',
         // Inbound customer image/document → desk transcript.
         inboundMedia: 'agent-inbound-media-2026-09-10',
       },

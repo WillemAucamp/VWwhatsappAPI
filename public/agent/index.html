@@ -512,36 +512,72 @@
     .attach-preview {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       padding: 8px 10px;
       background: #fff;
       border: 1px solid var(--line);
       border-radius: 12px;
+      overflow-x: auto;
     }
     .attach-preview.hidden { display: none; }
-    .attach-preview img {
-      width: 56px;
-      height: 56px;
-      object-fit: cover;
-      border-radius: 8px;
-      background: #f0f2f5;
-    }
-    .attach-preview .attach-meta {
+    .attach-thumbs {
+      display: flex;
+      gap: 8px;
+      align-items: center;
       flex: 1;
       min-width: 0;
-      font-size: 0.82rem;
-      color: var(--muted);
     }
-    .attach-preview .attach-meta strong {
-      display: block;
-      color: var(--ink);
-      font-weight: 600;
-      margin-bottom: 2px;
-    }
-    .attach-preview .attach-clear {
+    .attach-thumb {
+      position: relative;
       flex-shrink: 0;
-      padding: 6px 10px;
+      width: 64px;
+      height: 64px;
       border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: #f0f2f5;
+    }
+    .attach-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .attach-thumb .attach-remove {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      background: rgba(17, 27, 33, 0.72);
+      color: #fff;
+      font-size: 0.85rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .attach-add {
+      flex-shrink: 0;
+      width: 64px;
+      height: 64px;
+      padding: 0;
+      border-radius: 8px;
+      border: 1px dashed var(--line);
+      background: #fff;
+      color: var(--ink);
+      font-size: 1.5rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .attach-add:hover { background: #f0f2f5; }
+    .attach-add:disabled { opacity: 0.45; cursor: default; }
+    .attach-count {
+      flex-shrink: 0;
+      font-size: 0.78rem;
+      color: var(--muted);
+      padding-right: 4px;
     }
     .emoji-toggle {
       flex-shrink: 0;
@@ -856,14 +892,12 @@
           <div id="emojiCats" class="emoji-cats" role="tablist" aria-label="Emoji categories"></div>
           <div id="emojiGrid" class="emoji-grid" role="listbox" aria-label="Emojis"></div>
         </div>
-        <p class="composer-hint">Type <strong>/</strong> for shortcuts · paste an image to send a photo · use 😀 for emoji</p>
+        <p class="composer-hint">Type <strong>/</strong> for shortcuts · paste or add photos (up to 10) · use 😀 for emoji</p>
         <div id="attachPreview" class="attach-preview hidden" aria-live="polite">
-          <img id="attachThumb" alt="Attachment preview" />
-          <div class="attach-meta">
-            <strong id="attachName">Image</strong>
-            <span id="attachSize"></span>
-          </div>
-          <button type="button" class="secondary attach-clear" id="attachClearBtn">Remove</button>
+          <div id="attachThumbs" class="attach-thumbs"></div>
+          <button type="button" class="attach-add" id="attachAddBtn" title="Add photos" aria-label="Add photos">+</button>
+          <span id="attachCount" class="attach-count"></span>
+          <input id="attachFileInput" type="file" accept="image/jpeg,image/png,image/webp,image/jpg" multiple hidden />
         </div>
         <div class="composer-row">
           <button type="button" class="emoji-toggle" id="emojiBtn" title="Insert emoji" aria-label="Insert emoji" disabled>😀</button>
@@ -966,7 +1000,7 @@
       threadLabelIds: [],
       slash: { open: false, query: '', start: -1, end: -1, active: 0, matches: [] },
       emoji: { open: false, categoryId: 'smileys', query: '' },
-      pendingImage: null,
+      pendingImages: [],
       editingShortcutId: null,
       editingLabelId: null,
       assignDraft: [],
@@ -1259,7 +1293,7 @@
       list.querySelectorAll('.chat-item').forEach((btn) => {
         btn.addEventListener('click', () => {
           const next = btn.getAttribute('data-wa');
-          if (next !== state.selected) clearPendingImage();
+          if (next !== state.selected) clearPendingImages();
           state.selected = next;
           renderChatList();
           loadThread(state.selected);
@@ -1298,7 +1332,7 @@
       el('markUnreadBtnBar').disabled = !on;
       if (!on) {
         hideEmojiPicker();
-        clearPendingImage();
+        clearPendingImages();
       }
     }
 
@@ -1441,9 +1475,9 @@
 
     async function sendReply() {
       const text = el('replyBox').value.trim();
-      const pending = state.pendingImage;
+      const pending = state.pendingImages.slice();
       if (!state.selected) return;
-      if (!pending && !text) return;
+      if (!pending.length && !text) return;
       if (state.sending) return;
       state.sending = true;
       hideSlashMenu();
@@ -1451,43 +1485,57 @@
       el('threadError').textContent = '';
       el('sendBtn').disabled = true;
       try {
-        if (pending) {
-          await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply-media', {
-            method: 'POST',
-            body: JSON.stringify({
-              imageBase64: pending.base64,
-              mimeType: pending.mimeType,
-              filename: pending.filename,
-              caption: text,
-            }),
-          });
-          clearPendingImage();
+        if (pending.length) {
+          for (let i = 0; i < pending.length; i++) {
+            const item = pending[i];
+            await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply-media', {
+              method: 'POST',
+              body: JSON.stringify({
+                imageBase64: item.base64,
+                mimeType: item.mimeType,
+                filename: item.filename,
+                caption: i === 0 ? text : '',
+              }),
+            });
+            if (i === 0) el('replyBox').value = '';
+            // Drop sent items so a mid-batch failure does not resend them.
+            const still = state.pendingImages.indexOf(item);
+            if (still >= 0) {
+              if (item.objectUrl) {
+                try { URL.revokeObjectURL(item.objectUrl); } catch (_) {}
+              }
+              state.pendingImages.splice(still, 1);
+            }
+          }
+          clearPendingImages();
         } else {
           await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply', {
             method: 'POST',
             body: JSON.stringify({ text }),
           });
+          el('replyBox').value = '';
         }
-        el('replyBox').value = '';
         await loadThread(state.selected);
         await loadChats(true);
       } catch (err) {
         el('threadError').textContent = err.data && err.data.error ? err.data.error : err.message;
+        renderAttachStrip();
       } finally {
         state.sending = false;
         el('sendBtn').disabled = false;
       }
     }
 
-    function clearPendingImage() {
-      if (state.pendingImage && state.pendingImage.objectUrl) {
-        try { URL.revokeObjectURL(state.pendingImage.objectUrl); } catch (_) {}
-      }
-      state.pendingImage = null;
-      el('attachPreview').classList.add('hidden');
-      el('attachThumb').removeAttribute('src');
-      el('attachName').textContent = 'Image';
-      el('attachSize').textContent = '';
+    const MAX_PENDING_IMAGES = 10;
+
+    function clearPendingImages() {
+      (state.pendingImages || []).forEach((item) => {
+        if (item && item.objectUrl) {
+          try { URL.revokeObjectURL(item.objectUrl); } catch (_) {}
+        }
+      });
+      state.pendingImages = [];
+      renderAttachStrip();
     }
 
     function formatBytes(n) {
@@ -1497,21 +1545,62 @@
       return (n / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
-    function setPendingImage({ blob, mimeType, filename, base64 }) {
-      clearPendingImage();
+    function renderAttachStrip() {
+      const box = el('attachPreview');
+      const thumbs = el('attachThumbs');
+      const count = el('attachCount');
+      const addBtn = el('attachAddBtn');
+      const list = state.pendingImages || [];
+      if (!list.length) {
+        box.classList.add('hidden');
+        thumbs.innerHTML = '';
+        count.textContent = '';
+        return;
+      }
+      box.classList.remove('hidden');
+      thumbs.innerHTML = list.map((item, i) => (
+        '<div class="attach-thumb" title="' + escapeHtml(item.filename || 'Image') + ' · ' + escapeHtml(formatBytes(item.size)) + '">' +
+          '<img src="' + escapeHtml(item.objectUrl) + '" alt="" />' +
+          '<button type="button" class="attach-remove" data-idx="' + i + '" aria-label="Remove photo">×</button>' +
+        '</div>'
+      )).join('');
+      count.textContent = list.length + ' / ' + MAX_PENDING_IMAGES;
+      addBtn.disabled = list.length >= MAX_PENDING_IMAGES || el('replyBox').disabled;
+      thumbs.querySelectorAll('.attach-remove').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.getAttribute('data-idx'));
+          removePendingImage(idx);
+        });
+      });
+    }
+
+    function removePendingImage(idx) {
+      const item = state.pendingImages[idx];
+      if (!item) return;
+      if (item.objectUrl) {
+        try { URL.revokeObjectURL(item.objectUrl); } catch (_) {}
+      }
+      state.pendingImages.splice(idx, 1);
+      renderAttachStrip();
+    }
+
+    function addPendingImage({ blob, mimeType, filename, base64 }) {
+      if (state.pendingImages.length >= MAX_PENDING_IMAGES) {
+        el('threadError').textContent = 'You can attach up to ' + MAX_PENDING_IMAGES + ' images.';
+        return false;
+      }
       const objectUrl = URL.createObjectURL(blob);
-      state.pendingImage = {
+      state.pendingImages.push({
+        id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
         blob,
         mimeType,
         filename: filename || 'image.png',
         base64,
         objectUrl,
         size: blob.size || 0,
-      };
-      el('attachThumb').src = objectUrl;
-      el('attachName').textContent = state.pendingImage.filename;
-      el('attachSize').textContent = formatBytes(state.pendingImage.size);
-      el('attachPreview').classList.remove('hidden');
+      });
+      renderAttachStrip();
+      return true;
     }
 
     function fileToBase64(file) {
@@ -1529,45 +1618,74 @@
 
     async function acceptImageFile(file) {
       if (!file || !String(file.type || '').startsWith('image/')) {
-        el('threadError').textContent = 'Only image files can be pasted (JPEG, PNG, WebP).';
-        return;
+        el('threadError').textContent = 'Only image files can be attached (JPEG, PNG, WebP).';
+        return false;
       }
       const mime = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
       if (!['image/jpeg', 'image/png', 'image/webp'].includes(mime)) {
         el('threadError').textContent = 'Only JPEG, PNG, or WebP images are supported.';
-        return;
+        return false;
       }
       if (file.size > 16 * 1024 * 1024) {
         el('threadError').textContent = 'Image must be under 16MB.';
-        return;
+        return false;
+      }
+      if (state.pendingImages.length >= MAX_PENDING_IMAGES) {
+        el('threadError').textContent = 'You can attach up to ' + MAX_PENDING_IMAGES + ' images.';
+        return false;
       }
       el('threadError').textContent = '';
       const base64 = await fileToBase64(file);
       const filename = file.name || (mime === 'image/png' ? 'paste.png' : mime === 'image/webp' ? 'paste.webp' : 'paste.jpg');
-      setPendingImage({ blob: file, mimeType: mime, filename, base64 });
+      return addPendingImage({ blob: file, mimeType: mime, filename, base64 });
     }
 
-    el('attachClearBtn').addEventListener('click', clearPendingImage);
+    async function acceptImageFiles(fileList) {
+      const files = Array.from(fileList || []).filter(Boolean);
+      if (!files.length) return;
+      for (const file of files) {
+        if (state.pendingImages.length >= MAX_PENDING_IMAGES) {
+          el('threadError').textContent = 'You can attach up to ' + MAX_PENDING_IMAGES + ' images.';
+          break;
+        }
+        try {
+          await acceptImageFile(file);
+        } catch (err) {
+          el('threadError').textContent = err.message || 'Could not read image.';
+        }
+      }
+    }
+
+    el('attachAddBtn').addEventListener('click', () => {
+      if (el('replyBox').disabled) return;
+      el('attachFileInput').click();
+    });
+    el('attachFileInput').addEventListener('change', async (e) => {
+      const files = e.target.files;
+      try {
+        await acceptImageFiles(files);
+      } finally {
+        e.target.value = '';
+      }
+    });
     el('replyBox').addEventListener('paste', async (e) => {
       if (el('replyBox').disabled) return;
       const items = e.clipboardData && e.clipboardData.items;
       if (!items || !items.length) return;
-      let imageItem = null;
+      const files = [];
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         if (item && item.kind === 'file' && String(item.type || '').startsWith('image/')) {
-          imageItem = item;
-          break;
+          const file = item.getAsFile();
+          if (file) files.push(file);
         }
       }
-      if (!imageItem) return;
-      const file = imageItem.getAsFile();
-      if (!file) return;
+      if (!files.length) return;
       e.preventDefault();
       hideSlashMenu();
       hideEmojiPicker();
       try {
-        await acceptImageFile(file);
+        await acceptImageFiles(files);
       } catch (err) {
         el('threadError').textContent = err.message || 'Could not read pasted image.';
       }
