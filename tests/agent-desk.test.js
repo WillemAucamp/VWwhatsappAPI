@@ -294,9 +294,9 @@ async function testMessageStoreAndApis() {
     const labels = await fetch(`http://127.0.0.1:${port}/agent/api/labels`, {
       headers: { Authorization: 'Bearer desk-secret' },
     }).then((r) => r.json());
-    assert.ok(labels.labels.length >= 4);
-    const vip = labels.labels.find((l) => l.name === 'VIP');
-    assert.ok(vip);
+    assert.ok(labels.labels.length >= 6);
+    const cemented = labels.labels.find((l) => l.name === 'Unqualified');
+    assert.ok(cemented);
 
     const newLabel = await fetch(`http://127.0.0.1:${port}/agent/api/labels`, {
       method: 'POST',
@@ -329,7 +329,7 @@ async function testMessageStoreAndApis() {
       {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ labelIds: [vip.id, recreated.label.id] }),
+        body: JSON.stringify({ labelIds: [cemented.id, recreated.label.id] }),
       }
     ).then((r) => r.json());
     assert.strictEqual(assign.labelIds.length, 2);
@@ -340,13 +340,13 @@ async function testMessageStoreAndApis() {
     const labeled = chatsLabeled.chats.find((c) => c.waNumber === '27821234567');
     assert.ok(labeled);
     assert.strictEqual(labeled.labels.length, 2);
-    assert.ok(labeled.labels.some((l) => l.name === 'VIP'));
+    assert.ok(labeled.labels.some((l) => l.name === 'Unqualified'));
 
     const thread = await fetch(
       `http://127.0.0.1:${port}/agent/api/chats/27821234567`,
       { headers: { Authorization: 'Bearer desk-secret' } }
     ).then((r) => r.json());
-    assert.deepStrictEqual(thread.labelIds.sort(), [vip.id, recreated.label.id].sort());
+    assert.deepStrictEqual(thread.labelIds.sort(), [cemented.id, recreated.label.id].sort());
 
     // Paste-image media reply (mocked Graph send).
     const tinyPngBase64 =

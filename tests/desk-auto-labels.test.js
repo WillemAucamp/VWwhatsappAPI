@@ -21,10 +21,15 @@ function tmpLabelStore() {
 }
 
 async function seedQualificationLabels(store) {
-  const names = ['Unqualified', 'No License', 'Bad Credit', 'App Link Sent'];
+  const listed = await store.listLabels();
+  const names = ['Unqualified', 'No License', 'Bad Credit', 'App-Link sent'];
   const byName = {};
   for (const name of names) {
-    byName[name.toLowerCase()] = await store.createLabel({ name });
+    const existing = listed.find(
+      (l) => String(l.name).toLowerCase().replace(/[-_]+/g, ' ') ===
+        name.toLowerCase().replace(/[-_]+/g, ' ')
+    );
+    byName[name.toLowerCase()] = existing || (await store.createLabel({ name }));
   }
   return byName;
 }
@@ -95,7 +100,7 @@ async function testAppLinkSentOnYesSendIt() {
   const engine = makeEngine(labels);
   const wa = '27821110004';
   await driveToSendLink(engine, wa);
-  assert.deepStrictEqual(await labelNamesFor(labels, wa), ['App Link Sent']);
+  assert.deepStrictEqual(await labelNamesFor(labels, wa), ['App-Link sent']);
   // eslint-disable-next-line no-console
   console.log('✓ Yes, send it → App Link Sent');
 }
@@ -103,25 +108,33 @@ async function testAppLinkSentOnYesSendIt() {
 async function testAdditiveAndCaseInsensitive() {
   const labels = tmpLabelStore();
   const existing = await labels.listLabels();
-  const vip = existing.find((l) => l.name.toLowerCase() === 'vip');
-  assert.ok(vip, 'default VIP label should exist');
-  await labels.createLabel({ name: 'Unqualified' });
+  const validated = existing.find((l) => l.name.toLowerCase() === 'validated');
+  assert.ok(validated, 'default Validated label should exist');
   const wa = '27821110005';
-  await labels.setChatLabels(wa, [vip.id]);
+  await labels.setChatLabels(wa, [validated.id]);
   const added = await labels.addChatLabelByName(wa, 'unqualified');
   assert.strictEqual(added.applied, true);
   const names = await labelNamesFor(labels, wa);
-  assert.ok(names.includes('VIP'));
+  assert.ok(names.includes('Validated'));
   assert.ok(names.includes('Unqualified'));
   const again = await labels.addChatLabelByName(wa, 'Unqualified');
   assert.strictEqual(again.reason, 'already_set');
   assert.strictEqual((await labels.getChatLabelIds(wa)).length, 2);
+  const hyphen = await labels.addChatLabelByName(wa, 'App Link Sent');
+  assert.strictEqual(hyphen.applied, true);
+  assert.ok((await labelNamesFor(labels, wa)).includes('App-Link sent'));
   // eslint-disable-next-line no-console
   console.log('✓ auto-tag is additive and case-insensitive');
 }
 
 async function testMissingLabelDoesNotThrow() {
-  const labels = tmpLabelStore();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-labels-empty-'));
+  const file = path.join(dir, 'labels.json');
+  fs.writeFileSync(
+    file,
+    `${JSON.stringify({ labels: [], chatLabels: {}, meta: { labels_seeded: true } }, null, 2)}\n`
+  );
+  const labels = createLabelStore(file);
   const engine = makeEngine(labels);
   const wa = '27821110006';
   await engine.handleInbound(wa, 'hi');

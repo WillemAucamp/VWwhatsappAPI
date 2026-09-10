@@ -25,6 +25,7 @@ const files = [
   'agent-desk.test.js',
   'desk-list-filters.test.js',
   'desk-auto-labels.test.js',
+  'desk-labels-cement.test.js',
   'message-store.test.js',
 ];
 

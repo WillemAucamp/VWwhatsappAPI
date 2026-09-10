@@ -483,7 +483,7 @@ const STATES = {
     softDecline: true,
     sendLink: 'application',
     notifyAgent: false,
-    deskLabel: 'App Link Sent',
+    deskLabel: 'App-Link sent',
   },
 
   CONSENT_NO_HANDOVER: {
