@@ -60,7 +60,10 @@
     };
     add(wa);
     add(raw);
-    if (wa) add('+' + wa);
+    keys.slice().forEach((id) => {
+      const digits = digitsOnly(id);
+      if (digits) add('+' + digits);
+    });
     return keys;
   }
 

@@ -158,6 +158,7 @@ function testNumberSearchVariants() {
   assert.strictEqual(merged[0].waNumber, '27648411242');
   assert.ok(waLookupKeys('648411242').includes('27648411242'));
   assert.ok(waLookupKeys('0648411242').includes('27648411242'));
+  assert.ok(waLookupKeys('820002222').includes('+27820002222'));
   // eslint-disable-next-line no-console
   console.log('✓ stored numbers match 27 / 0 / suffix search');
 }
