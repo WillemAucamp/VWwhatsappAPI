@@ -1426,16 +1426,22 @@
       return { text: 'bot', cls: 'bot' };
     }
 
-    function renderChatList() {
-      const list = el('chatList');
+    function listedChatsForSearch() {
       const searchDigits =
         typeof digitsOnly === 'function'
           ? digitsOnly(state.chatSearch)
           : String(state.chatSearch || '').replace(/\D/g, '');
       const searching = searchDigits.length >= 4;
-      const source =
-        searching && Array.isArray(state.searchResults) ? state.searchResults : state.chats;
-      const chats = source.filter(chatMatchesFilters);
+      const chats =
+        typeof mergeDeskSearchHits === 'function'
+          ? mergeDeskSearchHits(state.chats, state.searchResults, state, chatUnreadCount)
+          : state.chats.filter(chatMatchesFilters);
+      return { searching, searchDigits, chats };
+    }
+
+    function renderChatList() {
+      const list = el('chatList');
+      const { searching, searchDigits, chats } = listedChatsForSearch();
       if (searching && !chats.length) {
         const emptyMsg = deskFilterEmptyMessage(state);
         list.innerHTML =
@@ -1577,11 +1583,10 @@
       }
       const params = new URLSearchParams();
       if (state.emergencyInbox) params.set('emergency', '1');
-      if (searching) params.set('q', searchDigits);
       const qs = params.toString() ? '?' + params.toString() : '';
       try {
         let data = await api('/api/chats' + qs, { timeoutMs: 10000 });
-        if ((!data.chats || !data.chats.length) && !state.emergencyInbox && !searching) {
+        if ((!data.chats || !data.chats.length) && !state.emergencyInbox) {
           let stored = 0;
           try {
             const status = await api('/api/status', { timeoutMs: 5000 });
@@ -1596,11 +1601,18 @@
             );
           }
         }
+        state.chats = data.chats || [];
         if (searching) {
-          state.searchResults = data.chats || [];
+          try {
+            const searchParams = new URLSearchParams(params);
+            searchParams.set('q', searchDigits);
+            const found = await api('/api/chats?' + searchParams.toString(), { timeoutMs: 10000 });
+            state.searchResults = found.chats || [];
+          } catch (_) {
+            state.searchResults = [];
+          }
         } else {
           state.searchResults = null;
-          state.chats = data.chats || [];
         }
         renderLabelFilters();
         renderChatList();

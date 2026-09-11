@@ -136,11 +136,32 @@
     return 'No chats match these filters.';
   }
 
+  function mergeDeskSearchHits(inboxChats, searchResults, filters, unreadCountOf) {
+    const search = (filters && filters.chatSearch) || '';
+    const searching = digitsOnly(search).length >= 4;
+    const unreadOf = typeof unreadCountOf === 'function' ? unreadCountOf : function () { return 0; };
+    const inboxHits = (inboxChats || []).filter((chat) =>
+      deskChatMatchesFilters(chat, filters, unreadOf(chat))
+    );
+    if (!searching) return inboxHits;
+    const extra = Array.isArray(searchResults)
+      ? searchResults.filter((chat) => deskChatMatchesFilters(chat, filters, unreadOf(chat)))
+      : [];
+    const byWa = {};
+    inboxHits.concat(extra).forEach((chat) => {
+      if (chat && chat.waNumber && !byWa[chat.waNumber]) byWa[chat.waNumber] = chat;
+    });
+    const out = [];
+    Object.keys(byWa).forEach((wa) => out.push(byWa[wa]));
+    return out;
+  }
+
   return {
     digitsOnly,
     searchDigitCandidates,
     searchLikePatterns,
     waNumberMatchesQuery,
+    mergeDeskSearchHits,
     deskChatHasLabel,
     deskChatMatchesSearch,
     deskStatusBadge,

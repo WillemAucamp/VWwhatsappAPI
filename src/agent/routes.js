@@ -11,6 +11,7 @@ const {
   inferDeskLabelNames,
   syncInferredDeskLabels,
 } = require('./deskAutoLabels');
+const { waNumberMatchesQuery } = require('../../public/agent/deskListFilters');
 
 function timingSafeEqualStr(a, b) {
   const left = Buffer.from(String(a || ''));
@@ -255,28 +256,20 @@ function createAgentRouter({
       const query = String((req.query && (req.query.q || req.query.search)) || '').trim();
       const searching = String(query).replace(/\D/g, '').length >= 4;
 
-      let chats = [];
-      if (searching && typeof messageStore.searchChats === 'function') {
-        chats = await withTimeout(
-          messageStore.searchChats({
-            query,
-            lastReadByWa: readsMap,
-            limit: 50,
-          }),
-          listMs,
-          []
-        );
-      } else {
-        chats = await withTimeout(
-          messageStore.listChats({ lastReadByWa: readsMap }),
-          listMs,
-          null
-        );
-        if (!Array.isArray(chats)) {
-          chats = await withTimeout(messageStore.listChats(), listMs, []);
-        }
+      let chats = await withTimeout(
+        messageStore.listChats({ lastReadByWa: readsMap }),
+        listMs,
+        null
+      );
+      if (!Array.isArray(chats)) {
+        chats = await withTimeout(messageStore.listChats(), listMs, []);
       }
       if (!Array.isArray(chats)) chats = [];
+      if (searching) {
+        chats = chats.filter((chat) =>
+          waNumberMatchesQuery(chat.waNumber, query)
+        );
+      }
 
       const labelById = new Map((labelBundle.labels || []).map((l) => [l.id, l]));
       const enriched = chats.map((chat) => {

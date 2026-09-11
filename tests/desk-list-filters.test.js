@@ -9,6 +9,7 @@ const {
   deskFilterEmptyMessage,
   deskChatHasLabel,
   waNumberMatchesQuery,
+  mergeDeskSearchHits,
 } = require('../public/agent/deskListFilters');
 
 function testStatusBadges() {
@@ -110,7 +111,7 @@ function testDeskHtmlWiresHelper() {
   assert.ok(html.includes("kind === 'agent'"), 'Agent chip must be wired');
   assert.ok(html.includes('filterAgent'), 'filterAgent state must exist');
   assert.ok(html.includes('filter-bar-wrap'), 'filter chips must sit in a scroll wrap');
-  assert.ok(html.includes('filterScrollRight'), 'overflowing labels need a scroll-right control');
+  assert.ok(html.includes('searchMessageBtn'), 'empty search must offer Message +number');
   assert.ok(html.includes('min-width: 0'), 'filter bar must be able to shrink so chips scroll');
   assert.ok(html.includes('chatListStatusBadge'), 'chat list must use chatListStatusBadge');
   assert.ok(
@@ -144,6 +145,14 @@ function testNumberSearchVariants() {
     true
   );
   assert.ok(!waNumberMatchesQuery('27821234567', '648411242'));
+  const merged = mergeDeskSearchHits(
+    [{ waNumber: '27648411242', lastText: 'hi' }],
+    [],
+    { chatSearch: '+27648411242', filterLabelId: 'all' },
+    () => 0
+  );
+  assert.strictEqual(merged.length, 1);
+  assert.strictEqual(merged[0].waNumber, '27648411242');
   // eslint-disable-next-line no-console
   console.log('✓ stored numbers match 27 / 0 / suffix search');
 }

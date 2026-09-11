@@ -288,42 +288,14 @@ function createPostgresMessageStore(connectionString) {
   }
 
   async function searchChats({ query, lastReadByWa = {}, limit = 40 } = {}) {
-    const { searchLikePatterns } = require('../../public/agent/deskListFilters');
-    const patterns = searchLikePatterns(query);
-    if (!patterns.length) return [];
-    await ensureSchema();
-    const reads = normalizeReadsMap(lastReadByWa);
+    const { waNumberMatchesQuery } = require('../../public/agent/deskListFilters');
     const cap = Math.max(1, Math.min(80, Number(limit) || 40));
-    const { rows } = await pool.query(
-      `SELECT
-         latest.wa_number,
-         latest.at,
-         latest.text,
-         latest.direction,
-         latest.source,
-         counts.message_count,
-         counts.inbound_total
-       FROM (
-         SELECT DISTINCT ON (wa_number)
-           wa_number, at, text, direction, source
-         FROM chat_messages
-         WHERE regexp_replace(wa_number, '\\D', '', 'g') LIKE ANY($1::text[])
-         ORDER BY wa_number, at DESC
-       ) latest
-       JOIN (
-         SELECT
-           wa_number,
-           COUNT(*)::int AS message_count,
-           COUNT(*) FILTER (WHERE direction = 'in')::int AS inbound_total
-         FROM chat_messages
-         WHERE regexp_replace(wa_number, '\\D', '', 'g') LIKE ANY($1::text[])
-         GROUP BY wa_number
-       ) counts ON counts.wa_number = latest.wa_number
-       ORDER BY latest.at DESC
-       LIMIT $2`,
-      [patterns, cap]
-    );
-    return rows.map((row) => mapListedChat(row, reads));
+    // Same matcher as the desk UI. A separate LIKE scan missed stored 27…
+    // numbers and could time out, which the UI treated as "not stored".
+    const chats = await listChats({ lastReadByWa });
+    return chats
+      .filter((chat) => waNumberMatchesQuery(chat.waNumber, query))
+      .slice(0, cap);
   }
 
   async function close() {
