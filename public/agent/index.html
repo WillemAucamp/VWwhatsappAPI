@@ -913,7 +913,7 @@
       <div id="authBanner" class="banner danger hidden"></div>
       <div id="inboxBanner" class="banner hidden"></div>
       <div class="search-bar">
-        <input id="chatSearch" type="search" inputmode="tel" autocomplete="off" placeholder="Search number" aria-label="Search chats by number" />
+        <input id="chatSearch" type="search" inputmode="tel" autocomplete="off" placeholder="Search any stored number" aria-label="Search stored chats by number" />
       </div>
       <div class="filter-bar-wrap" id="filterBarWrap">
         <button type="button" class="filter-scroll-btn left hidden" id="filterScrollLeft" aria-label="Show earlier labels" title="More labels">
@@ -1087,6 +1087,7 @@
       filterUnread: false,
       filterAgent: false,
       chatSearch: '',
+      searchResults: null,
       threadLabelIds: [],
       slash: { open: false, query: '', start: -1, end: -1, active: 0, matches: [] },
       emoji: { open: false, categoryId: 'smileys', query: '' },
@@ -1427,8 +1428,29 @@
 
     function renderChatList() {
       const list = el('chatList');
-      const chats = state.chats.filter(chatMatchesFilters);
-      if (!state.chats.length) {
+      const searchDigits =
+        typeof digitsOnly === 'function'
+          ? digitsOnly(state.chatSearch)
+          : String(state.chatSearch || '').replace(/\D/g, '');
+      const searching = searchDigits.length >= 4;
+      const source =
+        searching && Array.isArray(state.searchResults) ? state.searchResults : state.chats;
+      const chats = source.filter(chatMatchesFilters);
+      if (searching && !chats.length) {
+        const emptyMsg = deskFilterEmptyMessage(state);
+        list.innerHTML =
+          '<div class="empty" style="margin:24px auto;">' +
+          escapeHtml(emptyMsg) +
+          '<div style="margin-top:12px;"><button type="button" class="secondary" id="searchMessageBtn">Message +' +
+          escapeHtml(searchDigits) +
+          '</button></div></div>';
+        const msgBtn = el('searchMessageBtn');
+        if (msgBtn) {
+          msgBtn.addEventListener('click', () => openEmergencyModal(searchDigits));
+        }
+        return;
+      }
+      if (!state.chats.length && !searching) {
         list.innerHTML = '<div class="empty" style="margin:24px auto;">No chats yet. When a customer messages WhatsApp, they appear here.</div>';
         return;
       }
@@ -1545,13 +1567,21 @@
     });
 
     async function loadChats(silent) {
-      if (!silent && !state.chats.length) {
+      const searchDigits =
+        typeof digitsOnly === 'function'
+          ? digitsOnly(state.chatSearch)
+          : String(state.chatSearch || '').replace(/\D/g, '');
+      const searching = searchDigits.length >= 4;
+      if (!silent && !state.chats.length && !searching) {
         el('chatList').innerHTML = '<div class="empty" style="margin:24px auto;">Loading chats…</div>';
       }
-      const qs = state.emergencyInbox ? '?emergency=1' : '';
+      const params = new URLSearchParams();
+      if (state.emergencyInbox) params.set('emergency', '1');
+      if (searching) params.set('q', searchDigits);
+      const qs = params.toString() ? '?' + params.toString() : '';
       try {
         let data = await api('/api/chats' + qs, { timeoutMs: 10000 });
-        if ((!data.chats || !data.chats.length) && !state.emergencyInbox) {
+        if ((!data.chats || !data.chats.length) && !state.emergencyInbox && !searching) {
           let stored = 0;
           try {
             const status = await api('/api/status', { timeoutMs: 5000 });
@@ -1566,7 +1596,12 @@
             );
           }
         }
-        state.chats = data.chats || [];
+        if (searching) {
+          state.searchResults = data.chats || [];
+        } else {
+          state.searchResults = null;
+          state.chats = data.chats || [];
+        }
         renderLabelFilters();
         renderChatList();
         if (state.emergencyInbox && state.chats.length) {
@@ -1623,7 +1658,20 @@
 
     el('chatSearch').addEventListener('input', () => {
       state.chatSearch = el('chatSearch').value || '';
+      const searchDigits =
+        typeof digitsOnly === 'function'
+          ? digitsOnly(state.chatSearch)
+          : String(state.chatSearch || '').replace(/\D/g, '');
+      if (state.searchTimer) clearTimeout(state.searchTimer);
+      if (searchDigits.length < 4) {
+        const wasSearching = Array.isArray(state.searchResults);
+        state.searchResults = null;
+        renderChatList();
+        if (wasSearching) loadChats(true);
+        return;
+      }
       renderChatList();
+      state.searchTimer = setTimeout(() => loadChats(true), 250);
     });
 
     function setThreadActionsEnabled(on) {

@@ -105,6 +105,23 @@ async function testMessageStoreAndApis() {
     assert.strictEqual(chats.chats[0].waNumber, '27821234567');
     assert.strictEqual(chats.chats[0].unreadCount, 1);
 
+    const suffixSearch = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats?q=821234567`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    ).then((r) => r.json());
+    assert.ok(
+      suffixSearch.chats.find((c) => c.waNumber === '27821234567'),
+      'suffix digits find the stored international number'
+    );
+    const localZeroSearch = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats?q=0821234567`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    ).then((r) => r.json());
+    assert.ok(
+      localZeroSearch.chats.find((c) => c.waNumber === '27821234567'),
+      '0 + local mobile finds 27… stored chat'
+    );
+
     const threadOpen = await fetch(`http://127.0.0.1:${port}/agent/api/chats/27821234567`, {
       headers: { Authorization: 'Bearer desk-secret' },
     }).then((r) => r.json());
@@ -415,6 +432,26 @@ async function testMessageStoreAndApis() {
     assert.ok(typeof status.chatCount === 'number');
     assert.ok(status.chatCount >= 2);
     assert.strictEqual(status.inboxList, 'raw-list-2026-09-10');
+
+    await messageStore.append({
+      waNumber: '27648411242',
+      direction: 'in',
+      source: 'customer',
+      text: 'from another lead',
+    });
+    const partial = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats?q=648411242`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    ).then((r) => r.json());
+    assert.ok(
+      partial.chats.find((c) => c.waNumber === '27648411242'),
+      '648411242 finds stored 27648411242'
+    );
+    const miss = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats?q=599001122`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    ).then((r) => r.json());
+    assert.strictEqual(miss.chats.length, 0);
 
     const emergencyList = await fetch(
       `http://127.0.0.1:${port}/agent/api/chats?emergency=1`,

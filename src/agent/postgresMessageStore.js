@@ -216,6 +216,35 @@ function createPostgresMessageStore(connectionString) {
     };
   }
 
+  function mapListedChat(row, reads) {
+    const wa = normalizeWa(row.wa_number);
+    const since = reads[wa] || null;
+    const lastAt =
+      row.at instanceof Date ? row.at.toISOString() : String(row.at);
+    const customerLast =
+      row.direction === 'in' || row.source === 'customer';
+    let unreadCount;
+    if (!since) {
+      unreadCount = row.inbound_total || 0;
+    } else if (customerLast && String(lastAt) > String(since)) {
+      unreadCount = 1;
+    } else {
+      unreadCount = 0;
+    }
+    const chat = {
+      waNumber: wa || String(row.wa_number || ''),
+      lastAt,
+      lastText: row.text,
+      lastDirection: row.direction,
+      lastSource: row.source,
+      messageCount: row.message_count,
+      unreadCount,
+      lastReadAt: since,
+    };
+    chat.unreadCount = applyUnreadFloor(chat, since);
+    return chat;
+  }
+
   async function countChats() {
     await ensureSchema();
     const { rows } = await pool.query(
@@ -254,35 +283,47 @@ function createPostgresMessageStore(connectionString) {
        ) counts ON counts.wa_number = latest.wa_number`
     );
     return rows
-      .map((row) => {
-        const wa = normalizeWa(row.wa_number);
-        const since = reads[wa] || null;
-        const lastAt =
-          row.at instanceof Date ? row.at.toISOString() : String(row.at);
-        const customerLast =
-          row.direction === 'in' || row.source === 'customer';
-        let unreadCount;
-        if (!since) {
-          unreadCount = row.inbound_total || 0;
-        } else if (customerLast && String(lastAt) > String(since)) {
-          unreadCount = 1;
-        } else {
-          unreadCount = 0;
-        }
-        const chat = {
-          waNumber: wa || String(row.wa_number || ''),
-          lastAt,
-          lastText: row.text,
-          lastDirection: row.direction,
-          lastSource: row.source,
-          messageCount: row.message_count,
-          unreadCount,
-          lastReadAt: since,
-        };
-        chat.unreadCount = applyUnreadFloor(chat, since);
-        return chat;
-      })
+      .map((row) => mapListedChat(row, reads))
       .sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
+  }
+
+  async function searchChats({ query, lastReadByWa = {}, limit = 40 } = {}) {
+    const { searchLikePatterns } = require('../../public/agent/deskListFilters');
+    const patterns = searchLikePatterns(query);
+    if (!patterns.length) return [];
+    await ensureSchema();
+    const reads = normalizeReadsMap(lastReadByWa);
+    const cap = Math.max(1, Math.min(80, Number(limit) || 40));
+    const { rows } = await pool.query(
+      `SELECT
+         latest.wa_number,
+         latest.at,
+         latest.text,
+         latest.direction,
+         latest.source,
+         counts.message_count,
+         counts.inbound_total
+       FROM (
+         SELECT DISTINCT ON (wa_number)
+           wa_number, at, text, direction, source
+         FROM chat_messages
+         WHERE regexp_replace(wa_number, '\\D', '', 'g') LIKE ANY($1::text[])
+         ORDER BY wa_number, at DESC
+       ) latest
+       JOIN (
+         SELECT
+           wa_number,
+           COUNT(*)::int AS message_count,
+           COUNT(*) FILTER (WHERE direction = 'in')::int AS inbound_total
+         FROM chat_messages
+         WHERE regexp_replace(wa_number, '\\D', '', 'g') LIKE ANY($1::text[])
+         GROUP BY wa_number
+       ) counts ON counts.wa_number = latest.wa_number
+       ORDER BY latest.at DESC
+       LIMIT $2`,
+      [patterns, cap]
+    );
+    return rows.map((row) => mapListedChat(row, reads));
   }
 
   async function close() {
@@ -307,6 +348,7 @@ function createPostgresMessageStore(connectionString) {
     append,
     listMessages,
     listChats,
+    searchChats,
     countChats,
     listWaNumbers,
     readMedia,

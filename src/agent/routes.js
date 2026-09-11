@@ -252,13 +252,29 @@ function createAgentRouter({
         }
       }
 
-      let chats = await withTimeout(
-        messageStore.listChats({ lastReadByWa: readsMap }),
-        listMs,
-        null
-      );
-      if (!Array.isArray(chats)) {
-        chats = await withTimeout(messageStore.listChats(), listMs, []);
+      const query = String((req.query && (req.query.q || req.query.search)) || '').trim();
+      const searching = String(query).replace(/\D/g, '').length >= 4;
+
+      let chats = [];
+      if (searching && typeof messageStore.searchChats === 'function') {
+        chats = await withTimeout(
+          messageStore.searchChats({
+            query,
+            lastReadByWa: readsMap,
+            limit: 50,
+          }),
+          listMs,
+          []
+        );
+      } else {
+        chats = await withTimeout(
+          messageStore.listChats({ lastReadByWa: readsMap }),
+          listMs,
+          null
+        );
+        if (!Array.isArray(chats)) {
+          chats = await withTimeout(messageStore.listChats(), listMs, []);
+        }
       }
       if (!Array.isArray(chats)) chats = [];
 
@@ -286,6 +302,7 @@ function createAgentRouter({
         chats: enriched,
         emergency,
         inbox: 'raw-list-2026-09-10',
+        search: searching ? query : null,
       });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });

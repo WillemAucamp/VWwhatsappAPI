@@ -8,6 +8,7 @@ const {
   deskChatMatchesFilters,
   deskFilterEmptyMessage,
   deskChatHasLabel,
+  waNumberMatchesQuery,
 } = require('../public/agent/deskListFilters');
 
 function testStatusBadges() {
@@ -124,7 +125,31 @@ function testDeskHtmlWiresHelper() {
   console.log('✓ agent desk HTML uses shared bot/agent list helpers');
 }
 
+function testNumberSearchVariants() {
+  assert.ok(waNumberMatchesQuery('27648411242', '648411242'));
+  assert.ok(waNumberMatchesQuery('27648411242', '0648411242'));
+  assert.ok(waNumberMatchesQuery('27648411242', '27648411242'));
+  assert.ok(waNumberMatchesQuery('27821234567', '0821234567'));
+  assert.ok(waNumberMatchesQuery('27821234567', '821234567'));
+  assert.ok(
+    deskChatMatchesFilters(
+      { waNumber: '27648411242', agentTakenOver: false },
+      { chatSearch: '648411242', filterUnread: true, filterLabelId: 'all' },
+      0
+    ),
+    'number search ignores unread filter'
+  );
+  assert.strictEqual(
+    deskFilterEmptyMessage({ chatSearch: '648411242' }).includes('Use +'),
+    true
+  );
+  assert.ok(!waNumberMatchesQuery('27821234567', '648411242'));
+  // eslint-disable-next-line no-console
+  console.log('✓ stored numbers match 27 / 0 / suffix search');
+}
+
 testStatusBadges();
 testAgentFilter();
 testDeskHtmlWiresHelper();
+testNumberSearchVariants();
 console.log('\ndesk list filter tests passed.');

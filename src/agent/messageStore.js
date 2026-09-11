@@ -185,6 +185,13 @@ function createFileMessageStore(
     return chats;
   }
 
+  async function searchChats({ query, lastReadByWa = {}, limit = 40 } = {}) {
+    const { waNumberMatchesQuery } = require('../../public/agent/deskListFilters');
+    const chats = await listChats({ lastReadByWa });
+    const cap = Math.max(1, Math.min(80, Number(limit) || 40));
+    return chats.filter((chat) => waNumberMatchesQuery(chat.waNumber, query)).slice(0, cap);
+  }
+
   async function countChats() {
     const names = await fs.promises.readdir(root);
     return names.filter((name) => name.endsWith('.jsonl')).length;
@@ -206,6 +213,7 @@ function createFileMessageStore(
     append,
     listMessages,
     listChats,
+    searchChats,
     countChats,
     listWaNumbers,
     readMedia,
