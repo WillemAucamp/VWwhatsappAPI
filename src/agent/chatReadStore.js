@@ -15,11 +15,10 @@ const { getSharedPool, resolveDeskSettingsBackend } = require('./pg');
  *
  * WhatsApp has no "mark chat unread" API — in the WhatsApp client that is
  * local device state. forcedUnread is the desk's equivalent, and it stays
- * set until staff explicitly open the chat again.
+ * set until staff explicitly open the chat again. Like WhatsApp it flags the
+ * chat without rewinding the read cursor, so the badge does not jump back to
+ * the whole history.
  */
-
-/** Epoch cursor → every message counts as unread again. */
-const EPOCH = '1970-01-01T00:00:00.000Z';
 
 function normalizeWa(waNumber) {
   return String(waNumber || '').replace(/\D/g, '');
@@ -130,11 +129,16 @@ function createFileChatReadStore(filePath = config.agent.chatReadsPath) {
     const wa = requireWa(waNumber);
     return withLock(async () => {
       const data = await readAllUnlocked();
-      data.reads[wa] = EPOCH;
+      // Keep the read cursor: staff flagged the chat for follow-up, they did
+      // not un-read its whole history. WhatsApp shows a dot, not a big count.
       if (!data.forcedUnread) data.forcedUnread = {};
       data.forcedUnread[wa] = true;
       await writeAllUnlocked(data);
-      return { waNumber: wa, lastReadAt: EPOCH, forcedUnread: true };
+      return {
+        waNumber: wa,
+        lastReadAt: data.reads[wa] || null,
+        forcedUnread: true,
+      };
     });
   }
 
@@ -246,16 +250,22 @@ function createPostgresChatReadStore(connectionString) {
   async function markUnread(waNumber) {
     const wa = requireWa(waNumber);
     await ensureSchema();
-    await pool.query(
+    // ON CONFLICT leaves last_read_at alone: the chat is flagged for
+    // follow-up, its history is not un-read.
+    const { rows } = await pool.query(
       `INSERT INTO agent_chat_reads (wa_number, last_read_at, forced_unread, updated_at)
-       VALUES ($1, $2::timestamptz, TRUE, NOW())
+       VALUES ($1, NULL, TRUE, NOW())
        ON CONFLICT (wa_number) DO UPDATE
-         SET last_read_at = EXCLUDED.last_read_at,
-             forced_unread = TRUE,
-             updated_at = NOW()`,
-      [wa, EPOCH]
+         SET forced_unread = TRUE,
+             updated_at = NOW()
+       RETURNING last_read_at`,
+      [wa]
     );
-    return { waNumber: wa, lastReadAt: EPOCH, forcedUnread: true };
+    return {
+      waNumber: wa,
+      lastReadAt: rows[0] ? isoOf(rows[0].last_read_at) : null,
+      forcedUnread: true,
+    };
   }
 
   return {
@@ -288,5 +298,4 @@ module.exports = {
   createChatReadStore,
   createFileChatReadStore,
   createPostgresChatReadStore,
-  EPOCH,
 };

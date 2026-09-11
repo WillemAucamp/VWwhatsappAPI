@@ -33,7 +33,6 @@ const { MemorySessionStore } = require('../src/session/store');
 const {
   createChatReadStore,
   createFileChatReadStore,
-  EPOCH,
 } = require('../src/agent/chatReadStore');
 const { createMessageStore } = require('../src/agent/messageStore');
 
@@ -95,14 +94,16 @@ async function testReadCursorAndStickyUnread() {
   assert.ok(opened.lastReadAt);
   assert.strictEqual(opened.forcedUnread, false);
 
+  // Marking unread flags the chat for follow-up; it does not rewind the
+  // cursor, so the badge stays a nudge instead of the whole history.
   const forced = await reads.markUnread(wa);
   assert.strictEqual(forced.forcedUnread, true);
-  assert.strictEqual(forced.lastReadAt, EPOCH);
+  assert.strictEqual(forced.lastReadAt, opened.lastReadAt);
   assert.strictEqual(await reads.isForcedUnread(wa), true);
 
   const state = await reads.getState();
   assert.strictEqual(state.forcedUnread[wa], true);
-  assert.strictEqual(state.reads[wa], EPOCH);
+  assert.strictEqual(state.reads[wa], opened.lastReadAt);
 
   // Opening the chat again clears the manual flag.
   await reads.markRead(wa);
@@ -113,31 +114,97 @@ async function testReadCursorAndStickyUnread() {
   console.log('✓ read cursor clears manual unread only on an explicit open');
 }
 
+/**
+ * The inbox badge for a manually unread chat comes from the router, which
+ * floors the store's count at 1 for a flagged chat. Nine read messages must
+ * still show a badge of 1, the way WhatsApp shows a single dot.
+ */
 async function testForcedUnreadShowsInInbox() {
   const dir = tmpDir('desk-unread-inbox-');
-  const store = createMessageStore(dir);
-  const reads = createFileChatReadStore(path.join(dir, 'chat_reads.json'));
+  const messageStore = createMessageStore(dir);
+  const chatReadStore = createFileChatReadStore(path.join(dir, 'chat_reads.json'));
   const wa = '27612642189';
 
-  await store.append({ waNumber: wa, direction: 'in', source: 'customer', text: 'Hi' });
-  await store.append({ waNumber: wa, direction: 'out', source: 'agent', text: 'Replied' });
+  for (let i = 0; i < 8; i += 1) {
+    await messageStore.append({
+      waNumber: wa,
+      direction: 'in',
+      source: 'customer',
+      text: `Message ${i}`,
+      at: `2026-09-10T06:${String(30 + i).padStart(2, '0')}:00.000Z`,
+    });
+  }
+  await messageStore.append({
+    waNumber: wa,
+    direction: 'out',
+    source: 'agent',
+    text: 'Replied',
+    at: '2026-09-10T06:40:00.000Z',
+  });
 
-  await reads.markRead(wa);
-  const readState = await reads.getState();
-  const readChats = await store.listChats({ lastReadByWa: readState.reads });
-  assert.strictEqual(readChats[0].unreadCount, 0);
-
-  await reads.markUnread(wa);
-  const unreadState = await reads.getState();
-  const unreadChats = await store.listChats({ lastReadByWa: unreadState.reads });
-  assert.ok(
-    unreadChats[0].unreadCount >= 1,
-    'manual unread survives even when an agent sent the last message'
+  const app = express();
+  app.use(
+    '/agent',
+    createAgentRouter({
+      engine: { handleInbound: async () => {} },
+      sessionStore: new MemorySessionStore(),
+      messageStore,
+      shortcutStore: createShortcutStore(path.join(dir, 'shortcuts.json')),
+      labelStore: createLabelStore(path.join(dir, 'labels.json')),
+      chatReadStore,
+      sendMessage: async () => ({ messages: [{ id: 'wamid.out' }] }),
+    })
   );
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, () => resolve(s));
+  });
+  const port = server.address().port;
+  const call = (url, init) =>
+    fetch(`http://127.0.0.1:${port}/agent${url}`, {
+      ...init,
+      headers: {
+        Authorization: 'Bearer desk-secret',
+        'Content-Type': 'application/json',
+        ...((init && init.headers) || {}),
+      },
+    }).then((r) => r.json());
+  const chatFor = async () => {
+    const listed = await call('/api/chats');
+    return listed.chats.find((c) => c.waNumber === wa);
+  };
 
-  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    await call(`/api/chats/${wa}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ force: true }),
+    });
+    const read = await chatFor();
+    assert.strictEqual(read.unreadCount, 0);
+    assert.strictEqual(read.forcedUnread, false);
+
+    await call(`/api/chats/${wa}/unread`, { method: 'POST' });
+    const unread = await chatFor();
+    assert.strictEqual(unread.forcedUnread, true);
+    assert.strictEqual(
+      unread.unreadCount,
+      1,
+      'a manual unread is a nudge, not the whole history'
+    );
+
+    // Opening the chat again clears it.
+    await call(`/api/chats/${wa}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ force: true }),
+    });
+    const reopened = await chatFor();
+    assert.strictEqual(reopened.unreadCount, 0);
+    assert.strictEqual(reopened.forcedUnread, false);
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
   // eslint-disable-next-line no-console
-  console.log('✓ manually unread chat still shows a badge in the inbox');
+  console.log('✓ manual unread shows a single-message badge, cleared on open');
 }
 
 function testReadStoreBackendSelection() {
