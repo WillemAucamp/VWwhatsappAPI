@@ -276,11 +276,74 @@ async function testPersistRetriesWithoutExtras() {
   }
 }
 
+async function testFailedPlaceholderPersistAllowsMetaRetry() {
+  const attempts = [];
+  const messageStore = {
+    append: async (row) => {
+      attempts.push(row);
+      throw new Error('postgres unavailable');
+    },
+  };
+  const engine = { handleInbound: async () => {} };
+  const dedupe = createInboundDedupe();
+  const app = express();
+  app.use(express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = Buffer.from(buf);
+    },
+  }));
+  app.use(
+    '/webhook',
+    createWebhookRouter({
+      engine,
+      requireSignature: false,
+      inboundDedupe: dedupe,
+      messageStore,
+    })
+  );
+  const { server, port } = await listen(app);
+  try {
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: 'wamid.audio.lost',
+                    from: '27829990007',
+                    type: 'audio',
+                    audio: { id: 'mid.lost', mime_type: 'audio/ogg' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    await postJson(port, '/webhook', payload);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.ok(attempts.length >= 1, 'append was attempted');
+    assert.ok(
+      dedupe.begin('wamid.audio.lost'),
+      'failed placeholder must stay unclaimed so a Meta retry can store it'
+    );
+    // eslint-disable-next-line no-console
+    console.log('✓ failed placeholder persist leaves wamid open for Meta retry');
+  } finally {
+    server.close();
+  }
+}
+
 async function main() {
   testExtractImageAndDocument();
   await testWebhookStoresMediaAndSkipsFsm();
   await testWebhookStoresAudioWithoutFsm();
   await testPersistRetriesWithoutExtras();
+  await testFailedPlaceholderPersistAllowsMetaRetry();
   // eslint-disable-next-line no-console
   console.log('\ninbound media tests passed.');
 }

@@ -342,13 +342,19 @@ function createWebhookRouter({
             if (inbound.skipFsm) {
               if (!dedupe.begin(message.id)) continue;
               try {
-                await persistDeskRow(messageStore, {
+                const saved = await persistDeskRow(messageStore, {
                   waNumber: inbound.from,
                   direction: 'in',
                   source: 'customer',
                   text: inbound.text,
                   wamid: message.id || null,
                 });
+                if (messageStore && !saved) {
+                  // Nothing was stored and no FSM reply went out, so let Meta retry.
+                  throw new Error(
+                    `transcript append failed for ${inbound.inboundType || message.type}`
+                  );
+                }
                 diagnostics.recordHandled();
                 dedupe.commit(message.id);
               } catch (err) {
