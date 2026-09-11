@@ -122,17 +122,34 @@ async function testMessageStoreAndApis() {
       '0 + local mobile finds 27… stored chat'
     );
 
+    const listChats = () =>
+      fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
+        headers: { Authorization: 'Bearer desk-secret' },
+      }).then((r) => r.json());
+    const postRead = (wa, body) =>
+      fetch(`http://127.0.0.1:${port}/agent/api/chats/${wa}/read`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(body || {}),
+      }).then((r) => r.json());
+
+    // Reading a thread must not move the cursor: the 5s desk poll calls this.
     const threadOpen = await fetch(`http://127.0.0.1:${port}/agent/api/chats/27821234567`, {
       headers: { Authorization: 'Bearer desk-secret' },
     }).then((r) => r.json());
-    assert.ok(threadOpen.lastReadAt);
+    assert.strictEqual(threadOpen.lastReadAt, null);
     assert.strictEqual(threadOpen.messages.length, 1);
+    const stillUnread = await listChats();
+    assert.strictEqual(stillUnread.chats[0].unreadCount, 1);
 
-    const chatsAfterRead = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
-      headers: { Authorization: 'Bearer desk-secret' },
-    }).then((r) => r.json());
+    // Rule 2: opening the chat marks it read, takeover or not.
+    const opened = await postRead('27821234567', { force: true });
+    assert.strictEqual(opened.forcedUnread, false);
+    assert.ok(opened.lastReadAt);
+    const chatsAfterRead = await listChats();
     assert.strictEqual(chatsAfterRead.chats[0].unreadCount, 0);
 
+    // Rule 3: manual unread sticks; a background refresh must not clear it.
     const markedUnread = await fetch(
       `http://127.0.0.1:${port}/agent/api/chats/27821234567/unread`,
       { method: 'POST', headers: authHeaders(), body: '{}' }
@@ -141,11 +158,48 @@ async function testMessageStoreAndApis() {
       return r.json();
     });
     assert.strictEqual(markedUnread.forcedUnread, true);
-    const chatsForcedUnread = await fetch(`http://127.0.0.1:${port}/agent/api/chats`, {
-      headers: { Authorization: 'Bearer desk-secret' },
-    }).then((r) => r.json());
+    const chatsForcedUnread = await listChats();
     assert.ok(chatsForcedUnread.chats[0].unreadCount >= 1);
     assert.strictEqual(chatsForcedUnread.chats[0].forcedUnread, true);
+
+    const pollRead = await postRead('27821234567', { force: false });
+    assert.strictEqual(pollRead.skipped, 'forced_unread');
+    const stillForced = await listChats();
+    assert.strictEqual(stillForced.chats[0].forcedUnread, true);
+    assert.ok(stillForced.chats[0].unreadCount >= 1);
+
+    // Clicking the chat again is an explicit open, so it clears the manual flag.
+    await postRead('27821234567', { force: true });
+    const clearedAgain = await listChats();
+    assert.strictEqual(clearedAgain.chats[0].forcedUnread, false);
+    assert.strictEqual(clearedAgain.chats[0].unreadCount, 0);
+
+    // Rule 1: a bot reply makes the chat unread again; agent sends do not.
+    await messageStore.append({
+      waNumber: '27821234567',
+      direction: 'out',
+      source: 'bot',
+      text: 'Bot follow-up nobody has reviewed',
+    });
+    const afterBot = await listChats();
+    assert.strictEqual(
+      afterBot.chats[0].unreadCount,
+      1,
+      'bot reply must show as unread for staff'
+    );
+    await postRead('27821234567', { force: true });
+    await messageStore.append({
+      waNumber: '27821234567',
+      direction: 'out',
+      source: 'agent',
+      text: 'Agent typed this on the desk',
+    });
+    const afterAgent = await listChats();
+    assert.strictEqual(
+      afterAgent.chats[0].unreadCount,
+      0,
+      'the desk agent already read what they sent'
+    );
 
     await messageStore.append({
       waNumber: '27821234567',

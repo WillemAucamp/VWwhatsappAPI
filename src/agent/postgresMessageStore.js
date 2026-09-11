@@ -68,12 +68,11 @@ function normalizeReadsMap(map) {
   return out;
 }
 
+/** Ensure a latest unreviewed message after last-read always shows as unread. */
 function applyUnreadFloor(chat, since) {
   let n = Number(chat && chat.unreadCount) || 0;
-  const customerLast =
-    (chat && chat.lastDirection === 'in') ||
-    (chat && chat.lastSource === 'customer');
-  if (customerLast && (!since || String(chat.lastAt) > String(since))) {
+  const unreviewedLast = chat && chat.lastSource !== 'agent';
+  if (unreviewedLast && (!since || String(chat.lastAt) > String(since))) {
     n = Math.max(n, 1);
   }
   return n;
@@ -230,17 +229,19 @@ function createPostgresMessageStore(connectionString) {
     };
   }
 
-  function mapListedChat(row, reads) {
+  function mapListedChat(row, reads, cursorAware) {
     const wa = normalizeWa(row.wa_number);
     const since = reads[wa] || null;
     const lastAt =
       row.at instanceof Date ? row.at.toISOString() : String(row.at);
-    const customerLast =
-      row.direction === 'in' || row.source === 'customer';
+    const unreviewedLast = row.source !== 'agent';
     let unreadCount;
-    if (!since) {
-      unreadCount = row.inbound_total || 0;
-    } else if (customerLast && String(lastAt) > String(since)) {
+    if (cursorAware) {
+      // SQL already excluded anything staff read before their cursor.
+      unreadCount = Number(row.unread_total) || 0;
+    } else if (!since) {
+      unreadCount = Number(row.unread_total) || 0;
+    } else if (unreviewedLast && String(lastAt) > String(since)) {
       unreadCount = 1;
     } else {
       unreadCount = 0;
@@ -267,38 +268,87 @@ function createPostgresMessageStore(connectionString) {
     return rows[0] && rows[0].n != null ? Number(rows[0].n) : 0;
   }
 
+  // Two set-based scans beat N correlated COUNTs against BYTEA rows.
+  // Do not select media_bytes — TOAST would stall the inbox.
+  const LATEST_PER_CHAT_SQL = `
+    SELECT DISTINCT ON (wa_number)
+      wa_number, at, text, direction, source
+    FROM chat_messages
+    ORDER BY wa_number, at DESC`;
+
+  /**
+   * Unread = messages the desk has not reviewed since its read cursor.
+   * Bot replies count (staff must review them); agent messages never do.
+   */
+  const CURSOR_AWARE_LIST_SQL = `
+    SELECT
+      latest.wa_number, latest.at, latest.text, latest.direction, latest.source,
+      counts.message_count, counts.unread_total
+    FROM (${LATEST_PER_CHAT_SQL}) latest
+    JOIN (
+      SELECT
+        m.wa_number,
+        COUNT(*)::int AS message_count,
+        COUNT(*) FILTER (
+          WHERE m.source IS DISTINCT FROM 'agent'
+            AND (r.last_read_at IS NULL OR m.at > r.last_read_at)
+        )::int AS unread_total
+      FROM chat_messages m
+      LEFT JOIN (
+        SELECT * FROM unnest($1::text[], $2::timestamptz[]) AS t(wa_number, last_read_at)
+      ) r ON r.wa_number = regexp_replace(m.wa_number, '\\D', '', 'g')
+      GROUP BY m.wa_number
+    ) counts ON counts.wa_number = latest.wa_number`;
+
+  const TOTALS_ONLY_LIST_SQL = `
+    SELECT
+      latest.wa_number, latest.at, latest.text, latest.direction, latest.source,
+      counts.message_count, counts.unread_total
+    FROM (${LATEST_PER_CHAT_SQL}) latest
+    JOIN (
+      SELECT
+        wa_number,
+        COUNT(*)::int AS message_count,
+        COUNT(*) FILTER (WHERE source IS DISTINCT FROM 'agent')::int AS unread_total
+      FROM chat_messages
+      GROUP BY wa_number
+    ) counts ON counts.wa_number = latest.wa_number`;
+
+  let lastUnreadMode = null;
+
   async function listChats({ lastReadByWa = {} } = {}) {
     await ensureSchema();
     const reads = normalizeReadsMap(lastReadByWa);
-    // Two set-based scans beat N correlated COUNTs against BYTEA rows.
-    // Do not select media_bytes — TOAST would stall the inbox.
-    const { rows } = await pool.query(
-      `SELECT
-         latest.wa_number,
-         latest.at,
-         latest.text,
-         latest.direction,
-         latest.source,
-         counts.message_count,
-         counts.inbound_total
-       FROM (
-         SELECT DISTINCT ON (wa_number)
-           wa_number, at, text, direction, source
-         FROM chat_messages
-         ORDER BY wa_number, at DESC
-       ) latest
-       JOIN (
-         SELECT
-           wa_number,
-           COUNT(*)::int AS message_count,
-           COUNT(*) FILTER (WHERE direction = 'in')::int AS inbound_total
-         FROM chat_messages
-         GROUP BY wa_number
-       ) counts ON counts.wa_number = latest.wa_number`
-    );
+    const waKeys = Object.keys(reads);
+
+    if (waKeys.length) {
+      try {
+        const { rows } = await pool.query(CURSOR_AWARE_LIST_SQL, [
+          waKeys,
+          waKeys.map((wa) => reads[wa]),
+        ]);
+        lastUnreadMode = 'cursor-join';
+        return rows
+          .map((row) => mapListedChat(row, reads, true))
+          .sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
+      } catch (err) {
+        // An unread-count query must never blank the desk; fall back to totals.
+        // eslint-disable-next-line no-console
+        console.error('[transcript] cursor unread counts failed', err.message);
+        lastUnreadMode = 'totals-fallback';
+      }
+    } else if (!lastUnreadMode) {
+      lastUnreadMode = 'totals';
+    }
+
+    const { rows } = await pool.query(TOTALS_ONLY_LIST_SQL);
     return rows
-      .map((row) => mapListedChat(row, reads))
+      .map((row) => mapListedChat(row, reads, false))
       .sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
+  }
+
+  function unreadMode() {
+    return lastUnreadMode;
   }
 
   async function searchChats({ query, lastReadByWa = {}, limit = 40 } = {}) {
@@ -340,6 +390,7 @@ function createPostgresMessageStore(connectionString) {
     readMedia,
     close,
     ping,
+    unreadMode,
     backend: 'postgres',
   };
 }

@@ -12,6 +12,9 @@ const {
   syncInferredDeskLabels,
 } = require('./deskAutoLabels');
 const { waNumberMatchesQuery } = require('../../public/agent/deskListFilters');
+const {
+  markMessageRead: transportMarkMessageRead,
+} = require('../transport/whatsapp');
 
 function timingSafeEqualStr(a, b) {
   const left = Buffer.from(String(a || ''));
@@ -106,6 +109,7 @@ function createAgentRouter({
   labelStore,
   chatReadStore,
   sendMessage,
+  markMessageRead,
 } = {}) {
   const router = express.Router();
   const password = config.agent.deskPassword;
@@ -114,6 +118,9 @@ function createAgentRouter({
   const labels = labelStore || createLabelStore();
   const chatReads = chatReadStore || createChatReadStore();
   const autoLabels = createAutoLabelSync({ labels, messageStore });
+  const sendReadReceipt = markMessageRead || transportMarkMessageRead;
+  // A slow read-state query must not reset every badge to "never opened".
+  let lastKnownReadState = { reads: {}, forcedUnread: {} };
 
   function requireAuth(req, res, next) {
     if (!enabled) {
@@ -182,6 +189,13 @@ function createAgentRouter({
       chatCount,
       chatListError,
       inboxList: 'raw-list-2026-09-10',
+      unreadModel: 'bot-counts-unread-2026-09-11',
+      chatReadsBackend: (chatReads && chatReads.backend) || 'unknown',
+      unreadCountMode:
+        messageStore && typeof messageStore.unreadMode === 'function'
+          ? messageStore.unreadMode()
+          : 'file',
+      readReceipts: Boolean(config.agent.sendReadReceipts),
       emergency: Boolean(config.agent.deskEmergency),
       transcriptAppendFailures: snap.transcriptAppendFailures || 0,
       lastTranscriptAppendError: snap.lastTranscriptAppendError || null,
@@ -268,6 +282,12 @@ function createAgentRouter({
         if (readState) {
           readsMap = readState.reads || readState;
           forcedUnread = readState.forcedUnread || {};
+          lastKnownReadState = { reads: readsMap, forcedUnread };
+        } else {
+          // Timed out: reuse the last good cursors rather than showing every
+          // chat as never-opened.
+          readsMap = lastKnownReadState.reads;
+          forcedUnread = lastKnownReadState.forcedUnread;
         }
         if (labelsMap && typeof labelsMap === 'object') {
           labelBundle = labelsMap;
@@ -339,11 +359,76 @@ function createAgentRouter({
         return res.status(500).json({ error: 'mark_unread_unavailable' });
       }
       const marked = await chatReads.markUnread(wa);
+      if (lastKnownReadState.reads) {
+        lastKnownReadState.reads[wa] = marked.lastReadAt;
+        lastKnownReadState.forcedUnread[wa] = true;
+      }
       res.json({ ok: true, ...marked });
     } catch (err) {
       return sendStoreError(res, err);
     }
   });
+
+  /**
+   * Opening a chat on the desk marks it read — takeover or not.
+   * Read is an explicit action, never a side effect of a GET, so the 5s desk
+   * poll cannot undo a manual "mark unread".
+   * body.force=true means staff clicked the chat, which also clears a manual
+   * unread. Without it, a background refresh leaves a forced-unread chat alone.
+   */
+  router.post('/api/chats/:wa/read', requireAuth, express.json(), async (req, res) => {
+    try {
+      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      if (!wa) {
+        return res.status(400).json({ error: 'wa_required' });
+      }
+      const force = Boolean(req.body && req.body.force);
+      if (!force && typeof chatReads.isForcedUnread === 'function') {
+        const forced = await chatReads.isForcedUnread(wa);
+        if (forced) {
+          return res.json({
+            ok: true,
+            waNumber: wa,
+            skipped: 'forced_unread',
+            forcedUnread: true,
+          });
+        }
+      }
+      const marked = await chatReads.markRead(wa);
+      if (lastKnownReadState.reads) {
+        lastKnownReadState.reads[wa] = marked.lastReadAt;
+        delete lastKnownReadState.forcedUnread[wa];
+      }
+      let receipt = null;
+      if (config.agent.sendReadReceipts) {
+        receipt = await sendReadReceiptFor(wa);
+      }
+      res.json({ ok: true, ...marked, receipt });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  /** Blue ticks for the customer, mirroring WhatsApp's own read receipts. */
+  async function sendReadReceiptFor(wa) {
+    try {
+      if (!messageStore || typeof messageStore.listMessages !== 'function') {
+        return { sent: false, reason: 'no_transcript' };
+      }
+      const messages = await messageStore.listMessages(wa, { limit: 30 });
+      const lastInbound = [...(messages || [])]
+        .reverse()
+        .find((m) => m && m.direction === 'in' && m.wamid);
+      if (!lastInbound) return { sent: false, reason: 'no_inbound_wamid' };
+      await sendReadReceipt(lastInbound.wamid);
+      return { sent: true, wamid: lastInbound.wamid };
+    } catch (err) {
+      // Never fail the open because the receipt could not go out.
+      // eslint-disable-next-line no-console
+      console.error('[agent] read receipt failed', err.message);
+      return { sent: false, reason: err.message || String(err) };
+    }
+  }
 
   router.get('/api/chats/:wa', requireAuth, async (req, res) => {
     try {
@@ -371,11 +456,15 @@ function createAgentRouter({
           }
         }
       }
-      // Opening a thread marks it read for the agent desk (bot path untouched).
+      // Reading a thread does not move the read cursor; the desk POSTs
+      // /read when staff actually open the chat.
       let lastReadAt = null;
+      let forcedUnread = false;
       try {
-        const marked = await chatReads.markRead(wa);
-        lastReadAt = marked.lastReadAt;
+        lastReadAt = await chatReads.get(wa);
+        if (typeof chatReads.isForcedUnread === 'function') {
+          forcedUnread = await chatReads.isForcedUnread(wa);
+        }
       } catch (_) {
         lastReadAt = null;
       }
@@ -384,6 +473,7 @@ function createAgentRouter({
         waNumber: wa,
         messages,
         lastReadAt,
+        forcedUnread,
         labelIds,
         labels: publicLabels(labelIds, labelById),
         session: session

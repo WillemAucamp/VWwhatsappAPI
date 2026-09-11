@@ -172,7 +172,6 @@ function createFileMessageStore(
       const wa = normalizeWa(last.waNumber);
       const since = reads[wa] || null;
       let unreadCount = 0;
-      let inboundTotal = 0;
       for (const line of lines) {
         let row = null;
         try {
@@ -180,13 +179,9 @@ function createFileMessageStore(
         } catch {
           continue;
         }
-        if (!row || !isInboundRow(row)) continue;
-        inboundTotal += 1;
-        if (since && String(row.at) > String(since)) unreadCount += 1;
+        if (!countsAsUnread(row)) continue;
+        if (!since || String(row.at) > String(since)) unreadCount += 1;
       }
-      // Never opened in the desk: every customer message is still unread for staff
-      // (even if the bot already replied afterward).
-      if (!since) unreadCount = inboundTotal;
       const chat = {
         waNumber: wa || String(last.waNumber || ''),
         lastAt: last.at,
@@ -264,14 +259,21 @@ function isInboundRow(row) {
   return row.source === 'customer';
 }
 
-/** Ensure a latest customer message after last-read always shows as unread. */
+/**
+ * Staff must review what the customer said *and* what the bot answered, so both
+ * count towards unread. Messages an agent typed on the desk never do.
+ */
+function countsAsUnread(row) {
+  if (!row) return false;
+  return row.source !== 'agent';
+}
+
+/** Ensure a latest unreviewed message after last-read always shows as unread. */
 function applyUnreadFloor(chat, since) {
   let n = Number(chat && chat.unreadCount) || 0;
-  const customerLast =
-    (chat && chat.lastDirection === 'in') ||
-    (chat && chat.lastSource === 'customer');
+  const unreviewedLast = chat && chat.lastSource !== 'agent';
   if (
-    customerLast &&
+    unreviewedLast &&
     (!since || String(chat.lastAt) > String(since))
   ) {
     n = Math.max(n, 1);
