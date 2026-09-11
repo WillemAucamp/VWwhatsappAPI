@@ -22,6 +22,9 @@ const stats = {
   lastSendError: null,
   lastCatalogError: null,
   lastCatalogMode: null,
+  transcriptAppendFailures: 0,
+  lastTranscriptAppendError: null,
+  lastSkippedInboundType: null,
   /** @type {Array<{mode:string,error:string,at:string}>} */
   catalogAttempts: [],
 };
@@ -75,6 +78,18 @@ function recordSendError(err) {
   stats.lastError = stats.lastSendError;
 }
 
+function recordTranscriptAppendError(err) {
+  stats.transcriptAppendFailures += 1;
+  stats.lastTranscriptAppendError = err && err.message
+    ? String(err.message).slice(0, 500)
+    : String(err);
+  stats.lastError = stats.lastTranscriptAppendError;
+}
+
+function recordSkippedInboundType(type) {
+  stats.lastSkippedInboundType = type ? String(type) : null;
+}
+
 function recordCatalogError(err, mode) {
   const msg = err && err.message ? String(err.message) : String(err);
   const responseDetail =
@@ -105,6 +120,8 @@ module.exports = {
   recordHandled,
   recordHandleError,
   recordSendError,
+  recordTranscriptAppendError,
+  recordSkippedInboundType,
   recordCatalogError,
   snapshot,
 };

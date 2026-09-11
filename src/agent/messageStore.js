@@ -26,7 +26,7 @@ function createFileMessageStore(
   fs.mkdirSync(mediaRoot, { recursive: true });
 
   function fileFor(waNumber) {
-    const safe = String(waNumber).replace(/[^a-zA-Z0-9_+-]/g, '_');
+    const safe = String(waNumber || '').replace(/[^a-zA-Z0-9_+-]/g, '_');
     return path.join(root, `${safe}.jsonl`);
   }
 
@@ -48,7 +48,7 @@ function createFileMessageStore(
   }
 
   async function append(message) {
-    const waNumber = String(message.waNumber || '');
+    const waNumber = normalizeWa(message.waNumber) || String(message.waNumber || '');
     if (!waNumber) return null;
     const row = {
       id:
@@ -87,13 +87,29 @@ function createFileMessageStore(
     return publicMediaFields(row);
   }
 
+  function candidateFiles(waNumber) {
+    const { waLookupKeys } = require('../../public/agent/deskListFilters');
+    const files = [];
+    const seen = new Set();
+    waLookupKeys(waNumber).forEach((id) => {
+      const file = fileFor(id);
+      if (file && !seen.has(file) && fs.existsSync(file)) {
+        seen.add(file);
+        files.push(file);
+      }
+    });
+    return files;
+  }
+
   async function listMessages(waNumber, { limit = 200 } = {}) {
-    const file = fileFor(waNumber);
-    if (!fs.existsSync(file)) return [];
-    const raw = await fs.promises.readFile(file, 'utf8');
-    const lines = raw.split('\n').filter(Boolean);
-    const sliced = lines.slice(Math.max(0, lines.length - limit));
-    return sliced
+    const files = candidateFiles(waNumber);
+    if (!files.length) return [];
+    const lines = [];
+    for (const file of files) {
+      const raw = await fs.promises.readFile(file, 'utf8');
+      lines.push(...raw.split('\n').filter(Boolean));
+    }
+    const parsed = lines
       .map((line) => {
         try {
           return publicMediaFields(JSON.parse(line));
@@ -101,20 +117,23 @@ function createFileMessageStore(
           return null;
         }
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+    return parsed.slice(Math.max(0, parsed.length - limit));
   }
 
   async function findMessage(waNumber, messageId) {
-    const file = fileFor(waNumber);
-    if (!fs.existsSync(file)) return null;
-    const raw = await fs.promises.readFile(file, 'utf8');
-    const lines = raw.split('\n').filter(Boolean);
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const row = JSON.parse(lines[i]);
-        if (row && row.id === messageId) return row;
-      } catch {
-        // skip
+    const files = candidateFiles(waNumber);
+    for (const file of files) {
+      const raw = await fs.promises.readFile(file, 'utf8');
+      const lines = raw.split('\n').filter(Boolean);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const row = JSON.parse(lines[i]);
+          if (row && row.id === messageId) return row;
+        } catch {
+          // skip
+        }
       }
     }
     return null;

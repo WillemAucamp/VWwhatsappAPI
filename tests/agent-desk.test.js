@@ -455,6 +455,18 @@ async function testMessageStoreAndApis() {
       plusSearch.chats.find((c) => c.waNumber === '27648411242'),
       '+27648411242 finds stored 27648411242'
     );
+    const storedHit = await fetch(
+      `http://127.0.0.1:${port}/agent/api/stored/648411242`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    ).then((r) => r.json());
+    assert.strictEqual(storedHit.stored, true);
+    assert.strictEqual(storedHit.waNumber, '27648411242');
+    const storedMiss = await fetch(
+      `http://127.0.0.1:${port}/agent/api/stored/599001122`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    ).then((r) => r.json());
+    assert.strictEqual(storedMiss.stored, false);
+    assert.ok(typeof status.transcriptAppendFailures === 'number');
     const miss = await fetch(
       `http://127.0.0.1:${port}/agent/api/chats?q=599001122`,
       { headers: { Authorization: 'Bearer desk-secret' } }

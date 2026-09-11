@@ -1158,6 +1158,14 @@
           banner.textContent =
             'WhatsApp token auth failed — bot and agent replies cannot send. Update WHATSAPP_TOKEN (and App Secret if signatures fail) on Render, then redeploy.';
           banner.classList.remove('hidden');
+        } else if (status.transcriptAppendFailures > 0) {
+          banner.textContent =
+            'Some WhatsApp messages failed to save (' +
+            status.transcriptAppendFailures +
+            '). ' +
+            (status.lastTranscriptAppendError || 'See /health webhook.transcriptAppendFailures') +
+            ' Use + to message a number if a chat is missing.';
+          banner.classList.remove('hidden');
         } else if (status.webhookSignatureRejects > 0 && status.lastSendError) {
           banner.textContent = status.lastSendError;
           banner.classList.remove('hidden');
@@ -1610,6 +1618,32 @@
             state.searchResults = found.chats || [];
           } catch (_) {
             state.searchResults = [];
+          }
+          const listed =
+            typeof mergeDeskSearchHits === 'function'
+              ? mergeDeskSearchHits(state.chats, state.searchResults, state, chatUnreadCount)
+              : [];
+          if (!listed.length) {
+            try {
+              const stored = await api('/api/stored/' + encodeURIComponent(searchDigits), {
+                timeoutMs: 8000,
+              });
+              if (stored && stored.stored && stored.waNumber) {
+                state.searchResults = [
+                  {
+                    waNumber: String(stored.waNumber).replace(/\D/g, ''),
+                    lastText: stored.lastText || '',
+                    lastAt: stored.lastAt || new Date().toISOString(),
+                    lastDirection: stored.lastDirection || 'in',
+                    lastSource: stored.lastSource || 'customer',
+                    messageCount: stored.messageCount || 1,
+                    unreadCount: 0,
+                  },
+                ];
+              }
+            } catch (_) {
+              /* keep Message +number empty state */
+            }
           }
         } else {
           state.searchResults = null;

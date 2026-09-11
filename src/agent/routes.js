@@ -183,6 +183,9 @@ function createAgentRouter({
       chatListError,
       inboxList: 'raw-list-2026-09-10',
       emergency: Boolean(config.agent.deskEmergency),
+      transcriptAppendFailures: snap.transcriptAppendFailures || 0,
+      lastTranscriptAppendError: snap.lastTranscriptAppendError || null,
+      lastSkippedInboundType: snap.lastSkippedInboundType || null,
     });
   });
 
@@ -209,6 +212,30 @@ function createAgentRouter({
       'agent_desk=; Path=/agent; HttpOnly; SameSite=Lax; Max-Age=0'
     );
     res.json({ ok: true });
+  });
+
+  router.get('/api/stored/:wa', requireAuth, async (req, res) => {
+    try {
+      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      if (!wa) {
+        return res.status(400).json({ error: 'wa_required', stored: false });
+      }
+      const messages = await messageStore.listMessages(wa, { limit: 1 });
+      const last = messages && messages.length ? messages[messages.length - 1] : null;
+      res.json({
+        waNumber: last
+          ? String(last.waNumber || wa).replace(/\D/g, '') || wa
+          : wa,
+        stored: Boolean(last),
+        lastText: last ? last.text : null,
+        lastAt: last ? last.at : null,
+        lastDirection: last ? last.direction : null,
+        lastSource: last ? last.source : null,
+        messageCount: last ? 1 : 0,
+      });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
   });
 
   router.get('/api/chats', requireAuth, async (req, res) => {
