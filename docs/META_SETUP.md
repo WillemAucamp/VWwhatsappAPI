@@ -22,11 +22,12 @@ Open [Meta for Developers](https://developers.facebook.com/) → your app → **
 | `WHATSAPP_TOKEN` | Temporary access token (testing) or a **system-user** token that never expires (production) |
 | `WHATSAPP_PHONE_NUMBER_ID` | Phone number ID (not the digits clients dial) |
 | `WHATSAPP_WABA_ID` | WhatsApp Business Account ID (optional, used by `check-meta`) |
+| `WHATSAPP_CATALOG_ID` | Meta Commerce catalog ID linked to this WABA — powers **See our cars** product list |
 | `WHATSAPP_VERIFY_TOKEN` | Any long random string **you** invent — you paste the same value into Meta |
 | `WHATSAPP_APP_SECRET` | App Dashboard → Settings → Basic → App Secret |
 | `PUBLIC_BASE_URL` | Public origin of this process, no trailing slash, e.g. `https://abc.ngrok-free.app` |
 | `APPLICATION_LINK` | URL sent after a successful qualify |
-| `STOCK_LINK` | URL shown on the stock menu step |
+| `STOCK_LINK` | Fallback URL if the catalog is empty or product_list send fails |
 | `NODE_ENV` | `production` on a real host (forces webhook HMAC) |
 
 ```bash
@@ -61,7 +62,7 @@ ngrok http 3000
 
 Set `PUBLIC_BASE_URL` to that `https://…` origin and restart.
 
-Production: any Node 18+ host (Render, Railway, Fly, a VM). Prefer a single process with durable `data/` (sessions + lead logs). Health check: `GET /health`.
+Production: any Node 18+ host (Render, Railway, Fly, a VM). Prefer durable chat history via Supabase (`DATABASE_URL`) — see [SUPABASE_SETUP.md](./SUPABASE_SETUP.md). Health check: `GET /health`.
 
 ## 4. Point Meta at `/webhook`
 
@@ -100,12 +101,12 @@ Free-form bot text (and interactive menus) only work inside the **24-hour** wind
 ## 7. Before real clients
 
 1. Confirm `src/content/copy.js` matches the Melrose PDF script (already loaded).
-2. Set real `APPLICATION_LINK` (Google Form) and `STOCK_LINK`.
-3. Put a **system user** permanent token in `WHATSAPP_TOKEN` (dashboard tokens expire).
+2. Set real `APPLICATION_LINK` (Google Form). Keep `STOCK_LINK` as fallback only.
+3. Put a **system user** permanent token in `WHATSAPP_TOKEN` (dashboard tokens expire). Token needs catalog read access for `WHATSAPP_CATALOG_ID`.
 4. Keep `WHATSAPP_APP_SECRET` set. Production rejects unsigned webhook POSTs.
 5. Submit any templates you need outside 24h in WhatsApp Manager.
 6. Add a payment method on the WABA if you will send paid template conversations.
-7. Open items from the Melrose handoff: Promotions content TBD; Opt-Out currently → human_handover; stocklist uses Continue until dynamic vehicle rows are wired.
+7. Confirm catalog products with `npm run check:catalog`. **See our cars** sends a live Meta `product_list`; when the customer messages about a car, the bot continues into the finance check.
 
 ## 8. How the interactive menu works
 

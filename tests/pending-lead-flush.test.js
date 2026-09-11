@@ -73,8 +73,7 @@ async function testPendingLeadFlushedBeforeSoftClosedRestart() {
     logger.leads[0].path,
     [
       'GREETING',
-      'EMPLOYMENT_CHECK',
-      'AFFORDABILITY_CHECK',
+      'EMPLOYED_INCOME_CHECK',
       'LICENSE_CHECK',
       'CREDIT_CHECK',
       'FINAL_CONSENT',

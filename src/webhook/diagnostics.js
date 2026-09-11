@@ -20,6 +20,10 @@ const stats = {
   lastInboundType: null,
   lastError: null,
   lastSendError: null,
+  lastCatalogError: null,
+  lastCatalogMode: null,
+  /** @type {Array<{mode:string,error:string,at:string}>} */
+  catalogAttempts: [],
 };
 
 function touchPost() {
@@ -55,15 +59,37 @@ function recordHandled() {
 
 function recordHandleError(err) {
   stats.inboundHandleErrors += 1;
-  stats.lastError = err && err.message ? String(err.message).slice(0, 200) : String(err);
+  stats.lastError = err && err.message ? String(err.message).slice(0, 500) : String(err);
 }
 
 function recordSendError(err) {
   const msg = err && err.message ? String(err.message) : String(err);
+  // Prefer the enriched message (already includes Graph code/hint); avoid
+  // duplicating a huge raw JSON blob when the message already has detail.
+  const alreadyDetailed = /code\s+\d+|WHATSAPP_TOKEN|expired/i.test(msg);
   const detail =
-    err && err.response ? ` ${JSON.stringify(err.response).slice(0, 180)}` : '';
-  stats.lastSendError = `${msg}${detail}`.slice(0, 300);
+    !alreadyDetailed && err && err.response
+      ? ` ${JSON.stringify(err.response).slice(0, 180)}`
+      : '';
+  stats.lastSendError = `${msg}${detail}`.slice(0, 500);
   stats.lastError = stats.lastSendError;
+}
+
+function recordCatalogError(err, mode) {
+  const msg = err && err.message ? String(err.message) : String(err);
+  const responseDetail =
+    err && err.response ? ` ${JSON.stringify(err.response).slice(0, 220)}` : '';
+  const full = `${msg}${responseDetail}`.slice(0, 500);
+  stats.lastCatalogError = full;
+  stats.lastCatalogMode = mode || null;
+  stats.catalogAttempts = Array.isArray(stats.catalogAttempts)
+    ? stats.catalogAttempts.slice(-8)
+    : [];
+  stats.catalogAttempts.push({
+    mode: mode || null,
+    error: full,
+    at: new Date().toISOString(),
+  });
 }
 
 function snapshot() {
@@ -79,5 +105,6 @@ module.exports = {
   recordHandled,
   recordHandleError,
   recordSendError,
+  recordCatalogError,
   snapshot,
 };

@@ -28,7 +28,10 @@ const config = {
   whatsapp: {
     token: process.env.WHATSAPP_TOKEN || '',
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
-    wabaId: process.env.WHATSAPP_WABA_ID || '',
+    wabaId: process.env.WHATSAPP_WABA_ID || '1777270766733626',
+    // Meta Commerce catalog linked to this WABA (VW Melrose stock).
+    catalogId:
+      process.env.WHATSAPP_CATALOG_ID || '1067415159340072',
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'change-me-verify-token',
     appSecret: process.env.WHATSAPP_APP_SECRET || '',
     apiVersion: process.env.WHATSAPP_API_VERSION || 'v21.0',
@@ -42,7 +45,29 @@ const config = {
       String(process.env.AGENT_DESK_ENABLED || 'true').toLowerCase() !== 'false',
     deskPassword: process.env.AGENT_DESK_PASSWORD || '',
     transcriptPath: process.env.AGENT_TRANSCRIPT_PATH || './data/transcripts',
+    mediaPath: process.env.AGENT_MEDIA_PATH || './data/media',
+    shortcutsPath:
+      process.env.AGENT_SHORTCUTS_PATH || './data/agent/shortcuts.json',
+    labelsPath: process.env.AGENT_LABELS_PATH || './data/agent/labels.json',
+    chatReadsPath:
+      process.env.AGENT_CHAT_READS_PATH || './data/agent/chat_reads.json',
+    // file | postgres — defaults to postgres when DATABASE_URL is set (Supabase).
+    messageStore: (process.env.MESSAGE_STORE || '').toLowerCase(),
+    databaseUrl: process.env.DATABASE_URL || '',
+    // Skip unread/label/session enrichment on the inbox list (Render emergency).
+    deskEmergency:
+      String(process.env.AGENT_DESK_EMERGENCY || '').toLowerCase() === 'true',
+    inboxEnrichMs: intEnv('AGENT_DESK_INBOX_ENRICH_MS', 1500),
+    inboxListMs: intEnv('AGENT_DESK_INBOX_LIST_MS', 8000),
+    // Off-request-thread funnel label backfill. Never runs on GET /api/chats.
+    labelBackfillEnabled:
+      String(process.env.AGENT_DESK_LABEL_BACKFILL || 'true').toLowerCase() !==
+      'false',
+    labelBackfillIntervalMs: intEnv('AGENT_DESK_LABEL_BACKFILL_MS', 20000),
+    labelBackfillBatch: intEnv('AGENT_DESK_LABEL_BACKFILL_BATCH', 2),
+    labelBackfillTickMs: intEnv('AGENT_DESK_LABEL_BACKFILL_TICK_MS', 1500),
   },
+
 
   session: {
     ttlMs: intEnv('SESSION_TTL_MS', 24 * 60 * 60 * 1000),
@@ -64,7 +89,9 @@ const config = {
   },
 
   links: {
-    applicationLink: process.env.APPLICATION_LINK || '',
+    applicationLink:
+      process.env.APPLICATION_LINK ||
+      'https://forms.gle/eZq13HF91GpGqivU9',
     stockLink: process.env.STOCK_LINK || '',
   },
 
