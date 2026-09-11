@@ -53,11 +53,22 @@ function testExtractImageAndDocument() {
   assert.strictEqual(doc.mediaId, 'media.doc');
 
   assert.strictEqual(
-    extractInboundMessage({ from: '27821234567', type: 'audio', audio: { id: 'x' } }),
-    null
+    extractInboundMessage({ from: '27821234567', type: 'audio', audio: { id: 'x' } }).text,
+    '[Audio]'
   );
+  assert.strictEqual(
+    extractInboundMessage({ from: '27821234567', type: 'audio', audio: { id: 'x' } }).skipFsm,
+    true
+  );
+  const loc = extractInboundMessage({
+    from: '27821234567',
+    type: 'location',
+    location: { name: 'Melrose Arch' },
+  });
+  assert.strictEqual(loc.text, '[Location: Melrose Arch]');
+  assert.strictEqual(loc.skipFsm, true);
   // eslint-disable-next-line no-console
-  console.log('✓ extractInboundMessage supports image/document and skips audio');
+  console.log('✓ extractInboundMessage stores image/document and placeholder types');
 }
 
 async function testWebhookStoresMediaAndSkipsFsm() {
@@ -137,9 +148,139 @@ async function testWebhookStoresMediaAndSkipsFsm() {
   }
 }
 
+async function testWebhookStoresAudioWithoutFsm() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inbound-audio-'));
+  const messageStore = createMessageStore(dir);
+  const handled = [];
+  const engine = {
+    handleInbound: async (from, text) => {
+      handled.push({ from, text });
+    },
+  };
+  const app = express();
+  app.use(express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = Buffer.from(buf);
+    },
+  }));
+  app.use(
+    '/webhook',
+    createWebhookRouter({
+      engine,
+      requireSignature: false,
+      inboundDedupe: createInboundDedupe(),
+      messageStore,
+    })
+  );
+
+  const { server, port } = await listen(app);
+  try {
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: 'wamid.audio.1',
+                    from: '27829990009',
+                    type: 'audio',
+                    audio: { id: 'mid.audio', mime_type: 'audio/ogg' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const res = await postJson(port, '/webhook', payload);
+    assert.strictEqual(res.status, 200);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.strictEqual(handled.length, 0, 'FSM must not run for audio placeholders');
+    const messages = await messageStore.listMessages('27829990009');
+    assert.strictEqual(messages.length, 1);
+    assert.strictEqual(messages[0].text, '[Audio]');
+    // eslint-disable-next-line no-console
+    console.log('✓ webhook stores inbound audio placeholder and skips FSM');
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function testPersistRetriesWithoutExtras() {
+  const saved = [];
+  let calls = 0;
+  const messageStore = {
+    append: async (row) => {
+      calls += 1;
+      if (calls === 1) {
+        throw new Error('column media_kind does not exist');
+      }
+      saved.push(row);
+      return row;
+    },
+  };
+  const engine = { handleInbound: async () => {} };
+  const app = express();
+  app.use(express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = Buffer.from(buf);
+    },
+  }));
+  app.use(
+    '/webhook',
+    createWebhookRouter({
+      engine,
+      requireSignature: false,
+      inboundDedupe: createInboundDedupe(),
+      messageStore,
+    })
+  );
+  const { server, port } = await listen(app);
+  try {
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: 'wamid.retry.1',
+                    from: '27829990008',
+                    type: 'text',
+                    text: { body: 'hi' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const res = await postJson(port, '/webhook', payload);
+    assert.strictEqual(res.status, 200);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.ok(calls >= 2, 'append retries after first failure');
+    assert.ok(saved.length >= 1, 'retry without extras is stored');
+    assert.ok(String(saved[0].text).includes('hi'));
+    // eslint-disable-next-line no-console
+    console.log('✓ webhook retries transcript persist without extras');
+  } finally {
+    server.close();
+  }
+}
+
 async function main() {
   testExtractImageAndDocument();
   await testWebhookStoresMediaAndSkipsFsm();
+  await testWebhookStoresAudioWithoutFsm();
+  await testPersistRetriesWithoutExtras();
   // eslint-disable-next-line no-console
   console.log('\ninbound media tests passed.');
 }

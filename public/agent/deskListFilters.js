@@ -50,6 +50,20 @@
     return searchDigitCandidates(query).map((d) => '%' + d + '%');
   }
 
+  /** Keys to try when opening / listing a stored chat (27 / 0 / + / suffix). */
+  function waLookupKeys(waNumber) {
+    const wa = digitsOnly(waNumber);
+    const raw = String(waNumber || '');
+    const keys = searchDigitCandidates(wa || raw);
+    const add = (value) => {
+      if (value && keys.indexOf(value) === -1) keys.push(value);
+    };
+    add(wa);
+    add(raw);
+    if (wa) add('+' + wa);
+    return keys;
+  }
+
   function waNumberMatchesQuery(waNumber, query) {
     const wa = digitsOnly(waNumber);
     const q = String(query || '').trim();
@@ -160,6 +174,7 @@
     digitsOnly,
     searchDigitCandidates,
     searchLikePatterns,
+    waLookupKeys,
     waNumberMatchesQuery,
     mergeDeskSearchHits,
     deskChatHasLabel,

@@ -131,7 +131,64 @@ function extractInboundMessage(message) {
     };
   }
 
-  return null;
+  return fallbackInbound(message);
+}
+
+function fallbackInbound(message) {
+  if (!message || !message.from) return null;
+  const type = String(message.type || 'unknown');
+  let text = '';
+  if (type === 'audio' || type === 'voice') text = '[Audio]';
+  else if (type === 'video') text = '[Video]';
+  else if (type === 'sticker') text = '[Sticker]';
+  else if (type === 'location') {
+    const loc = message.location || {};
+    const label = loc.name || loc.address || '';
+    text = label ? `[Location: ${label}]` : '[Location]';
+  } else if (type === 'contacts') text = '[Contact]';
+  else if (type === 'reaction') {
+    const emoji = message.reaction && message.reaction.emoji;
+    text = emoji ? `[Reaction: ${emoji}]` : '[Reaction]';
+  } else if (type === 'button') {
+    const btn = message.button || {};
+    text = String(btn.text || btn.payload || '[Button]');
+  } else if (type === 'system') text = '[WhatsApp system]';
+  else text = `[WhatsApp ${type}]`;
+  return {
+    from: message.from,
+    text,
+    replyId: null,
+    productRetailerId: null,
+    catalogId: null,
+    mediaKind: null,
+    skipFsm: true,
+    inboundType: type,
+  };
+}
+
+async function persistDeskRow(messageStore, row) {
+  if (!messageStore || typeof messageStore.append !== 'function') return false;
+  try {
+    await messageStore.append(row);
+    return true;
+  } catch (err) {
+    diagnostics.recordTranscriptAppendError(err);
+    // eslint-disable-next-line no-console
+    console.error('[webhook] transcript append failed', err.message);
+    try {
+      await messageStore.append({
+        waNumber: row.waNumber,
+        direction: row.direction || 'in',
+        source: row.source || 'customer',
+        text: String(row.text || '[message]') + ' (retry without extras)',
+        wamid: row.wamid || null,
+      });
+      return true;
+    } catch (err2) {
+      diagnostics.recordTranscriptAppendError(err2);
+      return false;
+    }
+  }
 }
 
 async function persistInboundMedia(inbound, messageStore, downloadFn) {
@@ -243,6 +300,9 @@ function createWebhookRouter({
               from: inbound.from,
               type: message.type,
             });
+            if (inbound.skipFsm) {
+              diagnostics.recordSkippedInboundType(inbound.inboundType || message.type);
+            }
 
             // Customer media: store for the desk, skip FSM (do not treat as menu answers).
             if (inbound.mediaKind) {
@@ -257,24 +317,18 @@ function createWebhookRouter({
                 diagnostics.recordHandleError(err);
                 dedupe.release(message.id);
                 // Still leave a placeholder so staff see that something arrived.
-                if (messageStore) {
-                  try {
-                    await messageStore.append({
-                      waNumber: inbound.from,
-                      direction: 'in',
-                      source: 'customer',
-                      text:
-                        placeholderText({
-                          mediaKind: inbound.mediaKind,
-                          filename: inbound.filename,
-                          caption: inbound.text,
-                        }) + ' (media unavailable)',
-                      wamid: message.id || null,
-                    });
-                  } catch (_) {
-                    // ignore secondary failure
-                  }
-                }
+                await persistDeskRow(messageStore, {
+                  waNumber: inbound.from,
+                  direction: 'in',
+                  source: 'customer',
+                  text:
+                    placeholderText({
+                      mediaKind: inbound.mediaKind,
+                      filename: inbound.filename,
+                      caption: inbound.text,
+                    }) + ' (media unavailable)',
+                  wamid: message.id || null,
+                });
                 // eslint-disable-next-line no-console
                 console.error('[webhook] inbound media processing error', {
                   messageId: message.id,
@@ -285,22 +339,36 @@ function createWebhookRouter({
               continue;
             }
 
-            if (messageStore) {
+            if (inbound.skipFsm) {
+              if (!dedupe.begin(message.id)) continue;
               try {
-                await messageStore.append({
+                await persistDeskRow(messageStore, {
                   waNumber: inbound.from,
                   direction: 'in',
                   source: 'customer',
-                  text: inbound.replyId
-                    ? `${inbound.text}${inbound.text ? ' ' : ''}[${inbound.replyId}]`
-                    : inbound.text,
-                  replyId: inbound.replyId,
+                  text: inbound.text,
                   wamid: message.id || null,
                 });
+                diagnostics.recordHandled();
+                dedupe.commit(message.id);
               } catch (err) {
-                // eslint-disable-next-line no-console
-                console.error('[webhook] transcript append failed', err.message);
+                diagnostics.recordHandleError(err);
+                dedupe.release(message.id);
               }
+              continue;
+            }
+
+            if (messageStore) {
+              await persistDeskRow(messageStore, {
+                waNumber: inbound.from,
+                direction: 'in',
+                source: 'customer',
+                text: inbound.replyId
+                  ? `${inbound.text}${inbound.text ? ' ' : ''}[${inbound.replyId}]`
+                  : inbound.text,
+                replyId: inbound.replyId,
+                wamid: message.id || null,
+              });
             }
             if (!dedupe.begin(message.id)) continue;
             try {

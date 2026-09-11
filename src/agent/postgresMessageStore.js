@@ -115,7 +115,7 @@ function createPostgresMessageStore(connectionString) {
 
   async function append(message) {
     await ensureSchema();
-    const waNumber = String(message.waNumber || '');
+    const waNumber = normalizeWa(message.waNumber) || String(message.waNumber || '');
     if (!waNumber) return null;
     const row = {
       id:
@@ -178,8 +178,15 @@ function createPostgresMessageStore(connectionString) {
     });
   }
 
+  function lookupKeys(waNumber) {
+    const { waLookupKeys } = require('../../public/agent/deskListFilters');
+    return waLookupKeys(waNumber);
+  }
+
   async function listMessages(waNumber, { limit = 200 } = {}) {
     await ensureSchema();
+    const keys = lookupKeys(waNumber);
+    if (!keys.length) return [];
     const { rows } = await pool.query(
       `SELECT id, wa_number, direction, source, text, reply_id, wamid, at,
               media_kind, media_mime, media_filename, media_byte_length
@@ -187,24 +194,31 @@ function createPostgresMessageStore(connectionString) {
          SELECT id, wa_number, direction, source, text, reply_id, wamid, at,
                 media_kind, media_mime, media_filename, media_byte_length
          FROM chat_messages
-         WHERE wa_number = $1
+         WHERE regexp_replace(wa_number, '\\D', '', 'g') = ANY($1::text[])
+            OR wa_number = ANY($1::text[])
          ORDER BY at DESC
          LIMIT $2
        ) recent
        ORDER BY at ASC`,
-      [String(waNumber), limit]
+      [keys, limit]
     );
     return rows.map(mapRow);
   }
 
   async function readMedia(waNumber, messageId) {
     await ensureSchema();
+    const keys = lookupKeys(waNumber);
+    if (!keys.length) return null;
     const { rows } = await pool.query(
       `SELECT media_kind, media_mime, media_filename, media_bytes
        FROM chat_messages
-       WHERE wa_number = $1 AND id = $2
+       WHERE id = $2
+         AND (
+           regexp_replace(wa_number, '\\D', '', 'g') = ANY($1::text[])
+           OR wa_number = ANY($1::text[])
+         )
        LIMIT 1`,
-      [String(waNumber), String(messageId)]
+      [keys, String(messageId)]
     );
     const row = rows[0];
     if (!row || !row.media_kind || !row.media_bytes) return null;

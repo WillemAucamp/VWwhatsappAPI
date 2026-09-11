@@ -60,6 +60,7 @@ function createApp(overrides = {}) {
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[transcript] outbound append failed', err.message);
+        webhookDiagnostics.recordTranscriptAppendError(err);
       }
     }
     return result;
