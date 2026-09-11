@@ -1142,8 +1142,16 @@
       await loadDeskMeta();
       await loadChats();
       if (state.poll) clearInterval(state.poll);
-      state.poll = setInterval(() => {
-        loadChats(true);
+      state.poll = setInterval(async () => {
+        // Keep the chat you are looking at read as new messages land, the way
+        // WhatsApp does — unless you marked it unread on purpose.
+        if (state.selected) {
+          const open = state.chats.find((c) => c.waNumber === state.selected);
+          if (!(open && open.forcedUnread)) {
+            await markChatRead(state.selected, false);
+          }
+        }
+        await loadChats(true);
         if (state.selected) loadThread(state.selected, true);
         refreshAuthBanner();
       }, 5000);
@@ -1279,14 +1287,24 @@
       }, 0);
     }
 
-    /** Prefer API unreadCount; floor at 1 when latest message is still from the customer. */
+    /**
+     * Unread = customer messages plus bot replies staff have not reviewed.
+     * Messages an agent typed here never count. A manually unread chat keeps
+     * its badge even while it is the open thread.
+     */
     function chatUnreadCount(c) {
       if (!c) return 0;
-      if (state.selected && String(c.waNumber) === String(state.selected)) return 0;
+      if (
+        state.selected &&
+        String(c.waNumber) === String(state.selected) &&
+        !c.forcedUnread
+      ) {
+        return 0;
+      }
       let n = Number(c.unreadCount) || 0;
       if (c.forcedUnread) n = Math.max(n, 1);
-      const customerLast = c.lastDirection === 'in' || c.lastSource === 'customer';
-      if (customerLast && (!c.lastReadAt || String(c.lastAt) > String(c.lastReadAt))) {
+      const unreviewedLast = c.lastSource !== 'agent';
+      if (unreviewedLast && (!c.lastReadAt || String(c.lastAt) > String(c.lastReadAt))) {
         n = Math.max(n, 1);
       }
       return n;
@@ -1506,11 +1524,13 @@
         );
       }).join('');
       list.querySelectorAll('.chat-item').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
           const next = btn.getAttribute('data-wa');
           if (next !== state.selected) clearPendingImages();
           state.selected = next;
           renderChatList();
+          // Clicking a chat is the explicit open: it clears a manual unread.
+          await markChatRead(next, true);
           loadThread(state.selected);
         });
       });
@@ -1572,6 +1592,7 @@
         el('emergencyText').value = '';
         state.selected = wa;
         await loadChats();
+        await markChatRead(wa, true);
         await loadThread(wa);
       } catch (err) {
         el('emergencyError').textContent = err.message || 'Send failed';
@@ -1747,6 +1768,34 @@
       box.innerHTML = labels.map((l) => labelPillHtml(l)).join('');
     }
 
+    /**
+     * Mark a chat read on the desk. force=true means staff clicked the chat,
+     * which also clears a manual unread; the background refresh passes false so
+     * it cannot undo one.
+     */
+    async function markChatRead(wa, force) {
+      if (!wa) return null;
+      try {
+        const res = await api('/api/chats/' + encodeURIComponent(wa) + '/read', {
+          method: 'POST',
+          body: JSON.stringify({ force: Boolean(force) }),
+          timeoutMs: 8000,
+        });
+        const chat = state.chats.find((c) => c.waNumber === wa);
+        if (chat && !res.skipped) {
+          chat.unreadCount = 0;
+          chat.forcedUnread = false;
+          chat.lastReadAt = res.lastReadAt || chat.lastReadAt;
+          renderLabelFilters();
+          renderChatList();
+        }
+        return res;
+      } catch (err) {
+        if (err.status === 401) showLogin();
+        return null;
+      }
+    }
+
     async function loadThread(wa, silent) {
       el('threadError').textContent = '';
       try {
@@ -1759,11 +1808,11 @@
         state.threadLabelIds = data.labelIds || [];
         renderThreadLabels(data.labels || []);
         setThreadActionsEnabled(true);
-        // Clear unread locally; next poll refreshes from server after mark-read.
+        // Reading a thread does not mark it read; markChatRead owns that.
         const chat = state.chats.find((c) => c.waNumber === wa);
         if (chat) {
-          chat.unreadCount = 0;
           chat.lastReadAt = data.lastReadAt || chat.lastReadAt;
+          chat.forcedUnread = Boolean(data.forcedUnread);
           renderLabelFilters();
           renderChatList();
         }
@@ -2336,17 +2385,19 @@
       if (!state.selected) return;
       const wa = state.selected;
       try {
-        await api('/api/chats/' + encodeURIComponent(wa) + '/unread', {
+        const res = await api('/api/chats/' + encodeURIComponent(wa) + '/unread', {
           method: 'POST',
           body: '{}',
         });
-        // Leave the thread so the next poll does not immediately mark it read again.
-        state.selected = null;
-        setThreadActionsEnabled(false);
-        el('threadTitle').textContent = 'Select a chat';
-        el('threadStatus').textContent = '';
-        el('threadLabels').innerHTML = '';
-        el('messages').innerHTML = '<div class="empty">Marked +' + wa + ' as unread.</div>';
+        // The thread stays open; the badge sticks until the chat is opened again.
+        const chat = state.chats.find((c) => c.waNumber === wa);
+        if (chat) {
+          chat.forcedUnread = true;
+          chat.unreadCount = Math.max(1, Number(chat.unreadCount) || 0);
+          chat.lastReadAt = res.lastReadAt || chat.lastReadAt;
+        }
+        renderLabelFilters();
+        renderChatList();
         await loadChats(true);
       } catch (err) {
         el('threadError').textContent = err.message;
