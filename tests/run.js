@@ -27,6 +27,7 @@ const files = [
   'desk-auto-labels.test.js',
   'desk-labels-cement.test.js',
   'message-store.test.js',
+  'soft-closed-ack-not-stocklist.test.js',
 ];
 
 let failed = 0;
