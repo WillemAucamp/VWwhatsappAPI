@@ -51,6 +51,41 @@ function withTimeout(promise, ms, fallback) {
 }
 
 /**
+ * Snapshot hold state before a desk send so a Graph failure can undo a
+ * takeOver that never delivered an agent message (avoids silent agentTakenOver).
+ */
+async function snapshotDeskHold(sessionStore, wa) {
+  if (!sessionStore || typeof sessionStore.get !== 'function') {
+    return { heldBefore: false, status: 'active', interruptedFrom: null };
+  }
+  const existing = await sessionStore.get(wa);
+  if (!existing) {
+    return { heldBefore: false, status: 'active', interruptedFrom: null };
+  }
+  return {
+    heldBefore: Boolean(existing.agentTakenOver),
+    status: existing.status || 'active',
+    interruptedFrom: existing.interruptedFrom || null,
+  };
+}
+
+/**
+ * Undo a silent takeOver that preceded a failed Graph send. Does not call
+ * releaseToBot (which would Graph-send the resumed prompt and also fail).
+ */
+async function rollbackDeskTakeOver(sessionStore, wa, prior) {
+  if (!prior || prior.heldBefore) return;
+  if (!sessionStore || typeof sessionStore.get !== 'function') return;
+  const session = await sessionStore.get(wa);
+  if (!session || !session.agentTakenOver) return;
+  session.agentTakenOver = false;
+  session.status = prior.status || 'active';
+  session.interruptedFrom = prior.interruptedFrom || null;
+  session.updatedAt = new Date().toISOString();
+  await sessionStore.set(wa, session);
+}
+
+/**
  * Attach funnel labels from the live session and/or transcript.
  * Inbox list must stay light: never scan full transcripts there (that timed
  * out on Render and made the desk look empty). Thread open may scan once;
@@ -435,15 +470,34 @@ function createAgentRouter({
         return res.status(400).json({ error: 'wa_and_text_required' });
       }
 
-      // Ensure chat is under agent control so the bot stays quiet.
+      // Take over before Graph send so concurrent inbound stays quiet — but
+      // roll back if Graph fails so the customer is not left in a silent hold
+      // with no delivered agent message.
+      const priorHold = await snapshotDeskHold(sessionStore, wa);
       if (engine && typeof engine.takeOver === 'function') {
         await engine.takeOver(wa, { silent: true });
       }
 
-      const result = await sendMessage(wa, {
-        text,
-        meta: { source: 'agent', stateId: null },
-      });
+      let result;
+      try {
+        result = await sendMessage(wa, {
+          text,
+          meta: { source: 'agent', stateId: null },
+        });
+      } catch (sendErr) {
+        try {
+          await rollbackDeskTakeOver(sessionStore, wa, priorHold);
+        } catch (rollbackErr) {
+          // eslint-disable-next-line no-console
+          console.error(
+            '[agent-desk] rollback takeOver after failed reply',
+            rollbackErr && rollbackErr.message
+              ? rollbackErr.message
+              : String(rollbackErr)
+          );
+        }
+        throw sendErr;
+      }
       const wamid =
         result &&
         result.messages &&
@@ -508,18 +562,35 @@ function createAgentRouter({
           return res.status(400).json({ error: 'empty_image' });
         }
 
+        const priorHold = await snapshotDeskHold(sessionStore, wa);
         if (engine && typeof engine.takeOver === 'function') {
           await engine.takeOver(wa, { silent: true });
         }
 
-        const result = await sendMessage(wa, {
-          type: 'image',
-          mediaBuffer: buffer,
-          mimeType,
-          filename,
-          text: caption,
-          meta: { source: 'agent', stateId: null },
-        });
+        let result;
+        try {
+          result = await sendMessage(wa, {
+            type: 'image',
+            mediaBuffer: buffer,
+            mimeType,
+            filename,
+            text: caption,
+            meta: { source: 'agent', stateId: null },
+          });
+        } catch (sendErr) {
+          try {
+            await rollbackDeskTakeOver(sessionStore, wa, priorHold);
+          } catch (rollbackErr) {
+            // eslint-disable-next-line no-console
+            console.error(
+              '[agent-desk] rollback takeOver after failed media reply',
+              rollbackErr && rollbackErr.message
+                ? rollbackErr.message
+                : String(rollbackErr)
+            );
+          }
+          throw sendErr;
+        }
         const wamid =
           result &&
           result.messages &&

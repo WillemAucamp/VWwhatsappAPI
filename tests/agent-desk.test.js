@@ -638,10 +638,124 @@ async function testInboxSurvivesHangingLabels() {
   }
 }
 
+async function testReplyRollsBackTakeOverWhenGraphFails() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-reply-rollback-'));
+  const messageStore = createMessageStore(dir);
+  const sessionStore = new MemorySessionStore();
+  const engine = new FsmEngine({
+    sessionStore,
+    leadLogger: new CapturingLogger(),
+    sendMessage: async () => ({ messages: [{ id: 'wamid.bot' }] }),
+    notifyAgent: async () => ({ delivered: false }),
+  });
+
+  // Put customer mid-funnel so a silent hold would block progress.
+  await engine.handleInbound('27821110001', 'hi', { messageId: 'wamid.in.1' });
+  const before = await sessionStore.get('27821110001');
+  assert.ok(before);
+  assert.strictEqual(before.agentTakenOver, false);
+  assert.notStrictEqual(before.status, 'quiet');
+  const priorState = before.currentState;
+  const priorStatus = before.status;
+
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/agent',
+    createAgentRouter({
+      engine,
+      sessionStore,
+      messageStore,
+      shortcutStore: createShortcutStore(path.join(dir, 'shortcuts.json')),
+      labelStore: createLabelStore(path.join(dir, 'labels.json')),
+      chatReadStore: createChatReadStore(path.join(dir, 'chat_reads.json')),
+      sendMessage: async () => {
+        const err = new Error('Graph token expired');
+        err.response = { error: { message: 'Invalid OAuth access token' } };
+        throw err;
+      },
+    })
+  );
+  const { server, port } = await listen(app);
+  try {
+    const reply = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27821110001/reply`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ text: 'Staff never delivered this' }),
+      }
+    );
+    assert.strictEqual(reply.status, 502);
+    const after = await sessionStore.get('27821110001');
+    assert.strictEqual(
+      after.agentTakenOver,
+      false,
+      'failed Graph reply must not leave agentTakenOver hold'
+    );
+    assert.strictEqual(after.status, priorStatus);
+    assert.strictEqual(after.currentState, priorState);
+
+    // Customer can still progress with the bot after the failed desk send.
+    const next = await engine.handleInbound('27821110001', '1', {
+      messageId: 'wamid.in.2',
+    });
+    assert.ok(next);
+    const afterInbound = await sessionStore.get('27821110001');
+    assert.strictEqual(afterInbound.agentTakenOver, false);
+
+    // Already-held chats must stay held when a later Graph send fails.
+    await engine.takeOver('27821110001', { silent: true });
+    const heldReply = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27821110001/reply`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ text: 'still failing' }),
+      }
+    );
+    assert.strictEqual(heldReply.status, 502);
+    const stillHeld = await sessionStore.get('27821110001');
+    assert.strictEqual(stillHeld.agentTakenOver, true);
+    assert.strictEqual(stillHeld.status, 'quiet');
+
+    // Media reply path has the same rollback.
+    await engine.releaseToBot('27821110001');
+    const mid = await sessionStore.get('27821110001');
+    assert.strictEqual(mid.agentTakenOver, false);
+    const tinyPngBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const mediaFail = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27821110001/reply-media`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          imageBase64: tinyPngBase64,
+          mimeType: 'image/png',
+        }),
+      }
+    );
+    assert.strictEqual(mediaFail.status, 502);
+    const afterMedia = await sessionStore.get('27821110001');
+    assert.strictEqual(
+      afterMedia.agentTakenOver,
+      false,
+      'failed media reply must not leave silent hold'
+    );
+
+    // eslint-disable-next-line no-console
+    console.log('✓ desk reply rolls back takeOver when Graph send fails');
+  } finally {
+    server.close();
+  }
+}
+
 async function main() {
   await testMessageStoreAndApis();
   await testThreadOpenReturnsWhenLabelWriteFails();
   await testInboxSurvivesHangingLabels();
+  await testReplyRollsBackTakeOverWhenGraphFails();
   // eslint-disable-next-line no-console
   console.log('\nagent desk tests passed.');
 }
