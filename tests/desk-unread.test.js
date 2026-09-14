@@ -249,12 +249,26 @@ function testDeskUiWiresExplicitRead() {
     'clicking a chat is an explicit open'
   );
   assert.ok(
+    html.includes('readByWa'),
+    'desk must keep a local read cursor so a stale list cannot undo an open'
+  );
+  assert.ok(
+    html.includes('mergeChatsWithLocalReads') || html.includes('applyLocalReadOverride'),
+    'list refresh must honour the cursor written on click'
+  );
+  assert.ok(
     html.includes('forcedUnread'),
     'desk must respect a manually unread chat'
   );
   assert.ok(
     !/chat\.unreadCount = 0;\s*\n\s*chat\.lastReadAt = data\.lastReadAt/.test(html),
     'loadThread must not clear unread by itself'
+  );
+  assert.ok(
+    !/state\.selected &&\s*\n\s*String\(c\.waNumber\) === String\(state\.selected\)/.test(
+      html
+    ),
+    'selected row must not fake unreadCount=0'
   );
   // eslint-disable-next-line no-console
   console.log('✓ desk UI marks read on open, not on every poll');

@@ -1079,6 +1079,10 @@
       selected: null,
       poll: null,
       chats: [],
+      // Successful POST /read cursors, keyed by wa. Stops a slower in-flight
+      // GET /api/chats from putting the badge back after you open a chat.
+      readByWa: {},
+      chatsLoadSeq: 0,
       shortcuts: [],
       labels: [],
       labelColors: ['#128c7e', '#027eb5', '#c4530a', '#b42318', '#6941c6', '#067647', '#363f72', '#b54708', '#ca8a04'],
@@ -1232,6 +1236,8 @@
       closeMenus();
       try { await api('/api/logout', { method: 'POST', body: '{}' }); } catch (_) {}
       state.token = '';
+      state.readByWa = {};
+      state.selected = null;
       sessionStorage.removeItem('agentToken');
       showLogin();
     }
@@ -1291,16 +1297,11 @@
      * Unread = customer messages plus bot replies staff have not reviewed.
      * Messages an agent typed here never count. A manually unread chat keeps
      * its badge even while it is the open thread.
+     * Do NOT zero the badge merely because the row is selected — that hid
+     * failed mark-read calls and made the badge snap back on deselect.
      */
     function chatUnreadCount(c) {
       if (!c) return 0;
-      if (
-        state.selected &&
-        String(c.waNumber) === String(state.selected) &&
-        !c.forcedUnread
-      ) {
-        return 0;
-      }
       let n = Number(c.unreadCount) || 0;
       if (c.forcedUnread) n = Math.max(n, 1);
       const unreviewedLast = c.lastSource !== 'agent';
@@ -1308,6 +1309,34 @@
         n = Math.max(n, 1);
       }
       return n;
+    }
+
+    /** Prefer a fresher cursor we just wrote via POST /read over a stale list. */
+    function applyLocalReadOverride(chat) {
+      if (!chat || !chat.waNumber) return chat;
+      const wa = String(chat.waNumber);
+      const localAt = state.readByWa[wa];
+      if (!localAt) return chat;
+      if (chat.forcedUnread) return chat;
+      const serverAt = chat.lastReadAt || null;
+      if (serverAt && String(serverAt) >= String(localAt)) {
+        // Server caught up; drop the override.
+        delete state.readByWa[wa];
+        return chat;
+      }
+      const lastAt = chat.lastAt || null;
+      const unreviewedLast = chat.lastSource !== 'agent';
+      const newerThanLocal =
+        Boolean(lastAt) && unreviewedLast && String(lastAt) > String(localAt);
+      return Object.assign({}, chat, {
+        lastReadAt: localAt,
+        forcedUnread: false,
+        unreadCount: newerThanLocal ? Math.max(Number(chat.unreadCount) || 0, 1) : 0,
+      });
+    }
+
+    function mergeChatsWithLocalReads(chats) {
+      return (chats || []).map(applyLocalReadOverride);
     }
 
     function updateFilterScrollHints() {
@@ -1529,9 +1558,14 @@
           if (next !== state.selected) clearPendingImages();
           state.selected = next;
           renderChatList();
-          // Clicking a chat is the explicit open: it clears a manual unread.
-          await markChatRead(next, true);
-          loadThread(state.selected);
+          // Clicking a chat is the explicit open: mark it read before loading
+          // the thread so a slow GET /api/chats cannot put the badge back.
+          const marked = await markChatRead(next, true);
+          if (!marked) {
+            el('threadError').textContent =
+              'Could not mark this chat as read. Check your connection and try again.';
+          }
+          await loadThread(state.selected);
         });
       });
     }
@@ -1613,24 +1647,28 @@
       const params = new URLSearchParams();
       if (state.emergencyInbox) params.set('emergency', '1');
       const qs = params.toString() ? '?' + params.toString() : '';
+      const seq = ++state.chatsLoadSeq;
       try {
         let data = await api('/api/chats' + qs, { timeoutMs: 10000 });
+        if (seq !== state.chatsLoadSeq) return;
         if ((!data.chats || !data.chats.length) && !state.emergencyInbox) {
           let stored = 0;
           try {
             const status = await api('/api/status', { timeoutMs: 5000 });
             stored = Number(status.chatCount) || 0;
           } catch (_) {}
+          if (seq !== state.chatsLoadSeq) return;
           if (stored > 0) {
             setEmergencyInbox(true);
             data = await api('/api/chats?emergency=1', { timeoutMs: 10000 });
+            if (seq !== state.chatsLoadSeq) return;
             setInboxBanner(
               stored + ' chats are stored. Inbox switched to emergency list so numbers stay visible.',
               true
             );
           }
         }
-        state.chats = data.chats || [];
+        state.chats = mergeChatsWithLocalReads(data.chats || []);
         if (searching) {
           try {
             const searchParams = new URLSearchParams(params);
@@ -1785,7 +1823,8 @@
         if (chat && !res.skipped) {
           chat.unreadCount = 0;
           chat.forcedUnread = false;
-          chat.lastReadAt = res.lastReadAt || chat.lastReadAt;
+          chat.lastReadAt = res.lastReadAt || chat.lastReadAt || new Date().toISOString();
+          if (chat.lastReadAt) state.readByWa[String(wa)] = chat.lastReadAt;
           renderLabelFilters();
           renderChatList();
         }
@@ -1809,10 +1848,23 @@
         renderThreadLabels(data.labels || []);
         setThreadActionsEnabled(true);
         // Reading a thread does not mark it read; markChatRead owns that.
+        // Keep any fresher cursor we already wrote on click so a slower list
+        // refresh cannot put the unread badge back.
         const chat = state.chats.find((c) => c.waNumber === wa);
         if (chat) {
-          chat.lastReadAt = data.lastReadAt || chat.lastReadAt;
+          const localAt = state.readByWa[String(wa)];
+          const fromThread = data.lastReadAt || null;
+          if (localAt && (!fromThread || String(localAt) >= String(fromThread))) {
+            chat.lastReadAt = localAt;
+          } else if (fromThread) {
+            chat.lastReadAt = fromThread;
+          }
+          // After a forced open (POST /read?force), forcedUnread is false on
+          // the server; trust the thread payload for the flag.
           chat.forcedUnread = Boolean(data.forcedUnread);
+          if (!chat.forcedUnread && chat.lastReadAt && !(Number(chat.unreadCount) > 0)) {
+            chat.unreadCount = 0;
+          }
           renderLabelFilters();
           renderChatList();
         }
@@ -2397,6 +2449,8 @@
           chat.forcedUnread = true;
           chat.unreadCount = 1;
           chat.lastReadAt = res.lastReadAt || chat.lastReadAt;
+          // Manual unread wins over a local read override until opened again.
+          delete state.readByWa[String(wa)];
         }
         renderLabelFilters();
         renderChatList();
