@@ -181,7 +181,7 @@ function createAgentRouter({
       webhookSignatureRejects: snap.postRejectedSignature || 0,
       chatCount,
       chatListError,
-      inboxList: 'raw-list-2026-09-10',
+      inboxList: 'labels-in-emergency-2026-09-14',
       emergency: Boolean(config.agent.deskEmergency),
     });
   });
@@ -224,6 +224,9 @@ function createAgentRouter({
       let labelBundle = { labels: [], chatLabels: {} };
       const sessionByWa = new Map();
 
+      // Labels stay on even in emergency mode so label filter chips still work.
+      // Skip only the heavier unread + session enrichment when emergency=1.
+      const labelPromise = withTimeout(labels.getChatLabelsMap(), enrichMs, null);
       if (!emergency) {
         const [readState, labelsMap, sessions] = await Promise.all([
           withTimeout(
@@ -233,7 +236,7 @@ function createAgentRouter({
             enrichMs,
             null
           ),
-          withTimeout(labels.getChatLabelsMap(), enrichMs, null),
+          labelPromise,
           sessionStore && typeof sessionStore.listAll === 'function'
             ? withTimeout(sessionStore.listAll(), enrichMs, null)
             : Promise.resolve(null),
@@ -250,6 +253,11 @@ function createAgentRouter({
             const wa = String((session && session.waNumber) || '').replace(/\D/g, '');
             if (wa) sessionByWa.set(wa, session);
           }
+        }
+      } else {
+        const labelsMap = await labelPromise;
+        if (labelsMap && typeof labelsMap === 'object') {
+          labelBundle = labelsMap;
         }
       }
 
@@ -294,7 +302,7 @@ function createAgentRouter({
       res.json({
         chats: enriched,
         emergency,
-        inbox: 'raw-list-2026-09-10',
+        inbox: 'labels-in-emergency-2026-09-14',
         search: searching ? query : null,
       });
     } catch (err) {

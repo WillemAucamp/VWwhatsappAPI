@@ -144,8 +144,8 @@ function createApp(overrides = {}) {
         settingsStore:
           labelStore && labelStore.backend ? labelStore.backend : 'file',
         labelsCatalog: 'cemented-2026-09-10',
-        // Inbox list must not scan every transcript (blank desk on timeout).
-        inboxList: 'raw-list-2026-09-10',
+        // Emergency inbox still attaches labels so filter chips work.
+        inboxList: 'labels-in-emergency-2026-09-14',
         emergency: Boolean(config.agent.deskEmergency),
       },
     });

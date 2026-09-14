@@ -431,7 +431,7 @@ async function testMessageStoreAndApis() {
     );
     assert.ok(typeof status.chatCount === 'number');
     assert.ok(status.chatCount >= 2);
-    assert.strictEqual(status.inboxList, 'raw-list-2026-09-10');
+    assert.strictEqual(status.inboxList, 'labels-in-emergency-2026-09-14');
 
     await messageStore.append({
       waNumber: '27648411242',
@@ -467,6 +467,16 @@ async function testMessageStoreAndApis() {
     ).then((r) => r.json());
     assert.strictEqual(emergencyList.emergency, true);
     assert.ok(emergencyList.chats.find((c) => c.waNumber === '27821234567'));
+    const emergencyLabeled = emergencyList.chats.find((c) => c.waNumber === '27821234567');
+    assert.ok(
+      emergencyLabeled.labels &&
+        emergencyLabeled.labels.some((l) => l.name === 'Unqualified'),
+      'emergency inbox must still attach labels so filters work'
+    );
+    assert.ok(
+      (emergencyLabeled.labelIds || []).includes(cemented.id),
+      'emergency inbox labelIds must include assigned labels'
+    );
 
     // Paste-image media reply (mocked Graph send).
     const tinyPngBase64 =
