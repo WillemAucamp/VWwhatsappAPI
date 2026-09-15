@@ -162,6 +162,18 @@ CREATE TABLE IF NOT EXISTS agent_chat_reads (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`;
 
+/**
+ * Older deploys created this table without updated_at and with last_read_at
+ * NOT NULL. CREATE TABLE IF NOT EXISTS will not fix that, and markRead then
+ * 500s on every click ("column updated_at does not exist").
+ */
+const MIGRATE_TABLE_SQL = `
+ALTER TABLE agent_chat_reads
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE agent_chat_reads
+  ALTER COLUMN last_read_at DROP NOT NULL;
+`;
+
 function createPostgresChatReadStore(connectionString) {
   if (!connectionString) {
     throw new Error('DATABASE_URL is required for the postgres chat read store');
@@ -171,8 +183,10 @@ function createPostgresChatReadStore(connectionString) {
 
   function ensureSchema() {
     if (!ready) {
-      ready = pool
-        .query(CREATE_TABLE_SQL)
+      ready = (async () => {
+        await pool.query(CREATE_TABLE_SQL);
+        await pool.query(MIGRATE_TABLE_SQL);
+      })()
         .then(() => undefined)
         .catch((err) => {
           ready = null;
