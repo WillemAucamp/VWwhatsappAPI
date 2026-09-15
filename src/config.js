@@ -66,6 +66,11 @@ const config = {
     labelBackfillIntervalMs: intEnv('AGENT_DESK_LABEL_BACKFILL_MS', 20000),
     labelBackfillBatch: intEnv('AGENT_DESK_LABEL_BACKFILL_BATCH', 2),
     labelBackfillTickMs: intEnv('AGENT_DESK_LABEL_BACKFILL_TICK_MS', 1500),
+    // Send the customer a WhatsApp read receipt (blue ticks) when staff open a
+    // chat on the desk. Customer-visible, so opt in explicitly.
+    sendReadReceipts:
+      String(process.env.AGENT_DESK_SEND_READ_RECEIPTS || '').toLowerCase() ===
+      'true',
   },
 
 

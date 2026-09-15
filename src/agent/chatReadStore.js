@@ -3,13 +3,38 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { getSharedPool, resolveDeskSettingsBackend } = require('./pg');
 
 /**
  * Agent-desk-only "last opened" cursors per WhatsApp number.
  * Does not touch bot sessions, webhooks, or message transcripts.
+ *
+ * Backends:
+ * - postgres (whenever DATABASE_URL is set): survives Render redeploys
+ * - file: JSONL-free JSON blob under AGENT_CHAT_READS_PATH (tests / local)
+ *
+ * WhatsApp has no "mark chat unread" API — in the WhatsApp client that is
+ * local device state. forcedUnread is the desk's equivalent, and it stays
+ * set until staff explicitly open the chat again. Like WhatsApp it flags the
+ * chat without rewinding the read cursor, so the badge does not jump back to
+ * the whole history.
  */
 
-function createChatReadStore(filePath = config.agent.chatReadsPath) {
+function normalizeWa(waNumber) {
+  return String(waNumber || '').replace(/\D/g, '');
+}
+
+function requireWa(waNumber) {
+  const wa = normalizeWa(waNumber);
+  if (!wa) {
+    const err = new Error('wa_required');
+    err.status = 400;
+    throw err;
+  }
+  return wa;
+}
+
+function createFileChatReadStore(filePath = config.agent.chatReadsPath) {
   const file = path.resolve(filePath);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let chain = Promise.resolve();
@@ -75,19 +100,21 @@ function createChatReadStore(filePath = config.agent.chatReadsPath) {
   }
 
   async function get(waNumber) {
-    const wa = String(waNumber || '').replace(/\D/g, '');
+    const wa = normalizeWa(waNumber);
     if (!wa) return null;
     const all = await getAll();
     return all[wa] || null;
   }
 
+  async function isForcedUnread(waNumber) {
+    const wa = normalizeWa(waNumber);
+    if (!wa) return false;
+    const state = await getState();
+    return Boolean(state.forcedUnread[wa]);
+  }
+
   async function markRead(waNumber, at = new Date().toISOString()) {
-    const wa = String(waNumber || '').replace(/\D/g, '');
-    if (!wa) {
-      const err = new Error('wa_required');
-      err.status = 400;
-      throw err;
-    }
+    const wa = requireWa(waNumber);
     const when = at || new Date().toISOString();
     return withLock(async () => {
       const data = await readAllUnlocked();
@@ -99,28 +126,200 @@ function createChatReadStore(filePath = config.agent.chatReadsPath) {
   }
 
   async function markUnread(waNumber) {
-    const wa = String(waNumber || '').replace(/\D/g, '');
-    if (!wa) {
-      const err = new Error('wa_required');
-      err.status = 400;
-      throw err;
-    }
+    const wa = requireWa(waNumber);
     return withLock(async () => {
       const data = await readAllUnlocked();
-      // Epoch cursor → every inbound counts as unread again.
-      data.reads[wa] = '1970-01-01T00:00:00.000Z';
+      // Keep the read cursor: staff flagged the chat for follow-up, they did
+      // not un-read its whole history. WhatsApp shows a dot, not a big count.
       if (!data.forcedUnread) data.forcedUnread = {};
       data.forcedUnread[wa] = true;
       await writeAllUnlocked(data);
       return {
         waNumber: wa,
-        lastReadAt: data.reads[wa],
+        lastReadAt: data.reads[wa] || null,
         forcedUnread: true,
       };
     });
   }
 
-  return { getAll, getState, get, markRead, markUnread, file };
+  return {
+    getAll,
+    getState,
+    get,
+    isForcedUnread,
+    markRead,
+    markUnread,
+    file,
+    backend: 'file',
+  };
 }
 
-module.exports = { createChatReadStore };
+const CREATE_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS agent_chat_reads (
+  wa_number TEXT PRIMARY KEY,
+  last_read_at TIMESTAMPTZ,
+  forced_unread BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`;
+
+/** Single-statement migrates — Supabase/pgbouncer rejects multi-statement queries. */
+const ADD_UPDATED_AT_SQL = `
+ALTER TABLE agent_chat_reads
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`;
+
+const DROP_LAST_READ_NOT_NULL_SQL = `
+ALTER TABLE agent_chat_reads
+  ALTER COLUMN last_read_at DROP NOT NULL`;
+
+function createPostgresChatReadStore(connectionString) {
+  if (!connectionString) {
+    throw new Error('DATABASE_URL is required for the postgres chat read store');
+  }
+  const pool = getSharedPool(connectionString);
+  let ready = null;
+
+  function ensureSchema() {
+    if (!ready) {
+      ready = (async () => {
+        await pool.query(CREATE_TABLE_SQL);
+        // Best-effort: older Render tables predate these columns/nullability.
+        try {
+          await pool.query(ADD_UPDATED_AT_SQL);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[chat-reads] add updated_at failed', err.message);
+        }
+        try {
+          await pool.query(DROP_LAST_READ_NOT_NULL_SQL);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[chat-reads] drop last_read_at NOT NULL failed', err.message);
+        }
+      })()
+        .then(() => undefined)
+        .catch((err) => {
+          ready = null;
+          throw err;
+        });
+    }
+    return ready;
+  }
+
+  function isoOf(value) {
+    if (!value) return null;
+    return value instanceof Date ? value.toISOString() : String(value);
+  }
+
+  async function getState() {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT wa_number, last_read_at, forced_unread FROM agent_chat_reads`
+    );
+    const reads = {};
+    const forcedUnread = {};
+    for (const row of rows) {
+      const wa = normalizeWa(row.wa_number);
+      if (!wa) continue;
+      const at = isoOf(row.last_read_at);
+      if (at) reads[wa] = at;
+      if (row.forced_unread) forcedUnread[wa] = true;
+    }
+    return { reads, forcedUnread };
+  }
+
+  async function getAll() {
+    const state = await getState();
+    return state.reads;
+  }
+
+  async function get(waNumber) {
+    const wa = normalizeWa(waNumber);
+    if (!wa) return null;
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT last_read_at FROM agent_chat_reads WHERE wa_number = $1`,
+      [wa]
+    );
+    return rows[0] ? isoOf(rows[0].last_read_at) : null;
+  }
+
+  async function isForcedUnread(waNumber) {
+    const wa = normalizeWa(waNumber);
+    if (!wa) return false;
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT forced_unread FROM agent_chat_reads WHERE wa_number = $1`,
+      [wa]
+    );
+    return Boolean(rows[0] && rows[0].forced_unread);
+  }
+
+  async function markRead(waNumber, at = new Date().toISOString()) {
+    const wa = requireWa(waNumber);
+    const when = at || new Date().toISOString();
+    await ensureSchema();
+    // Do not reference updated_at: legacy Render tables may not have it yet,
+    // and mark-read must succeed even when the ALTER migrate is blocked.
+    await pool.query(
+      `INSERT INTO agent_chat_reads (wa_number, last_read_at, forced_unread)
+       VALUES ($1, $2::timestamptz, FALSE)
+       ON CONFLICT (wa_number) DO UPDATE
+         SET last_read_at = EXCLUDED.last_read_at,
+             forced_unread = FALSE`,
+      [wa, when]
+    );
+    return { waNumber: wa, lastReadAt: when, forcedUnread: false };
+  }
+
+  async function markUnread(waNumber) {
+    const wa = requireWa(waNumber);
+    await ensureSchema();
+    // Preserve an existing cursor on conflict. For a first-time row, use NOW()
+    // so legacy last_read_at NOT NULL tables still accept the insert; the
+    // forced_unread flag is what puts the badge back.
+    const { rows } = await pool.query(
+      `INSERT INTO agent_chat_reads (wa_number, last_read_at, forced_unread)
+       VALUES ($1, NOW(), TRUE)
+       ON CONFLICT (wa_number) DO UPDATE
+         SET forced_unread = TRUE
+       RETURNING last_read_at`,
+      [wa]
+    );
+    return {
+      waNumber: wa,
+      lastReadAt: rows[0] ? isoOf(rows[0].last_read_at) : null,
+      forcedUnread: true,
+    };
+  }
+
+  return {
+    getAll,
+    getState,
+    get,
+    isForcedUnread,
+    markRead,
+    markUnread,
+    backend: 'postgres',
+  };
+}
+
+/**
+ * @param {string|object} [options] File path (tests) or { backend, databaseUrl, filePath }
+ */
+function createChatReadStore(options) {
+  if (typeof options === 'string') {
+    return createFileChatReadStore(options);
+  }
+  const opts = options || {};
+  const { backend, databaseUrl } = resolveDeskSettingsBackend(opts);
+  if (backend === 'postgres') {
+    return createPostgresChatReadStore(databaseUrl);
+  }
+  return createFileChatReadStore(opts.filePath || config.agent.chatReadsPath);
+}
+
+module.exports = {
+  createChatReadStore,
+  createFileChatReadStore,
+  createPostgresChatReadStore,
+};

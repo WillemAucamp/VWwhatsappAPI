@@ -116,6 +116,26 @@ async function graphPost(graphBody) {
 }
 
 /**
+ * Send a read receipt for one received message (blue ticks on the customer's
+ * side). Per Meta's docs this also marks earlier messages in that conversation
+ * as read, and must happen within 30 days of receipt.
+ * @param {string} wamid `messages[].id` from an inbound webhook
+ */
+async function markMessageRead(wamid) {
+  const messageId = String(wamid || '').trim();
+  if (!messageId) {
+    const err = new Error('wamid is required to mark a message read');
+    err.code = 'WHATSAPP_WAMID_MISSING';
+    throw err;
+  }
+  return graphPost({
+    messaging_product: 'whatsapp',
+    status: 'read',
+    message_id: messageId,
+  });
+}
+
+/**
  * @param {object} interactive Spec from buildInteractiveFromState
  * @param {string} bodyText
  */
@@ -790,6 +810,7 @@ module.exports = {
   cloudApiSendDocument,
   uploadMedia,
   downloadMedia,
+  markMessageRead,
   buildInteractiveGraph,
   joinTextAndLink,
   graphGet,
