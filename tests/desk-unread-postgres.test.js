@@ -173,7 +173,8 @@ async function testChatReadStoreMigratesLegacySchema() {
   calls.length = 0;
   nextResults = [
     { rows: [] }, // CREATE TABLE IF NOT EXISTS
-    { rows: [] }, // MIGRATE ALTER…
+    { rows: [] }, // ADD updated_at
+    { rows: [] }, // DROP NOT NULL
     { rows: [] }, // INSERT markRead
   ];
   const store = createPostgresChatReadStore(
@@ -192,6 +193,10 @@ async function testChatReadStoreMigratesLegacySchema() {
   const insert = calls.find((c) => /INSERT INTO agent_chat_reads/i.test(c.sql));
   assert.ok(insert, 'markRead must insert after migrate');
   assert.deepStrictEqual(insert.params[0], '27612642189');
+  assert.ok(
+    !/updated_at/i.test(insert.sql),
+    'markRead must not require updated_at so legacy tables still accept opens'
+  );
   // eslint-disable-next-line no-console
   console.log('✓ chat read store migrates legacy agent_chat_reads schema');
 }

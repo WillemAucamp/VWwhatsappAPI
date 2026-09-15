@@ -323,14 +323,31 @@ function createPostgresMessageStore(connectionString) {
 
     if (waKeys.length) {
       try {
-        const { rows } = await pool.query(CURSOR_AWARE_LIST_SQL, [
-          waKeys,
-          waKeys.map((wa) => reads[wa]),
-        ]);
-        lastUnreadMode = 'cursor-join';
-        return rows
-          .map((row) => mapListedChat(row, reads, true))
-          .sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
+        // Cap the cursor join so a slow Supabase plan cannot burn the whole
+        // inbox budget — totals+cursors still clear opened chats on refresh.
+        const cursorMs = 3500;
+        const cursorRows = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => resolve(null), cursorMs);
+          pool
+            .query(CURSOR_AWARE_LIST_SQL, [
+              waKeys,
+              waKeys.map((wa) => reads[wa]),
+            ])
+            .then((result) => {
+              clearTimeout(timer);
+              resolve(result);
+            }, (err) => {
+              clearTimeout(timer);
+              reject(err);
+            });
+        });
+        if (cursorRows && Array.isArray(cursorRows.rows)) {
+          lastUnreadMode = 'cursor-join';
+          return cursorRows.rows
+            .map((row) => mapListedChat(row, reads, true))
+            .sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt)));
+        }
+        lastUnreadMode = 'totals-fallback';
       } catch (err) {
         // An unread-count query must never blank the desk; fall back to totals.
         // eslint-disable-next-line no-console
