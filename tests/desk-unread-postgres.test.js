@@ -163,11 +163,45 @@ async function testAgentLastMessageIsNotFlooredToUnread() {
   console.log('✓ agent reply as the latest message leaves the chat read');
 }
 
+/**
+ * Render already had agent_chat_reads from an older deploy (no updated_at,
+ * last_read_at NOT NULL). CREATE IF NOT EXISTS is a no-op there, so markRead
+ * must migrate before inserting or every open-chat click 500s.
+ */
+async function testChatReadStoreMigratesLegacySchema() {
+  const { createPostgresChatReadStore } = require('../src/agent/chatReadStore');
+  calls.length = 0;
+  nextResults = [
+    { rows: [] }, // CREATE TABLE IF NOT EXISTS
+    { rows: [] }, // MIGRATE ALTER…
+    { rows: [] }, // INSERT markRead
+  ];
+  const store = createPostgresChatReadStore(
+    'postgresql://u:p@localhost:5432/chat_reads_migrate'
+  );
+  const marked = await store.markRead('27612642189', '2026-09-15T07:00:00.000Z');
+  assert.strictEqual(marked.forcedUnread, false);
+  assert.ok(
+    calls.some((c) => /ADD COLUMN IF NOT EXISTS updated_at/i.test(c.sql)),
+    'must add updated_at for legacy Render tables'
+  );
+  assert.ok(
+    calls.some((c) => /ALTER COLUMN last_read_at DROP NOT NULL/i.test(c.sql)),
+    'must allow null last_read_at for mark-unread flags'
+  );
+  const insert = calls.find((c) => /INSERT INTO agent_chat_reads/i.test(c.sql));
+  assert.ok(insert, 'markRead must insert after migrate');
+  assert.deepStrictEqual(insert.params[0], '27612642189');
+  // eslint-disable-next-line no-console
+  console.log('✓ chat read store migrates legacy agent_chat_reads schema');
+}
+
 async function main() {
   await testCursorAwareCountsAndParams();
   await testFallsBackToTotalsWhenCursorQueryFails();
   await testNoCursorsUsesTotalsDirectly();
   await testAgentLastMessageIsNotFlooredToUnread();
+  await testChatReadStoreMigratesLegacySchema();
   // eslint-disable-next-line no-console
   console.log('\npostgres unread tests passed.');
 }
