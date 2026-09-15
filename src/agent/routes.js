@@ -188,9 +188,10 @@ function createAgentRouter({
       webhookSignatureRejects: snap.postRejectedSignature || 0,
       chatCount,
       chatListError,
-      inboxList: 'raw-list-2026-09-10',
+      inboxList: 'labels-in-emergency-2026-09-14',
       unreadModel: 'bot-counts-unread-2026-09-11',
       chatReadsBackend: (chatReads && chatReads.backend) || 'unknown',
+      chatReadsCount: Object.keys(lastKnownReadState.reads || {}).length,
       unreadCountMode:
         messageStore && typeof messageStore.unreadMode === 'function'
           ? messageStore.unreadMode()
@@ -259,6 +260,9 @@ function createAgentRouter({
         String((req.query && req.query.emergency) || '') === '1';
       const enrichMs = Number(config.agent.inboxEnrichMs) || 1500;
       const listMs = Number(config.agent.inboxListMs) || 8000;
+      // Read cursors keep badges cleared across refresh — give them longer
+      // than labels, and never treat a timeout as "nobody has read anything".
+      const readMs = Math.max(enrichMs * 2, Number(config.agent.inboxReadMs) || 6000);
 
       let readsMap = {};
       let forcedUnread = {};
@@ -266,14 +270,15 @@ function createAgentRouter({
       const sessionByWa = new Map();
 
       if (!emergency) {
-        const [readState, labelsMap, sessions] = await Promise.all([
-          withTimeout(
-            typeof chatReads.getState === 'function'
-              ? chatReads.getState()
-              : chatReads.getAll().then((reads) => ({ reads, forcedUnread: {} })),
-            enrichMs,
-            null
-          ),
+        const loadReads = () =>
+          typeof chatReads.getState === 'function'
+            ? chatReads.getState()
+            : chatReads.getAll().then((reads) => ({ reads, forcedUnread: {} }));
+        let readState = await withTimeout(loadReads(), readMs, null);
+        if (!readState) {
+          readState = await withTimeout(loadReads(), readMs, null);
+        }
+        const [labelsMap, sessions] = await Promise.all([
           withTimeout(labels.getChatLabelsMap(), enrichMs, null),
           sessionStore && typeof sessionStore.listAll === 'function'
             ? withTimeout(sessionStore.listAll(), enrichMs, null)
@@ -284,10 +289,14 @@ function createAgentRouter({
           forcedUnread = readState.forcedUnread || {};
           lastKnownReadState = { reads: readsMap, forcedUnread };
         } else {
-          // Timed out: reuse the last good cursors rather than showing every
-          // chat as never-opened.
+          // Timed out twice: reuse last good cursors. An empty map here is
+          // what made every chat look unread again after a browser refresh.
           readsMap = lastKnownReadState.reads;
           forcedUnread = lastKnownReadState.forcedUnread;
+          // eslint-disable-next-line no-console
+          console.error('[agent] chat read cursors timed out; reusing last known map', {
+            known: Object.keys(readsMap || {}).length,
+          });
         }
         if (labelsMap && typeof labelsMap === 'object') {
           labelBundle = labelsMap;
@@ -297,6 +306,11 @@ function createAgentRouter({
             const wa = String((session && session.waNumber) || '').replace(/\D/g, '');
             if (wa) sessionByWa.set(wa, session);
           }
+        }
+      } else {
+        const labelsMap = await withTimeout(labels.getChatLabelsMap(), enrichMs, null);
+        if (labelsMap && typeof labelsMap === 'object') {
+          labelBundle = labelsMap;
         }
       }
 
@@ -309,7 +323,12 @@ function createAgentRouter({
         null
       );
       if (!Array.isArray(chats)) {
-        chats = await withTimeout(messageStore.listChats(), listMs, []);
+        // Keep cursors on the retry — listing without them re-counts history.
+        chats = await withTimeout(
+          messageStore.listChats({ lastReadByWa: readsMap }),
+          listMs,
+          []
+        );
       }
       if (!Array.isArray(chats)) chats = [];
       if (searching) {
@@ -341,7 +360,7 @@ function createAgentRouter({
       res.json({
         chats: enriched,
         emergency,
-        inbox: 'raw-list-2026-09-10',
+        inbox: 'labels-in-emergency-2026-09-14',
         search: searching ? query : null,
       });
     } catch (err) {

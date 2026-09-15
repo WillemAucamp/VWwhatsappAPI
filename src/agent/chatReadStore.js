@@ -162,17 +162,14 @@ CREATE TABLE IF NOT EXISTS agent_chat_reads (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`;
 
-/**
- * Older deploys created this table without updated_at and with last_read_at
- * NOT NULL. CREATE TABLE IF NOT EXISTS will not fix that, and markRead then
- * 500s on every click ("column updated_at does not exist").
- */
-const MIGRATE_TABLE_SQL = `
+/** Single-statement migrates — Supabase/pgbouncer rejects multi-statement queries. */
+const ADD_UPDATED_AT_SQL = `
 ALTER TABLE agent_chat_reads
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`;
+
+const DROP_LAST_READ_NOT_NULL_SQL = `
 ALTER TABLE agent_chat_reads
-  ALTER COLUMN last_read_at DROP NOT NULL;
-`;
+  ALTER COLUMN last_read_at DROP NOT NULL`;
 
 function createPostgresChatReadStore(connectionString) {
   if (!connectionString) {
@@ -185,7 +182,19 @@ function createPostgresChatReadStore(connectionString) {
     if (!ready) {
       ready = (async () => {
         await pool.query(CREATE_TABLE_SQL);
-        await pool.query(MIGRATE_TABLE_SQL);
+        // Best-effort: older Render tables predate these columns/nullability.
+        try {
+          await pool.query(ADD_UPDATED_AT_SQL);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[chat-reads] add updated_at failed', err.message);
+        }
+        try {
+          await pool.query(DROP_LAST_READ_NOT_NULL_SQL);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[chat-reads] drop last_read_at NOT NULL failed', err.message);
+        }
       })()
         .then(() => undefined)
         .catch((err) => {
@@ -249,13 +258,14 @@ function createPostgresChatReadStore(connectionString) {
     const wa = requireWa(waNumber);
     const when = at || new Date().toISOString();
     await ensureSchema();
+    // Do not reference updated_at: legacy Render tables may not have it yet,
+    // and mark-read must succeed even when the ALTER migrate is blocked.
     await pool.query(
-      `INSERT INTO agent_chat_reads (wa_number, last_read_at, forced_unread, updated_at)
-       VALUES ($1, $2::timestamptz, FALSE, NOW())
+      `INSERT INTO agent_chat_reads (wa_number, last_read_at, forced_unread)
+       VALUES ($1, $2::timestamptz, FALSE)
        ON CONFLICT (wa_number) DO UPDATE
          SET last_read_at = EXCLUDED.last_read_at,
-             forced_unread = FALSE,
-             updated_at = NOW()`,
+             forced_unread = FALSE`,
       [wa, when]
     );
     return { waNumber: wa, lastReadAt: when, forcedUnread: false };
@@ -264,14 +274,14 @@ function createPostgresChatReadStore(connectionString) {
   async function markUnread(waNumber) {
     const wa = requireWa(waNumber);
     await ensureSchema();
-    // ON CONFLICT leaves last_read_at alone: the chat is flagged for
-    // follow-up, its history is not un-read.
+    // Preserve an existing cursor on conflict. For a first-time row, use NOW()
+    // so legacy last_read_at NOT NULL tables still accept the insert; the
+    // forced_unread flag is what puts the badge back.
     const { rows } = await pool.query(
-      `INSERT INTO agent_chat_reads (wa_number, last_read_at, forced_unread, updated_at)
-       VALUES ($1, NULL, TRUE, NOW())
+      `INSERT INTO agent_chat_reads (wa_number, last_read_at, forced_unread)
+       VALUES ($1, NOW(), TRUE)
        ON CONFLICT (wa_number) DO UPDATE
-         SET forced_unread = TRUE,
-             updated_at = NOW()
+         SET forced_unread = TRUE
        RETURNING last_read_at`,
       [wa]
     );
