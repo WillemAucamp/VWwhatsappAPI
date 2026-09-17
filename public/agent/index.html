@@ -1323,13 +1323,18 @@
      * its badge even while it is the open thread.
      * Do NOT zero the badge merely because the row is selected — that hid
      * failed mark-read calls and made the badge snap back on deselect.
+     *
+     * Trust the server's cursor-aware unreadCount whenever lastReadAt is set.
+     * Re-comparing lastAt > lastReadAt here re-badged chats after refresh
+     * (timestamp precision / clock skew), even when unreadCount was already 0.
      */
     function chatUnreadCount(c) {
       if (!c) return 0;
       let n = Number(c.unreadCount) || 0;
       if (c.forcedUnread) n = Math.max(n, 1);
-      const unreviewedLast = c.lastSource !== 'agent';
-      if (unreviewedLast && (!c.lastReadAt || String(c.lastAt) > String(c.lastReadAt))) {
+      // Never-opened chats: server may omit a cursor; keep a badge if the
+      // latest activity still needs review.
+      if (!c.lastReadAt && c.lastSource !== 'agent') {
         n = Math.max(n, 1);
       }
       return n;
@@ -1838,16 +1843,22 @@
     async function markChatRead(wa, force) {
       if (!wa) return null;
       try {
+        const chat = state.chats.find((c) => c.waNumber === wa);
+        // Cursor must cover every message already on screen. Using only "now"
+        // left lastAt slightly ahead of lastReadAt after refresh (precision /
+        // skew), and the badge snapped back.
+        const now = new Date().toISOString();
+        const lastAt = chat && chat.lastAt ? String(chat.lastAt) : '';
+        const at = lastAt && lastAt > now ? lastAt : now;
         const res = await api('/api/chats/' + encodeURIComponent(wa) + '/read', {
           method: 'POST',
-          body: JSON.stringify({ force: Boolean(force) }),
+          body: JSON.stringify({ force: Boolean(force), at }),
           timeoutMs: 8000,
         });
-        const chat = state.chats.find((c) => c.waNumber === wa);
         if (chat && !res.skipped) {
           chat.unreadCount = 0;
           chat.forcedUnread = false;
-          chat.lastReadAt = res.lastReadAt || chat.lastReadAt || new Date().toISOString();
+          chat.lastReadAt = res.lastReadAt || at || chat.lastReadAt || now;
           if (chat.lastReadAt) state.readByWa[String(wa)] = chat.lastReadAt;
           renderLabelFilters();
           renderChatList();

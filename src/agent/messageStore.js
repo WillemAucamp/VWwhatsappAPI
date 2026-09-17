@@ -268,14 +268,14 @@ function countsAsUnread(row) {
   return row.source !== 'agent';
 }
 
-/** Ensure a latest unreviewed message after last-read always shows as unread. */
+/** Never-opened chats (no cursor) keep at least one badge if activity awaits review. */
 function applyUnreadFloor(chat, since) {
   let n = Number(chat && chat.unreadCount) || 0;
   const unreviewedLast = chat && chat.lastSource !== 'agent';
-  if (
-    unreviewedLast &&
-    (!since || String(chat.lastAt) > String(since))
-  ) {
+  // Once a read cursor exists, trust the cursor-aware count. Comparing
+  // lastAt > since here re-badged chats after refresh when timestamps
+  // differed by precision / skew even though unreadCount was already 0.
+  if (!since && unreviewedLast) {
     n = Math.max(n, 1);
   }
   return n;

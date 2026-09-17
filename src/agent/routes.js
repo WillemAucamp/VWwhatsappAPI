@@ -206,7 +206,7 @@ function createAgentRouter({
       webhookSignatureRejects: snap.postRejectedSignature || 0,
       chatCount,
       chatListError,
-      inboxList: 'reads-in-emergency-2026-09-17',
+      inboxList: 'reads-survive-refresh-2026-09-17',
       unreadModel: 'bot-counts-unread-2026-09-11',
       chatReadsBackend: (chatReads && chatReads.backend) || 'unknown',
       chatReadsCount: Object.keys(lastKnownReadState.reads || {}).length,
@@ -387,7 +387,7 @@ function createAgentRouter({
       res.json({
         chats: enriched,
         emergency,
-        inbox: 'reads-in-emergency-2026-09-17',
+        inbox: 'reads-survive-refresh-2026-09-17',
         search: searching ? query : null,
       });
     } catch (err) {
@@ -440,7 +440,26 @@ function createAgentRouter({
           });
         }
       }
-      const marked = await chatReads.markRead(wa);
+      // Prefer an explicit cursor from the desk (covers on-screen lastAt), then
+      // fall back to max(now, latest stored message) so refresh cannot re-badge
+      // a chat whose last message timestamp sat slightly ahead of "now".
+      let at =
+        req.body && req.body.at != null && String(req.body.at).trim()
+          ? String(req.body.at).trim()
+          : new Date().toISOString();
+      try {
+        if (messageStore && typeof messageStore.listMessages === 'function') {
+          const messages = await messageStore.listMessages(wa, { limit: 1 });
+          const latest = Array.isArray(messages) && messages.length
+            ? messages[messages.length - 1]
+            : null;
+          const latestAt = latest && latest.at ? String(latest.at) : '';
+          if (latestAt && latestAt > String(at)) at = latestAt;
+        }
+      } catch (_) {
+        /* keep at */
+      }
+      const marked = await chatReads.markRead(wa, at);
       if (lastKnownReadState.reads) {
         lastKnownReadState.reads[wa] = marked.lastReadAt;
         delete lastKnownReadState.forcedUnread[wa];

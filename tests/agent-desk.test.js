@@ -485,7 +485,7 @@ async function testMessageStoreAndApis() {
     );
     assert.ok(typeof status.chatCount === 'number');
     assert.ok(status.chatCount >= 2);
-    assert.strictEqual(status.inboxList, 'reads-in-emergency-2026-09-17');
+    assert.strictEqual(status.inboxList, 'reads-survive-refresh-2026-09-17');
 
     await messageStore.append({
       waNumber: '27648411242',

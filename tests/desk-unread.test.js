@@ -267,7 +267,7 @@ async function testReadPersistsAcrossEmergencyRefresh() {
 
     const marked = await call(`/api/chats/${wa}/read`, {
       method: 'POST',
-      body: JSON.stringify({ force: true }),
+      body: JSON.stringify({ force: true, at: unreadBefore.lastAt }),
     });
     assert.strictEqual(marked.ok, true);
     assert.ok(marked.lastReadAt, 'POST /read must return a cursor');
@@ -275,6 +275,11 @@ async function testReadPersistsAcrossEmergencyRefresh() {
       await chatReadStore.get(wa),
       marked.lastReadAt,
       'cursor must land in the durable store, not only the response'
+    );
+    // Cursor must cover the on-screen last message (not only "now").
+    assert.ok(
+      String(marked.lastReadAt) >= String(unreadBefore.lastAt),
+      'read cursor must be at/after the latest message'
     );
 
     // Simulate a hard refresh while the desk is on emergency inbox
@@ -296,6 +301,80 @@ async function testReadPersistsAcrossEmergencyRefresh() {
   }
   // eslint-disable-next-line no-console
   console.log('✓ read cursor survives an emergency inbox refresh');
+}
+
+/**
+ * lastAt slightly ahead of a "now" cursor used to re-badge after refresh via
+ * applyUnreadFloor / the desk's lastAt>lastReadAt floor. Opening must pin the
+ * cursor to the latest message so the badge stays cleared.
+ */
+async function testReadCursorCoversLatestMessage() {
+  const dir = tmpDir('desk-unread-cursor-cover-');
+  const messageStore = createMessageStore(dir);
+  const chatReadStore = createFileChatReadStore(path.join(dir, 'chat_reads.json'));
+  const wa = '27619998877';
+  const lastAt = '2026-09-17T12:00:00.500Z';
+  // "now" deliberately behind lastAt — old markRead used Date.now() only.
+  const staleNow = '2026-09-17T12:00:00.000Z';
+
+  await messageStore.append({
+    waNumber: wa,
+    direction: 'in',
+    source: 'customer',
+    text: 'Hi',
+    at: lastAt,
+  });
+
+  const app = express();
+  app.use(
+    '/agent',
+    createAgentRouter({
+      engine: { handleInbound: async () => {} },
+      sessionStore: new MemorySessionStore(),
+      messageStore,
+      shortcutStore: createShortcutStore(path.join(dir, 'shortcuts.json')),
+      labelStore: createLabelStore(path.join(dir, 'labels.json')),
+      chatReadStore,
+      sendMessage: async () => ({ messages: [{ id: 'wamid.out' }] }),
+    })
+  );
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, () => resolve(s));
+  });
+  const port = server.address().port;
+  const call = (url, init) =>
+    fetch(`http://127.0.0.1:${port}/agent${url}`, {
+      ...init,
+      headers: {
+        Authorization: 'Bearer desk-secret',
+        'Content-Type': 'application/json',
+        ...((init && init.headers) || {}),
+      },
+    }).then((r) => r.json());
+
+  try {
+    // Even if the client sends a stale "now", the route must bump to lastAt.
+    const marked = await call(`/api/chats/${wa}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ force: true, at: staleNow }),
+    });
+    assert.strictEqual(marked.ok, true);
+    assert.strictEqual(
+      marked.lastReadAt,
+      lastAt,
+      'server must advance the cursor to the latest message'
+    );
+
+    const listed = await call('/api/chats');
+    const chat = listed.chats.find((c) => c.waNumber === wa);
+    assert.strictEqual(chat.unreadCount, 0);
+    assert.strictEqual(chat.lastReadAt, lastAt);
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  // eslint-disable-next-line no-console
+  console.log('✓ read cursor covers latest message even when now is behind');
 }
 
 function testReadStoreBackendSelection() {
@@ -450,6 +529,7 @@ async function main() {
   await testReadCursorAndStickyUnread();
   await testForcedUnreadShowsInInbox();
   await testReadPersistsAcrossEmergencyRefresh();
+  await testReadCursorCoversLatestMessage();
   testReadStoreBackendSelection();
   testDeskUiWiresExplicitRead();
   // eslint-disable-next-line no-console

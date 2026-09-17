@@ -153,7 +153,7 @@ function createApp(overrides = {}) {
         shortcutsPersist: 'postgres-seed-once-2026-09-17',
         labelsCatalog: 'cemented-2026-09-10',
         // Emergency inbox keeps labels + read cursors so badges survive refresh.
-        inboxList: 'reads-in-emergency-2026-09-17',
+        inboxList: 'reads-survive-refresh-2026-09-17',
         emergency: Boolean(config.agent.deskEmergency),
       },
     });
