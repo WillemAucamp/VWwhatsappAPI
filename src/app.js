@@ -146,6 +146,11 @@ function createApp(overrides = {}) {
         imageDownload: 'agent-image-download-2026-09-17',
         settingsStore:
           labelStore && labelStore.backend ? labelStore.backend : 'file',
+        shortcutStore:
+          shortcutStore && shortcutStore.backend
+            ? shortcutStore.backend
+            : 'file',
+        shortcutsPersist: 'postgres-seed-once-2026-09-17',
         labelsCatalog: 'cemented-2026-09-10',
         // Emergency inbox still attaches labels so filter chips work.
         inboxList: 'labels-in-emergency-2026-09-14',

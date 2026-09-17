@@ -28,6 +28,7 @@ const files = [
   'desk-unread-postgres.test.js',
   'desk-auto-labels.test.js',
   'desk-labels-cement.test.js',
+  'desk-shortcuts-persist.test.js',
   'message-store.test.js',
 ];
 
