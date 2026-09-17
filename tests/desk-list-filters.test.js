@@ -125,6 +125,10 @@ function testDeskHtmlWiresHelper() {
     !/escapeHtml\(c\.status\)/.test(html),
     'raw session status must not be shown as the pill text'
   );
+  assert.ok(
+    html.includes("Yesterday ") && html.includes('toLocaleDateString'),
+    'message timestamps must include the date, not only HH:MM'
+  );
   // eslint-disable-next-line no-console
   console.log('✓ agent desk HTML uses shared bot/agent list helpers');
 }
