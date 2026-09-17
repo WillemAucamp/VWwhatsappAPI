@@ -529,10 +529,14 @@ function createAgentRouter({
         return res.status(404).json({ error: 'media_not_found' });
       }
       const filename = String(media.filename || 'file').replace(/[/\\]/g, '_');
+      const forceDownload =
+        String((req.query && req.query.download) || '') === '1' ||
+        String((req.query && req.query.disposition) || '') === 'attachment';
+      const asAttachment = forceDownload || media.mediaKind !== 'image';
       res.setHeader('Content-Type', media.mimeType || 'application/octet-stream');
       res.setHeader(
         'Content-Disposition',
-        (media.mediaKind === 'image' ? 'inline' : 'attachment') +
+        (asAttachment ? 'attachment' : 'inline') +
           '; filename="' +
           filename.replace(/"/g, '') +
           '"'

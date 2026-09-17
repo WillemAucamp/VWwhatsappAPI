@@ -142,6 +142,8 @@ function createApp(overrides = {}) {
         pasteImage: 'agent-multi-image-2026-09-10',
         // Inbound customer image/document → desk transcript.
         inboundMedia: 'agent-inbound-media-2026-09-10',
+        // Image bubbles expose Download with ?download=1 attachment disposition.
+        imageDownload: 'agent-image-download-2026-09-17',
         settingsStore:
           labelStore && labelStore.backend ? labelStore.backend : 'file',
         labelsCatalog: 'cemented-2026-09-10',

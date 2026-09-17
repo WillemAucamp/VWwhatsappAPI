@@ -544,6 +544,44 @@ async function testMessageStoreAndApis() {
       'emergency inbox labelIds must include assigned labels'
     );
 
+    // Inbound image download: preview stays inline; ?download=1 forces attachment.
+    const tinyPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64'
+    );
+    const inboundImg = await messageStore.append({
+      waNumber: '27821234567',
+      direction: 'in',
+      source: 'customer',
+      text: '[Image]',
+      mediaKind: 'image',
+      mediaMime: 'image/png',
+      mediaFilename: 'payslip.png',
+      mediaByteLength: tinyPng.length,
+      mediaBuffer: tinyPng,
+    });
+    const inlineMedia = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27821234567/messages/${inboundImg.id}/media`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    );
+    assert.strictEqual(inlineMedia.status, 200);
+    assert.ok(
+      String(inlineMedia.headers.get('content-disposition') || '').startsWith('inline'),
+      'image preview is inline'
+    );
+    const downloadMedia = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/27821234567/messages/${inboundImg.id}/media?download=1`,
+      { headers: { Authorization: 'Bearer desk-secret' } }
+    );
+    assert.strictEqual(downloadMedia.status, 200);
+    assert.ok(
+      String(downloadMedia.headers.get('content-disposition') || '').startsWith('attachment'),
+      'download=1 forces attachment so staff can save the image'
+    );
+    assert.ok(
+      String(downloadMedia.headers.get('content-disposition') || '').includes('payslip.png')
+    );
+
     // Paste-image media reply (mocked Graph send).
     const tinyPngBase64 =
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';

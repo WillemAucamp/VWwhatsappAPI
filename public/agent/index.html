@@ -513,6 +513,30 @@
       object-fit: contain;
       background: rgba(0,0,0,0.04);
     }
+    .bubble-media-wrap {
+      display: grid;
+      gap: 6px;
+      margin: 0 0 6px;
+      justify-items: start;
+    }
+    .bubble-media-wrap .bubble-media { margin: 0; }
+    .bubble-media-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .bubble-download {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 0;
+      color: #027eb5;
+      font-size: 0.8rem;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .bubble-download:hover { text-decoration: underline; }
     .bubble-file {
       display: inline-flex;
       align-items: center;
@@ -1892,34 +1916,50 @@
       }
     }
 
-    function mediaUrlFor(message) {
+    function mediaUrlFor(message, opts) {
       if (!state.selected || !message || !message.id || !message.hasMedia) return '';
-      return (
+      const base =
         '/agent/api/chats/' +
         encodeURIComponent(state.selected) +
         '/messages/' +
         encodeURIComponent(message.id) +
-        '/media'
-      );
+        '/media';
+      if (opts && opts.download) return base + '?download=1';
+      return base;
     }
 
     function renderBubbleBody(m) {
       const mediaHref = mediaUrlFor(m);
+      const downloadHref = mediaUrlFor(m, { download: true });
+      const filename = m.mediaFilename || (m.mediaKind === 'image' ? 'image.jpg' : 'file');
       let mediaHtml = '';
       if (m.hasMedia && m.mediaKind === 'image' && mediaHref) {
         mediaHtml =
-          '<img class="bubble-media" src="' +
-          escapeHtml(mediaHref) +
-          '" alt="' +
-          escapeHtml(m.mediaFilename || 'Image') +
-          '" loading="lazy" />';
+          '<div class="bubble-media-wrap">' +
+            '<a href="' + escapeHtml(mediaHref) + '" target="_blank" rel="noopener" title="Open full size">' +
+              '<img class="bubble-media" src="' +
+              escapeHtml(mediaHref) +
+              '" alt="' +
+              escapeHtml(filename) +
+              '" loading="lazy" />' +
+            '</a>' +
+            '<div class="bubble-media-actions">' +
+              '<a class="bubble-download" href="' +
+              escapeHtml(downloadHref) +
+              '" download="' +
+              escapeHtml(filename) +
+              '">Download image</a>' +
+            '</div>' +
+          '</div>';
       } else if (m.hasMedia && mediaHref) {
         mediaHtml =
           '<a class="bubble-file" href="' +
-          escapeHtml(mediaHref) +
-          '" target="_blank" rel="noopener">' +
+          escapeHtml(downloadHref || mediaHref) +
+          '" download="' +
+          escapeHtml(filename) +
+          '">' +
           '📎 ' +
-          escapeHtml(m.mediaFilename || 'Download file') +
+          escapeHtml(filename || 'Download file') +
           '</a>';
       }
       const text = String(m.text || '');
