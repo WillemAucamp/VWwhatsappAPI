@@ -122,6 +122,24 @@ function createAgentRouter({
   // A slow read-state query must not reset every badge to "never opened".
   let lastKnownReadState = { reads: {}, forcedUnread: {} };
 
+  // Warm cursors on boot so the first inbox request after a deploy cannot
+  // treat a slow getState as "nobody has read anything" and re-badge the list.
+  if (typeof chatReads.getState === 'function') {
+    chatReads
+      .getState()
+      .then((state) => {
+        if (!state || typeof state !== 'object') return;
+        lastKnownReadState = {
+          reads: { ...(state.reads || {}) },
+          forcedUnread: { ...(state.forcedUnread || {}) },
+        };
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[agent] chat read warm-up failed', err && err.message);
+      });
+  }
+
   function requireAuth(req, res, next) {
     if (!enabled) {
       return res.status(503).json({
@@ -188,7 +206,7 @@ function createAgentRouter({
       webhookSignatureRejects: snap.postRejectedSignature || 0,
       chatCount,
       chatListError,
-      inboxList: 'labels-in-emergency-2026-09-14',
+      inboxList: 'reads-in-emergency-2026-09-17',
       unreadModel: 'bot-counts-unread-2026-09-11',
       chatReadsBackend: (chatReads && chatReads.backend) || 'unknown',
       chatReadsCount: Object.keys(lastKnownReadState.reads || {}).length,
@@ -269,38 +287,41 @@ function createAgentRouter({
       let labelBundle = { labels: [], chatLabels: {} };
       const sessionByWa = new Map();
 
-      // Labels stay on even in emergency mode so label filter chips still work.
-      // Skip only the heavier unread + session enrichment when emergency=1.
+      // Labels + read cursors stay on even in emergency mode. Skipping reads
+      // made every chat look unread again after a browser refresh whenever
+      // the desk had flipped to ?emergency=1 (auto or manual). Only the
+      // heavier session list is optional under emergency.
       const labelPromise = withTimeout(labels.getChatLabelsMap(), enrichMs, null);
+      const loadReads = () =>
+        typeof chatReads.getState === 'function'
+          ? chatReads.getState()
+          : chatReads.getAll().then((reads) => ({ reads, forcedUnread: {} }));
+      let readState = await withTimeout(loadReads(), readMs, null);
+      if (!readState) {
+        readState = await withTimeout(loadReads(), readMs, null);
+      }
+      if (readState) {
+        readsMap = readState.reads || readState;
+        forcedUnread = readState.forcedUnread || {};
+        lastKnownReadState = { reads: readsMap, forcedUnread };
+      } else {
+        // Timed out twice: reuse last good cursors. An empty map here is
+        // what made every chat look unread again after a browser refresh.
+        readsMap = lastKnownReadState.reads || {};
+        forcedUnread = lastKnownReadState.forcedUnread || {};
+        // eslint-disable-next-line no-console
+        console.error('[agent] chat read cursors timed out; reusing last known map', {
+          known: Object.keys(readsMap || {}).length,
+        });
+      }
+
       if (!emergency) {
-        const loadReads = () =>
-          typeof chatReads.getState === 'function'
-            ? chatReads.getState()
-            : chatReads.getAll().then((reads) => ({ reads, forcedUnread: {} }));
-        let readState = await withTimeout(loadReads(), readMs, null);
-        if (!readState) {
-          readState = await withTimeout(loadReads(), readMs, null);
-        }
         const [labelsMap, sessions] = await Promise.all([
           labelPromise,
           sessionStore && typeof sessionStore.listAll === 'function'
             ? withTimeout(sessionStore.listAll(), enrichMs, null)
             : Promise.resolve(null),
         ]);
-        if (readState) {
-          readsMap = readState.reads || readState;
-          forcedUnread = readState.forcedUnread || {};
-          lastKnownReadState = { reads: readsMap, forcedUnread };
-        } else {
-          // Timed out twice: reuse last good cursors. An empty map here is
-          // what made every chat look unread again after a browser refresh.
-          readsMap = lastKnownReadState.reads;
-          forcedUnread = lastKnownReadState.forcedUnread;
-          // eslint-disable-next-line no-console
-          console.error('[agent] chat read cursors timed out; reusing last known map', {
-            known: Object.keys(readsMap || {}).length,
-          });
-        }
         if (labelsMap && typeof labelsMap === 'object') {
           labelBundle = labelsMap;
         }
@@ -349,9 +370,12 @@ function createAgentRouter({
         if (forcedUnread[chat.waNumber]) {
           unreadCount = Math.max(unreadCount, 1);
         }
+        const lastReadAt =
+          chat.lastReadAt || readsMap[chat.waNumber] || null;
         return {
           ...chat,
           unreadCount,
+          lastReadAt,
           forcedUnread: Boolean(forcedUnread[chat.waNumber]),
           status: session ? session.status : 'bot',
           currentState: session ? session.currentState : null,
@@ -363,7 +387,7 @@ function createAgentRouter({
       res.json({
         chats: enriched,
         emergency,
-        inbox: 'labels-in-emergency-2026-09-14',
+        inbox: 'reads-in-emergency-2026-09-17',
         search: searching ? query : null,
       });
     } catch (err) {

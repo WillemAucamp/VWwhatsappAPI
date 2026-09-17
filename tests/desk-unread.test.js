@@ -207,6 +207,97 @@ async function testForcedUnreadShowsInInbox() {
   console.log('✓ manual unread shows a single-message badge, cleared on open');
 }
 
+/**
+ * Clicking a chat POSTs /read (persists). A browser refresh that lands on
+ * ?emergency=1 used to skip loading those cursors, so every badge snapped
+ * back to unread even though the store still had last_read_at.
+ */
+async function testReadPersistsAcrossEmergencyRefresh() {
+  const dir = tmpDir('desk-unread-emergency-');
+  const messageStore = createMessageStore(dir);
+  const chatReadStore = createFileChatReadStore(path.join(dir, 'chat_reads.json'));
+  const wa = '27612642189';
+
+  await messageStore.append({
+    waNumber: wa,
+    direction: 'in',
+    source: 'customer',
+    text: 'Hi',
+    at: '2026-09-17T08:00:00.000Z',
+  });
+  await messageStore.append({
+    waNumber: wa,
+    direction: 'out',
+    source: 'bot',
+    text: 'Menu',
+    at: '2026-09-17T08:01:00.000Z',
+  });
+
+  const app = express();
+  app.use(
+    '/agent',
+    createAgentRouter({
+      engine: { handleInbound: async () => {} },
+      sessionStore: new MemorySessionStore(),
+      messageStore,
+      shortcutStore: createShortcutStore(path.join(dir, 'shortcuts.json')),
+      labelStore: createLabelStore(path.join(dir, 'labels.json')),
+      chatReadStore,
+      sendMessage: async () => ({ messages: [{ id: 'wamid.out' }] }),
+    })
+  );
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, () => resolve(s));
+  });
+  const port = server.address().port;
+  const call = (url, init) =>
+    fetch(`http://127.0.0.1:${port}/agent${url}`, {
+      ...init,
+      headers: {
+        Authorization: 'Bearer desk-secret',
+        'Content-Type': 'application/json',
+        ...((init && init.headers) || {}),
+      },
+    }).then((r) => r.json());
+
+  try {
+    const before = await call('/api/chats');
+    const unreadBefore = before.chats.find((c) => c.waNumber === wa);
+    assert.ok(unreadBefore.unreadCount > 0, 'starts unread');
+
+    const marked = await call(`/api/chats/${wa}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ force: true }),
+    });
+    assert.strictEqual(marked.ok, true);
+    assert.ok(marked.lastReadAt, 'POST /read must return a cursor');
+    assert.strictEqual(
+      await chatReadStore.get(wa),
+      marked.lastReadAt,
+      'cursor must land in the durable store, not only the response'
+    );
+
+    // Simulate a hard refresh while the desk is on emergency inbox
+    // (localStorage agentEmergencyInbox=1 → ?emergency=1).
+    const after = await call('/api/chats?emergency=1');
+    assert.strictEqual(after.emergency, true);
+    const chat = after.chats.find((c) => c.waNumber === wa);
+    assert.ok(chat, 'chat still listed in emergency mode');
+    assert.strictEqual(
+      chat.unreadCount,
+      0,
+      'emergency list must honour the persisted read cursor'
+    );
+    assert.ok(chat.lastReadAt, 'emergency list must expose lastReadAt');
+    assert.strictEqual(chat.forcedUnread, false);
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  // eslint-disable-next-line no-console
+  console.log('✓ read cursor survives an emergency inbox refresh');
+}
+
 function testReadStoreBackendSelection() {
   const dir = tmpDir('desk-unread-backend-');
   const fileStore = createChatReadStore(path.join(dir, 'chat_reads.json'));
@@ -358,6 +449,7 @@ async function main() {
   await testOpeningChatCanSendWhatsAppReadReceipt();
   await testReadCursorAndStickyUnread();
   await testForcedUnreadShowsInInbox();
+  await testReadPersistsAcrossEmergencyRefresh();
   testReadStoreBackendSelection();
   testDeskUiWiresExplicitRead();
   // eslint-disable-next-line no-console
