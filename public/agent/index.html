@@ -2808,16 +2808,31 @@
       }
     });
 
-    /** WhatsApp-style HH:MM from ISO timestamp (desk UI only). */
+    /**
+     * Message / inbox timestamps for the desk.
+     * Today → HH:MM; yesterday → Yesterday HH:MM; older → 11 Sep, HH:MM
+     * (adds the year when it is not the current year).
+     */
     function formatBubbleTime(iso) {
       if (!iso) return '';
       const d = new Date(iso);
       if (Number.isNaN(d.getTime())) return String(iso);
-      return d.toLocaleTimeString([], {
+      const time = d.toLocaleTimeString([], {
         hour: '2-digit',
         minute: '2-digit',
         hour12: false,
       });
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfMsg = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const dayDiff = Math.round((startOfToday - startOfMsg) / 86400000);
+      if (dayDiff === 0) return time;
+      if (dayDiff === 1) return 'Yesterday ' + time;
+      const dateOpts =
+        d.getFullYear() === now.getFullYear()
+          ? { day: 'numeric', month: 'short' }
+          : { day: 'numeric', month: 'short', year: 'numeric' };
+      return d.toLocaleDateString([], dateOpts) + ', ' + time;
     }
 
     function escapeHtml(s) {
