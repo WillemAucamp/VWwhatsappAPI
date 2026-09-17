@@ -40,6 +40,8 @@ function cloneSession(session) {
       ? { ...session.pendingTerminalOutbound }
       : null,
     lastLoggedLeadKey: session.lastLoggedLeadKey || null,
+    selectedProductRetailerId: session.selectedProductRetailerId || null,
+    selectedCatalogId: session.selectedCatalogId || null,
   };
 }
 
@@ -62,6 +64,9 @@ function createEmptySession(waNumber) {
     // clear cannot double-write after process restart (in-memory set is lost).
     lastLoggedLeadKey: null,
     agentTakenOver: false,
+    // Catalog car the customer messaged about / ordered from "See our cars".
+    selectedProductRetailerId: null,
+    selectedCatalogId: null,
     lastBotMessageAt: null,
     lastFollowUpAt: null,
     followUpCount: 0,

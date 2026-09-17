@@ -45,6 +45,11 @@ function getMetaReadiness() {
   if (!config.publicBaseUrl) {
     warnings.push('PUBLIC_BASE_URL unset — Meta cannot reach /webhook until this is a public https URL');
   }
+  if (!w.catalogId) {
+    warnings.push(
+      'WHATSAPP_CATALOG_ID unset — "See our cars" falls back to STOCK_LINK instead of live product list'
+    );
+  }
   if (!copyInfo.greetingFilled || copyInfo.blank > 0) {
     warnings.push(
       `src/content/copy.js has ${copyInfo.blank} blank key(s) — empty WhatsApp bodies / incomplete menus`
@@ -56,6 +61,7 @@ function getMetaReadiness() {
     token,
     phoneNumberId,
     wabaId: Boolean(w.wabaId),
+    catalogId: w.catalogId || null,
     verifyTokenConfigured,
     appSecret,
     publicBaseUrl: config.publicBaseUrl || null,
@@ -81,6 +87,7 @@ function formatReadinessReport(readiness = getMetaReadiness()) {
       readiness.canVerifyWebhook ? 'yes' : 'NO'
     }  hmac: ${readiness.webhookSignatureRequired ? 'required' : 'optional'}`,
     `[meta] copy: ${readiness.copy.filled}/${readiness.copy.total} keys filled`,
+    `[meta] catalog: ${readiness.catalogId || 'unset'}`,
   ];
   if (readiness.webhookUrl) {
     lines.push(`[meta] webhook URL: ${readiness.webhookUrl}`);

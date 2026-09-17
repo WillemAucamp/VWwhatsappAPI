@@ -61,6 +61,34 @@ async function main() {
     }
   }
 
+  if (config.whatsapp.catalogId) {
+    try {
+      const { listProductsForProductList } = require('../src/catalog/products');
+      const products = await listProductsForProductList({
+        catalogId: config.whatsapp.catalogId,
+      });
+      // eslint-disable-next-line no-console
+      console.log(
+        `\n[meta] Catalog ${config.whatsapp.catalogId}: ${products.length} sellable product(s)`
+      );
+      for (const p of products.slice(0, 5)) {
+        // eslint-disable-next-line no-console
+        console.log(`  - ${p.retailer_id}${p.name ? ` · ${p.name}` : ''}`);
+      }
+      if (products.length > 5) {
+        // eslint-disable-next-line no-console
+        console.log(`  … +${products.length - 5} more`);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('\n[meta] Catalog lookup failed (non-fatal):', err.message);
+      if (err.response) {
+        // eslint-disable-next-line no-console
+        console.error(JSON.stringify(err.response, null, 2));
+      }
+    }
+  }
+
   if (readiness.webhookUrl) {
     // eslint-disable-next-line no-console
     console.log(

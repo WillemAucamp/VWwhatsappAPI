@@ -134,11 +134,163 @@ async function testInteractiveListGraphBody() {
   });
 }
 
+async function testAuthErrorIncludesTokenHint() {
+  const snap = { ...config.whatsapp };
+  config.whatsapp.token = 'bad-token';
+  config.whatsapp.phoneNumberId = '123456';
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: false,
+    status: 401,
+    json: async () => ({
+      error: {
+        message: 'Authentication Error',
+        code: 190,
+        type: 'OAuthException',
+      },
+    }),
+  });
+  try {
+    let thrown = null;
+    try {
+      await cloudApiSendMessage('27821234567', { text: 'hi' });
+    } catch (err) {
+      thrown = err;
+    }
+    assert.ok(thrown, 'expected send to throw');
+    assert.match(thrown.message, /401/);
+    assert.match(thrown.message, /190/);
+    assert.match(thrown.message, /WHATSAPP_TOKEN/);
+    // eslint-disable-next-line no-console
+    console.log('✓ 401 Graph auth error includes token hint');
+  } finally {
+    global.fetch = originalFetch;
+    restore(snap);
+  }
+}
+
+async function testTextDoesNotDuplicateLinkAlreadyInBody() {
+  await withFakeFetch(async (getBody) => {
+    const url = 'https://forms.gle/eZq13HF91GpGqivU9';
+    await cloudApiSendMessage('27821234567', {
+      text: `Click here:\n\n👉 ${url}`,
+      link: url,
+    });
+    const body = getBody();
+    assert.strictEqual(body.type, 'text');
+    assert.strictEqual(body.text.body, `Click here:\n\n👉 ${url}`);
+    assert.strictEqual(body.text.preview_url, true);
+    const occurrences = body.text.body.split(url).length - 1;
+    assert.strictEqual(occurrences, 1);
+    // eslint-disable-next-line no-console
+    console.log('✓ text Graph body does not duplicate link already in copy');
+  });
+}
+
+async function testImageUploadThenSend() {
+  const snap = { ...config.whatsapp };
+  config.whatsapp.token = 'test-token';
+  config.whatsapp.phoneNumberId = '123456';
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, options) => {
+    const href = String(url);
+    calls.push({ href, options });
+    if (href.includes('/media')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 'media.abc' }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ messages: [{ id: 'wamid.img' }] }),
+    };
+  };
+  try {
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64'
+    );
+    const result = await cloudApiSendMessage('27821234567', {
+      type: 'image',
+      mediaBuffer: png,
+      mimeType: 'image/png',
+      text: 'Stock shot',
+    });
+    assert.strictEqual(result.messages[0].id, 'wamid.img');
+    assert.strictEqual(calls.length, 2);
+    assert.ok(calls[0].href.includes('/123456/media'));
+    assert.ok(calls[0].options.body instanceof FormData);
+    const sendBody = JSON.parse(calls[1].options.body);
+    assert.strictEqual(sendBody.type, 'image');
+    assert.strictEqual(sendBody.image.id, 'media.abc');
+    assert.strictEqual(sendBody.image.caption, 'Stock shot');
+    // eslint-disable-next-line no-console
+    console.log('✓ image send uploads media then Graph type=image');
+  } finally {
+    global.fetch = originalFetch;
+    restore(snap);
+  }
+}
+
+async function testLargeImageSendsAsDocument() {
+  const snap = { ...config.whatsapp };
+  config.whatsapp.token = 'test-token';
+  config.whatsapp.phoneNumberId = '123456';
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, options) => {
+    const href = String(url);
+    calls.push({ href, options });
+    if (href.includes('/media')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 'media.big' }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ messages: [{ id: 'wamid.doc' }] }),
+    };
+  };
+  try {
+    // Just over Meta's 5MB inline image cap.
+    const big = Buffer.alloc(5 * 1024 * 1024 + 10, 1);
+    await cloudApiSendMessage('27821234567', {
+      type: 'image',
+      mediaBuffer: big,
+      mimeType: 'image/jpeg',
+      filename: 'big.jpg',
+      text: 'Large photo',
+    });
+    assert.strictEqual(calls.length, 2);
+    const sendBody = JSON.parse(calls[1].options.body);
+    assert.strictEqual(sendBody.type, 'document');
+    assert.strictEqual(sendBody.document.id, 'media.big');
+    assert.strictEqual(sendBody.document.caption, 'Large photo');
+    assert.strictEqual(sendBody.document.filename, 'big.jpg');
+    // eslint-disable-next-line no-console
+    console.log('✓ images over 5MB send as Graph type=document');
+  } finally {
+    global.fetch = originalFetch;
+    restore(snap);
+  }
+}
+
 async function main() {
   await testTemplateGraphBody();
   await testTextViaTemplateNameOnSendMessage();
   await testInteractiveButtonGraphBody();
   await testInteractiveListGraphBody();
+  await testAuthErrorIncludesTokenHint();
+  await testTextDoesNotDuplicateLinkAlreadyInBody();
+  await testImageUploadThenSend();
+  await testLargeImageSendsAsDocument();
   // eslint-disable-next-line no-console
   console.log('\ntransport graph tests passed.');
 }

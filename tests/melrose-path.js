@@ -8,8 +8,7 @@
 async function driveToFinalConsent(engine, wa) {
   await engine.handleInbound(wa, 'hi');
   await engine.handleInbound(wa, 'qualify me');
-  await engine.handleInbound(wa, 'yes'); // employed_yes
-  await engine.handleInbound(wa, 'more than r15k');
+  await engine.handleInbound(wa, 'yes'); // employed + income
   await engine.handleInbound(wa, 'yes'); // license_yes
   await engine.handleInbound(wa, 'good'); // credit_good
 }

@@ -4,6 +4,17 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
+const { createShortcutStore } = require('./shortcutStore');
+const { createLabelStore } = require('./labelStore');
+const { createChatReadStore } = require('./chatReadStore');
+const {
+  inferDeskLabelNames,
+  syncInferredDeskLabels,
+} = require('./deskAutoLabels');
+const { waNumberMatchesQuery } = require('../../public/agent/deskListFilters');
+const {
+  markMessageRead: transportMarkMessageRead,
+} = require('../transport/whatsapp');
 
 function timingSafeEqualStr(a, b) {
   const left = Buffer.from(String(a || ''));
@@ -12,15 +23,122 @@ function timingSafeEqualStr(a, b) {
   return crypto.timingSafeEqual(left, right);
 }
 
+function sendStoreError(res, err) {
+  const status = err && err.status ? err.status : 500;
+  return res.status(status).json({ error: err.message || String(err) });
+}
+
+function publicLabels(labelIds, labelById) {
+  return (labelIds || [])
+    .map((id) => labelById.get(id))
+    .filter(Boolean)
+    .map((l) => ({ id: l.id, name: l.name, color: l.color }));
+}
+
+function withTimeout(promise, ms, fallback) {
+  const wait = Number(ms);
+  if (!promise || !(wait > 0)) return Promise.resolve(fallback);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), wait);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      }
+    );
+  });
+}
+
+/**
+ * Attach funnel labels from the live session and/or transcript.
+ * Inbox list must stay light: never scan full transcripts there (that timed
+ * out on Render and made the desk look empty). Thread open may scan once;
+ * empty scans are remembered for this process.
+ */
+function createAutoLabelSync({ labels, messageStore }) {
+  const scannedEmpty = new Set();
+
+  async function syncChat(
+    waNumber,
+    {
+      session,
+      messages,
+      lastText,
+      allowTranscriptScan = true,
+      existingLabelIds,
+    } = {}
+  ) {
+    const wa = String(waNumber || '').replace(/\D/g, '');
+    if (!wa) return [];
+    let hints = { session, messages, lastText };
+    let inferred = inferDeskLabelNames(hints);
+    if (
+      !inferred.length &&
+      messages == null &&
+      allowTranscriptScan &&
+      !scannedEmpty.has(wa) &&
+      messageStore &&
+      typeof messageStore.listMessages === 'function'
+    ) {
+      const loaded = await messageStore.listMessages(wa, { limit: 150 });
+      hints = { session, messages: loaded, lastText };
+      inferred = inferDeskLabelNames(hints);
+      if (!inferred.length) scannedEmpty.add(wa);
+    }
+    if (!inferred.length) {
+      if (Array.isArray(existingLabelIds)) return existingLabelIds;
+      return labels.getChatLabelIds(wa);
+    }
+    scannedEmpty.delete(wa);
+    await syncInferredDeskLabels(labels, wa, hints);
+    return labels.getChatLabelIds(wa);
+  }
+
+  return { syncChat };
+}
+
 function createAgentRouter({
   engine,
   sessionStore,
   messageStore,
+  shortcutStore,
+  labelStore,
+  chatReadStore,
   sendMessage,
+  markMessageRead,
 } = {}) {
   const router = express.Router();
   const password = config.agent.deskPassword;
   const enabled = config.agent.deskEnabled && Boolean(password);
+  const shortcuts = shortcutStore || createShortcutStore();
+  const labels = labelStore || createLabelStore();
+  const chatReads = chatReadStore || createChatReadStore();
+  const autoLabels = createAutoLabelSync({ labels, messageStore });
+  const sendReadReceipt = markMessageRead || transportMarkMessageRead;
+  // A slow read-state query must not reset every badge to "never opened".
+  let lastKnownReadState = { reads: {}, forcedUnread: {} };
+
+  // Warm cursors on boot so the first inbox request after a deploy cannot
+  // treat a slow getState as "nobody has read anything" and re-badge the list.
+  if (typeof chatReads.getState === 'function') {
+    chatReads
+      .getState()
+      .then((state) => {
+        if (!state || typeof state !== 'object') return;
+        lastKnownReadState = {
+          reads: { ...(state.reads || {}) },
+          forcedUnread: { ...(state.forcedUnread || {}) },
+        };
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[agent] chat read warm-up failed', err && err.message);
+      });
+  }
 
   function requireAuth(req, res, next) {
     if (!enabled) {
@@ -43,13 +161,64 @@ function createAgentRouter({
   }
 
   router.get('/', (_req, res) => {
-    res.sendFile(path.join(__dirname, '../../public/agent/index.html'));
+    const file = path.join(__dirname, '../../public/agent/index.html');
+    res.sendFile(file, (err) => {
+      if (!err) return;
+      // eslint-disable-next-line no-console
+      console.error('[agent-desk] UI file missing:', file, err.message);
+      if (!res.headersSent) {
+        res
+          .status(500)
+          .type('text')
+          .send(
+            'Agent desk UI missing from server image. Dockerfile must COPY public ./public — then redeploy.'
+          );
+      }
+    });
   });
 
-  router.get('/api/status', (_req, res) => {
+  router.use(
+    '/static',
+    express.static(path.join(__dirname, '../../public/agent'))
+  );
+
+  router.get('/api/status', async (_req, res) => {
+    const diagnostics = require('../webhook/diagnostics');
+    const snap = diagnostics.snapshot();
+    let chatCount = null;
+    let chatListError = null;
+    try {
+      if (messageStore && typeof messageStore.countChats === 'function') {
+        chatCount = await messageStore.countChats();
+      } else if (messageStore && typeof messageStore.listChats === 'function') {
+        const chats = await messageStore.listChats();
+        chatCount = Array.isArray(chats) ? chats.length : null;
+      }
+    } catch (err) {
+      chatListError = err && err.message ? err.message : String(err);
+    }
     res.json({
       enabled,
       passwordConfigured: Boolean(password),
+      transcriptPath: config.agent.transcriptPath,
+      sessionStorePath: config.session.storePath,
+      lastSendError: snap.lastSendError || null,
+      webhookSignatureRejects: snap.postRejectedSignature || 0,
+      chatCount,
+      chatListError,
+      inboxList: 'reads-survive-refresh-2026-09-17',
+      unreadModel: 'bot-counts-unread-2026-09-11',
+      chatReadsBackend: (chatReads && chatReads.backend) || 'unknown',
+      chatReadsCount: Object.keys(lastKnownReadState.reads || {}).length,
+      unreadCountMode:
+        messageStore && typeof messageStore.unreadMode === 'function'
+          ? messageStore.unreadMode()
+          : 'file',
+      readReceipts: Boolean(config.agent.sendReadReceipts),
+      emergency: Boolean(config.agent.deskEmergency),
+      transcriptAppendFailures: snap.transcriptAppendFailures || 0,
+      lastTranscriptAppendError: snap.lastTranscriptAppendError || null,
+      lastSkippedInboundType: snap.lastSkippedInboundType || null,
     });
   });
 
@@ -78,24 +247,253 @@ function createAgentRouter({
     res.json({ ok: true });
   });
 
-  router.get('/api/chats', requireAuth, async (_req, res) => {
+  router.get('/api/stored/:wa', requireAuth, async (req, res) => {
     try {
-      const chats = await messageStore.listChats();
-      const enriched = [];
-      for (const chat of chats) {
-        const session = await sessionStore.get(chat.waNumber);
-        enriched.push({
-          ...chat,
-          status: session ? session.status : 'unknown',
-          currentState: session ? session.currentState : null,
-          agentTakenOver: Boolean(session && session.agentTakenOver),
+      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      if (!wa) {
+        return res.status(400).json({ error: 'wa_required', stored: false });
+      }
+      const messages = await messageStore.listMessages(wa, { limit: 1 });
+      const last = messages && messages.length ? messages[messages.length - 1] : null;
+      res.json({
+        waNumber: last
+          ? String(last.waNumber || wa).replace(/\D/g, '') || wa
+          : wa,
+        stored: Boolean(last),
+        lastText: last ? last.text : null,
+        lastAt: last ? last.at : null,
+        lastDirection: last ? last.direction : null,
+        lastSource: last ? last.source : null,
+        messageCount: last ? 1 : 0,
+      });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.get('/api/chats', requireAuth, async (req, res) => {
+    try {
+      const emergency =
+        Boolean(config.agent.deskEmergency) ||
+        String((req.query && req.query.emergency) || '') === '1';
+      const enrichMs = Number(config.agent.inboxEnrichMs) || 1500;
+      const listMs = Number(config.agent.inboxListMs) || 8000;
+      // Read cursors keep badges cleared across refresh — give them longer
+      // than labels, and never treat a timeout as "nobody has read anything".
+      const readMs = Math.max(enrichMs * 2, Number(config.agent.inboxReadMs) || 6000);
+
+      let readsMap = {};
+      let forcedUnread = {};
+      let labelBundle = { labels: [], chatLabels: {} };
+      const sessionByWa = new Map();
+
+      // Labels + read cursors stay on even in emergency mode. Skipping reads
+      // made every chat look unread again after a browser refresh whenever
+      // the desk had flipped to ?emergency=1 (auto or manual). Only the
+      // heavier session list is optional under emergency.
+      const labelPromise = withTimeout(labels.getChatLabelsMap(), enrichMs, null);
+      const loadReads = () =>
+        typeof chatReads.getState === 'function'
+          ? chatReads.getState()
+          : chatReads.getAll().then((reads) => ({ reads, forcedUnread: {} }));
+      let readState = await withTimeout(loadReads(), readMs, null);
+      if (!readState) {
+        readState = await withTimeout(loadReads(), readMs, null);
+      }
+      if (readState) {
+        readsMap = readState.reads || readState;
+        forcedUnread = readState.forcedUnread || {};
+        lastKnownReadState = { reads: readsMap, forcedUnread };
+      } else {
+        // Timed out twice: reuse last good cursors. An empty map here is
+        // what made every chat look unread again after a browser refresh.
+        readsMap = lastKnownReadState.reads || {};
+        forcedUnread = lastKnownReadState.forcedUnread || {};
+        // eslint-disable-next-line no-console
+        console.error('[agent] chat read cursors timed out; reusing last known map', {
+          known: Object.keys(readsMap || {}).length,
         });
       }
-      res.json({ chats: enriched });
+
+      if (!emergency) {
+        const [labelsMap, sessions] = await Promise.all([
+          labelPromise,
+          sessionStore && typeof sessionStore.listAll === 'function'
+            ? withTimeout(sessionStore.listAll(), enrichMs, null)
+            : Promise.resolve(null),
+        ]);
+        if (labelsMap && typeof labelsMap === 'object') {
+          labelBundle = labelsMap;
+        }
+        if (Array.isArray(sessions)) {
+          for (const session of sessions) {
+            const wa = String((session && session.waNumber) || '').replace(/\D/g, '');
+            if (wa) sessionByWa.set(wa, session);
+          }
+        }
+      } else {
+        const labelsMap = await labelPromise;
+        if (labelsMap && typeof labelsMap === 'object') {
+          labelBundle = labelsMap;
+        }
+      }
+
+      const query = String((req.query && (req.query.q || req.query.search)) || '').trim();
+      const searching = String(query).replace(/\D/g, '').length >= 4;
+
+      let chats = await withTimeout(
+        messageStore.listChats({ lastReadByWa: readsMap }),
+        listMs,
+        null
+      );
+      if (!Array.isArray(chats)) {
+        // Keep cursors on the retry — listing without them re-counts history.
+        chats = await withTimeout(
+          messageStore.listChats({ lastReadByWa: readsMap }),
+          listMs,
+          []
+        );
+      }
+      if (!Array.isArray(chats)) chats = [];
+      if (searching) {
+        chats = chats.filter((chat) =>
+          waNumberMatchesQuery(chat.waNumber, query)
+        );
+      }
+
+      const labelById = new Map((labelBundle.labels || []).map((l) => [l.id, l]));
+      const enriched = chats.map((chat) => {
+        const existingLabelIds = (labelBundle.chatLabels &&
+          labelBundle.chatLabels[chat.waNumber]) || [];
+        const session = sessionByWa.get(chat.waNumber) || null;
+        let unreadCount = Number(chat.unreadCount) || 0;
+        if (forcedUnread[chat.waNumber]) {
+          unreadCount = Math.max(unreadCount, 1);
+        }
+        const lastReadAt =
+          chat.lastReadAt || readsMap[chat.waNumber] || null;
+        return {
+          ...chat,
+          unreadCount,
+          lastReadAt,
+          forcedUnread: Boolean(forcedUnread[chat.waNumber]),
+          status: session ? session.status : 'bot',
+          currentState: session ? session.currentState : null,
+          agentTakenOver: Boolean(session && session.agentTakenOver),
+          labelIds: existingLabelIds,
+          labels: publicLabels(existingLabelIds, labelById),
+        };
+      });
+      res.json({
+        chats: enriched,
+        emergency,
+        inbox: 'reads-survive-refresh-2026-09-17',
+        search: searching ? query : null,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });
     }
   });
+
+  router.post('/api/chats/:wa/unread', requireAuth, async (req, res) => {
+    try {
+      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      if (!wa) {
+        return res.status(400).json({ error: 'wa_required' });
+      }
+      if (typeof chatReads.markUnread !== 'function') {
+        return res.status(500).json({ error: 'mark_unread_unavailable' });
+      }
+      const marked = await chatReads.markUnread(wa);
+      if (lastKnownReadState.reads) {
+        lastKnownReadState.reads[wa] = marked.lastReadAt;
+        lastKnownReadState.forcedUnread[wa] = true;
+      }
+      res.json({ ok: true, ...marked });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  /**
+   * Opening a chat on the desk marks it read — takeover or not.
+   * Read is an explicit action, never a side effect of a GET, so the 5s desk
+   * poll cannot undo a manual "mark unread".
+   * body.force=true means staff clicked the chat, which also clears a manual
+   * unread. Without it, a background refresh leaves a forced-unread chat alone.
+   */
+  router.post('/api/chats/:wa/read', requireAuth, express.json(), async (req, res) => {
+    try {
+      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      if (!wa) {
+        return res.status(400).json({ error: 'wa_required' });
+      }
+      const force = Boolean(req.body && req.body.force);
+      if (!force && typeof chatReads.isForcedUnread === 'function') {
+        const forced = await chatReads.isForcedUnread(wa);
+        if (forced) {
+          return res.json({
+            ok: true,
+            waNumber: wa,
+            skipped: 'forced_unread',
+            forcedUnread: true,
+          });
+        }
+      }
+      // Prefer an explicit cursor from the desk (covers on-screen lastAt), then
+      // fall back to max(now, latest stored message) so refresh cannot re-badge
+      // a chat whose last message timestamp sat slightly ahead of "now".
+      let at =
+        req.body && req.body.at != null && String(req.body.at).trim()
+          ? String(req.body.at).trim()
+          : new Date().toISOString();
+      try {
+        if (messageStore && typeof messageStore.listMessages === 'function') {
+          const messages = await messageStore.listMessages(wa, { limit: 1 });
+          const latest = Array.isArray(messages) && messages.length
+            ? messages[messages.length - 1]
+            : null;
+          const latestAt = latest && latest.at ? String(latest.at) : '';
+          if (latestAt && latestAt > String(at)) at = latestAt;
+        }
+      } catch (_) {
+        /* keep at */
+      }
+      const marked = await chatReads.markRead(wa, at);
+      if (lastKnownReadState.reads) {
+        lastKnownReadState.reads[wa] = marked.lastReadAt;
+        delete lastKnownReadState.forcedUnread[wa];
+      }
+      let receipt = null;
+      if (config.agent.sendReadReceipts) {
+        receipt = await sendReadReceiptFor(wa);
+      }
+      res.json({ ok: true, ...marked, receipt });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  /** Blue ticks for the customer, mirroring WhatsApp's own read receipts. */
+  async function sendReadReceiptFor(wa) {
+    try {
+      if (!messageStore || typeof messageStore.listMessages !== 'function') {
+        return { sent: false, reason: 'no_transcript' };
+      }
+      const messages = await messageStore.listMessages(wa, { limit: 30 });
+      const lastInbound = [...(messages || [])]
+        .reverse()
+        .find((m) => m && m.direction === 'in' && m.wamid);
+      if (!lastInbound) return { sent: false, reason: 'no_inbound_wamid' };
+      await sendReadReceipt(lastInbound.wamid);
+      return { sent: true, wamid: lastInbound.wamid };
+    } catch (err) {
+      // Never fail the open because the receipt could not go out.
+      // eslint-disable-next-line no-console
+      console.error('[agent] read receipt failed', err.message);
+      return { sent: false, reason: err.message || String(err) };
+    }
+  }
 
   router.get('/api/chats/:wa', requireAuth, async (req, res) => {
     try {
@@ -104,9 +502,45 @@ function createAgentRouter({
         messageStore.listMessages(wa),
         sessionStore.get(wa),
       ]);
+      let labelIds = [];
+      let allLabels = [];
+      try {
+        allLabels = await labels.listLabels();
+        labelIds = await autoLabels.syncChat(wa, { session, messages });
+      } catch (_) {
+        try {
+          labelIds = await labels.getChatLabelIds(wa);
+        } catch {
+          labelIds = [];
+        }
+        if (!allLabels.length) {
+          try {
+            allLabels = await labels.listLabels();
+          } catch {
+            allLabels = [];
+          }
+        }
+      }
+      // Reading a thread does not move the read cursor; the desk POSTs
+      // /read when staff actually open the chat.
+      let lastReadAt = null;
+      let forcedUnread = false;
+      try {
+        lastReadAt = await chatReads.get(wa);
+        if (typeof chatReads.isForcedUnread === 'function') {
+          forcedUnread = await chatReads.isForcedUnread(wa);
+        }
+      } catch (_) {
+        lastReadAt = null;
+      }
+      const labelById = new Map(allLabels.map((l) => [l.id, l]));
       res.json({
         waNumber: wa,
         messages,
+        lastReadAt,
+        forcedUnread,
+        labelIds,
+        labels: publicLabels(labelIds, labelById),
         session: session
           ? {
               status: session.status,
@@ -120,6 +554,62 @@ function createAgentRouter({
       });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });
+    }
+  });
+
+  router.get('/api/chats/:wa/messages/:id/media', requireAuth, async (req, res) => {
+    try {
+      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      const id = String(req.params.id || '');
+      if (!wa || !id) {
+        return res.status(400).json({ error: 'wa_and_id_required' });
+      }
+      if (!messageStore || typeof messageStore.readMedia !== 'function') {
+        return res.status(501).json({ error: 'media_not_supported' });
+      }
+      const media = await messageStore.readMedia(wa, id);
+      if (!media || !media.buffer) {
+        return res.status(404).json({ error: 'media_not_found' });
+      }
+      const filename = String(media.filename || 'file').replace(/[/\\]/g, '_');
+      const forceDownload =
+        String((req.query && req.query.download) || '') === '1' ||
+        String((req.query && req.query.disposition) || '') === 'attachment';
+      const asAttachment = forceDownload || media.mediaKind !== 'image';
+      res.setHeader('Content-Type', media.mimeType || 'application/octet-stream');
+      res.setHeader(
+        'Content-Disposition',
+        (asAttachment ? 'attachment' : 'inline') +
+          '; filename="' +
+          filename.replace(/"/g, '') +
+          '"'
+      );
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      return res.send(Buffer.from(media.buffer));
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.put('/api/chats/:wa/labels', requireAuth, express.json(), async (req, res) => {
+    try {
+      const wa = String(req.params.wa || '').replace(/\D/g, '');
+      const labelIds = req.body && Array.isArray(req.body.labelIds)
+        ? req.body.labelIds
+        : [];
+      const result = await labels.setChatLabels(wa, labelIds);
+      const allLabels = await labels.listLabels();
+      const labelById = new Map(allLabels.map((l) => [l.id, l]));
+      res.json({
+        ok: true,
+        ...result,
+        labels: result.labelIds
+          .map((id) => labelById.get(id))
+          .filter(Boolean)
+          .map((l) => ({ id: l.id, name: l.name, color: l.color })),
+      });
+    } catch (err) {
+      return sendStoreError(res, err);
     }
   });
 
@@ -168,10 +658,91 @@ function createAgentRouter({
     }
   });
 
+  // Paste-image sends from the desk (base64 JSON; keep text /reply unchanged).
+  router.post(
+    '/api/chats/:wa/reply-media',
+    requireAuth,
+    express.json({ limit: '24mb' }),
+    async (req, res) => {
+      try {
+        const wa = String(req.params.wa || '').replace(/\D/g, '');
+        const caption =
+          req.body && req.body.caption != null
+            ? String(req.body.caption).trim()
+            : req.body && req.body.text != null
+              ? String(req.body.text).trim()
+              : '';
+        const imageBase64 =
+          req.body && req.body.imageBase64 != null
+            ? String(req.body.imageBase64).replace(/^data:[^;]+;base64,/, '')
+            : '';
+        const mimeType =
+          (req.body && (req.body.mimeType || req.body.mediaMimeType)) || 'image/png';
+        const filename =
+          (req.body && req.body.filename) || undefined;
+        if (!wa || !imageBase64) {
+          return res.status(400).json({ error: 'wa_and_image_required' });
+        }
+
+        let buffer;
+        try {
+          buffer = Buffer.from(imageBase64, 'base64');
+        } catch (_) {
+          return res.status(400).json({ error: 'invalid_image_base64' });
+        }
+        if (!buffer.length) {
+          return res.status(400).json({ error: 'empty_image' });
+        }
+
+        if (engine && typeof engine.takeOver === 'function') {
+          await engine.takeOver(wa, { silent: true });
+        }
+
+        const result = await sendMessage(wa, {
+          type: 'image',
+          mediaBuffer: buffer,
+          mimeType,
+          filename,
+          text: caption,
+          meta: { source: 'agent', stateId: null },
+        });
+        const wamid =
+          result &&
+          result.messages &&
+          result.messages[0] &&
+          result.messages[0].id
+            ? result.messages[0].id
+            : null;
+        const text = caption || '[Image]';
+
+        res.json({
+          ok: true,
+          message: {
+            waNumber: wa,
+            direction: 'out',
+            source: 'agent',
+            text,
+            wamid,
+            at: new Date().toISOString(),
+          },
+          graph: result,
+        });
+      } catch (err) {
+        const status = err && err.status >= 400 && err.status < 600 ? err.status : 502;
+        res.status(status).json({
+          error: err.message || String(err),
+          code: err.code || undefined,
+          response: err.response || undefined,
+        });
+      }
+    }
+  );
+
   router.post('/api/chats/:wa/takeover', requireAuth, async (req, res) => {
     try {
       const wa = String(req.params.wa || '').replace(/\D/g, '');
-      const result = await engine.takeOver(wa);
+      // Silent: staff takeover must not send any bot WhatsApp message.
+      const result = await engine.takeOver(wa, { silent: true });
       res.json({ ok: true, ...result });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });
@@ -185,6 +756,92 @@ function createAgentRouter({
       res.json({ ok: true, ...result });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });
+    }
+  });
+
+  // —— Shortcuts (type "/" in composer) ——
+  router.get('/api/shortcuts', requireAuth, async (_req, res) => {
+    try {
+      const list = await shortcuts.list();
+      res.json({ shortcuts: list });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.post('/api/shortcuts', requireAuth, express.json(), async (req, res) => {
+    try {
+      const row = await shortcuts.create({
+        key: req.body && req.body.key,
+        text: req.body && req.body.text,
+      });
+      res.status(201).json({ shortcut: row });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.put('/api/shortcuts/:id', requireAuth, express.json(), async (req, res) => {
+    try {
+      const row = await shortcuts.update(req.params.id, {
+        key: req.body && req.body.key,
+        text: req.body && req.body.text,
+      });
+      res.json({ shortcut: row });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.delete('/api/shortcuts/:id', requireAuth, async (req, res) => {
+    try {
+      await shortcuts.remove(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  // —— Labels ——
+  router.get('/api/labels', requireAuth, async (_req, res) => {
+    try {
+      const list = await labels.listLabels();
+      res.json({ labels: list, colors: labels.colors || [] });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.post('/api/labels', requireAuth, express.json(), async (req, res) => {
+    try {
+      const row = await labels.createLabel({
+        name: req.body && req.body.name,
+        color: req.body && req.body.color,
+      });
+      res.status(201).json({ label: row });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.put('/api/labels/:id', requireAuth, express.json(), async (req, res) => {
+    try {
+      const row = await labels.updateLabel(req.params.id, {
+        name: req.body && req.body.name,
+        color: req.body && req.body.color,
+      });
+      res.json({ label: row });
+    } catch (err) {
+      return sendStoreError(res, err);
+    }
+  });
+
+  router.delete('/api/labels/:id', requireAuth, async (req, res) => {
+    try {
+      await labels.removeLabel(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      return sendStoreError(res, err);
     }
   });
 

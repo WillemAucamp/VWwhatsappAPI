@@ -97,10 +97,15 @@ function assertInteractiveMenu(h) {
   assert.ok(interactive.length >= 1, `${h.label}: expected interactive menu`);
   const greet = interactive[0];
   assert.strictEqual(greet.interactive.type, 'button');
-  assert.strictEqual(greet.interactive.buttons.length, 3);
+  // See our cars temporarily hidden from the greeting menu.
+  assert.strictEqual(greet.interactive.buttons.length, 2);
   assert.deepStrictEqual(
     greet.interactive.buttons.map((b) => b.id),
-    ['see_cars', 'qualify_me', 'opt_out']
+    ['qualify_me', 'saw_special']
+  );
+  assert.deepStrictEqual(
+    greet.interactive.buttons.map((b) => b.title),
+    ['Qualify Me', 'I saw a special']
   );
 }
 
@@ -110,18 +115,16 @@ async function testFullQualifyPath() {
 
   await h.say(wa, 'hi');
   await h.say(wa, 'qualify me');
-  await h.say(wa, 'yes');
-  await h.say(wa, 'more than r15k');
-  await h.say(wa, 'yes');
+  await h.say(wa, 'yes'); // employed + income
+  await h.say(wa, 'yes'); // license
   await h.say(wa, 'good');
-  await h.say(wa, 'yes');
+  await h.say(wa, 'yes'); // final consent
 
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'qualified_self_serve');
   assert.deepStrictEqual(lead.path, [
     'GREETING',
-    'EMPLOYMENT_CHECK',
-    'AFFORDABILITY_CHECK',
+    'EMPLOYED_INCOME_CHECK',
     'LICENSE_CHECK',
     'CREDIT_CHECK',
     'FINAL_CONSENT',
@@ -139,73 +142,75 @@ async function testInteractiveQualifyPath() {
   await h.say(wa, 'hi');
   assertInteractiveMenu(h);
   await h.tap(wa, 'qualify_me', 'Qualify Me');
-  await h.tap(wa, 'employed_yes', 'Yes');
-  await h.tap(wa, 'income_over_9k', 'More than R9k');
+  await h.tap(wa, 'employed_income_yes', 'Yes');
   await h.tap(wa, 'license_yes', 'Yes');
   await h.tap(wa, 'credit_good', 'Good');
   await h.tap(wa, 'consent_yes', 'Yes, send it');
 
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'qualified_self_serve');
-  assert.ok(String(h.messages[h.messages.length - 1].text).includes(copy.send_link_body.split('\n')[0].replace('{{APPLICATION_LINK}}', '') || 'Here is the link'));
+  const lastText = String(h.messages[h.messages.length - 1].text);
+  assert.ok(lastText.includes('https://forms.gle/eZq13HF91GpGqivU9'));
+  assert.ok(lastText.includes('Click on the link below'));
+  assert.ok(lastText.includes('estimated repayments'));
   // eslint-disable-next-line no-console
   console.log('✓ interactive qualify path');
 }
 
-async function testSeeCarsThenQualify() {
-  const h = createHarness('see_cars');
-  const wa = '27000000002';
-
-  await h.say(wa, 'hello');
-  await h.say(wa, 'see our cars');
-  const stockMsg = h.messages.find((m) => m.mediaSlot === 'stock_list');
-  assert.ok(stockMsg, 'stock mediaSlot present');
-  assert.ok(String(stockMsg.text).includes('Here is our current stock'));
-  await h.say(wa, 'continue');
+async function testQualifyMeWithoutPriorGreetingSession() {
+  // After Render redeploy, session is gone but WhatsApp still shows old buttons.
+  const h = createHarness('qualify_me_cold');
+  const wa = '27000000100';
+  await h.tap(wa, 'qualify_me', 'Qualify Me');
   const session = await h.store.get(wa);
-  assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
-  assert.deepStrictEqual(session.path, [
-    'GREETING',
-    'STOCKLIST_CAROUSEL',
-    'EMPLOYMENT_CHECK',
-  ]);
+  assert.strictEqual(session.currentState, 'EMPLOYED_INCOME_CHECK');
+  assert.deepStrictEqual(session.path, ['GREETING', 'EMPLOYED_INCOME_CHECK']);
+  assert.ok(
+    h.messages.some((m) => m.meta && m.meta.stateId === 'EMPLOYED_INCOME_CHECK'),
+    'should enter qualification tree, not bounce to GREETING'
+  );
+  assert.ok(
+    !h.messages.some((m) => m.meta && m.meta.stateId === 'GREETING'),
+    'should not re-send main menu when Qualify Me was tapped'
+  );
   // eslint-disable-next-line no-console
-  console.log('✓ See our cars → stocklist → employment_check');
+  console.log('✓ Qualify Me with no session → employed+income check');
 }
 
-async function testEmployedNoEndChat() {
-  const h = createHarness('employed_no');
-  const wa = '27000000004';
+async function testQualifyMeAfterSoftClose() {
+  const h = createHarness('qualify_me_soft');
+  const wa = '27000000101';
+  await h.say(wa, 'hi');
+  await h.tap(wa, 'qualify_me', 'Qualify Me');
+  await h.tap(wa, 'employed_income_no', 'No');
+  let session = await h.store.get(wa);
+  assert.strictEqual(session.status, 'soft_closed');
+
+  await h.tap(wa, 'qualify_me', 'Qualify Me');
+  session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'EMPLOYED_INCOME_CHECK');
+  assert.strictEqual(session.status, 'active');
+  // eslint-disable-next-line no-console
+  console.log('✓ Qualify Me after soft_closed → employed+income check');
+}
+
+async function testNotReadyEndChat() {
+  const h = createHarness('not_ready');
+  const wa = '27000000005';
   await h.say(wa, 'hi');
   await h.say(wa, 'qualify me');
   await h.say(wa, 'no');
   const lead = lastLead(h);
-  assert.strictEqual(lead.exitReason, 'employed_no');
-  assert.ok(lead.path.includes('END_CHAT_EMPLOYED_NO'));
+  assert.strictEqual(lead.exitReason, 'not_ready_income_employment');
+  assert.ok(lead.path.includes('END_CHAT_NOT_READY'));
   assert.ok(
-    String(h.messages[h.messages.length - 1].text).includes(
-      'proof of steady income'
-    )
+    String(h.messages[h.messages.length - 1].text).includes('R9,500')
   );
   await h.say(wa, 'hello again');
   const session = await h.store.get(wa);
   assert.strictEqual(session.currentState, 'GREETING');
   // eslint-disable-next-line no-console
-  console.log('✓ employed_no end_chat + soft reopen');
-}
-
-async function testIncomeUnder5kEndChat() {
-  const h = createHarness('income_under_5k');
-  const wa = '27000000005';
-  await h.say(wa, 'hi');
-  await h.say(wa, 'qualify me');
-  await h.say(wa, 'yes');
-  await h.say(wa, 'less than r5k');
-  const lead = lastLead(h);
-  assert.strictEqual(lead.exitReason, 'income_under_5k');
-  assert.ok(lead.path.includes('END_CHAT_INCOME'));
-  // eslint-disable-next-line no-console
-  console.log('✓ income_under_5k end_chat');
+  console.log('✓ not-ready end_chat + soft reopen');
 }
 
 async function testLicenseNoHandover() {
@@ -214,18 +219,21 @@ async function testLicenseNoHandover() {
   await h.say(wa, 'hi');
   await h.say(wa, 'qualify me');
   await h.say(wa, 'yes');
-  await h.say(wa, 'more than r15k');
   await h.say(wa, 'no');
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'no_license');
   assert.ok(h.agentEvents.some((e) => e.type === 'handover'));
-  assert.ok(
-    String(h.messages[h.messages.length - 1].text).includes(
-      'personal conversation'
-    )
-  );
+  const session = await h.store.get(wa);
+  assert.strictEqual(session.status, 'quiet');
+  assert.strictEqual(session.agentTakenOver, true);
+  const lastText = String(h.messages[h.messages.length - 1].text);
+  assert.ok(lastText.includes('license is a must'));
+  assert.ok(lastText.includes('community of property'));
+  assert.ok(lastText.includes('only one bank'));
+  await h.say(wa, 'thanks');
+  assert.strictEqual((await h.store.get(wa)).status, 'quiet');
   // eslint-disable-next-line no-console
-  console.log('✓ license_no → human_handover');
+  console.log('✓ license_no → exceptions plan + quiet for manual replies');
 }
 
 async function testCreditBadHandover() {
@@ -234,23 +242,31 @@ async function testCreditBadHandover() {
   await h.say(wa, 'hi');
   await h.say(wa, 'qualify me');
   await h.say(wa, 'yes');
-  await h.say(wa, 'more than r9k');
   await h.say(wa, 'yes');
   await h.say(wa, 'bad');
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'credit_bad');
   assert.ok(h.agentEvents.some((e) => e.type === 'handover'));
+  const session = await h.store.get(wa);
+  assert.strictEqual(session.status, 'quiet');
+  assert.strictEqual(session.agentTakenOver, true);
+  const lastText = String(h.messages[h.messages.length - 1].text);
+  assert.ok(lastText.includes('ClearScore'));
+  assert.ok(lastText.includes("I've saved your details"));
+  assert.ok(lastText.includes('*What to do:*'));
+  // Further customer input stays open for staff (quiet), does not restart funnel
+  await h.say(wa, 'thanks');
+  assert.strictEqual((await h.store.get(wa)).status, 'quiet');
   // eslint-disable-next-line no-console
-  console.log('✓ credit_bad → human_handover');
+  console.log('✓ credit_bad → plan + quiet for manual replies');
 }
 
 async function testConsentNoHandover() {
-  const h = createHarness('consent_no');
+  const h = createHarness('final_consent_no');
   const wa = '27000000008';
   await h.say(wa, 'hi');
   await h.say(wa, 'qualify me');
   await h.say(wa, 'yes');
-  await h.say(wa, 'more than r15k');
   await h.say(wa, 'yes');
   await h.say(wa, 'good');
   await h.say(wa, 'not right now');
@@ -265,7 +281,8 @@ async function testOptOutFromGreeting() {
   const h = createHarness('opt_out');
   const wa = '27000000009';
   await h.say(wa, 'hi');
-  await h.tap(wa, 'opt_out', 'Opt-Out');
+  // Opt-Out is text-matchable (not a main-menu button anymore).
+  await h.say(wa, 'opt out');
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'human_requested');
   assert.strictEqual((await h.store.get(wa)).status, 'quiet');
@@ -280,50 +297,265 @@ async function testInvalidRetryThenEscalate() {
   await h.say(wa, 'qualify me');
   await h.say(wa, 'zzzz');
   let session = await h.store.get(wa);
-  assert.strictEqual(session.currentState, 'EMPLOYMENT_CHECK');
+  assert.strictEqual(session.currentState, 'OFF_MENU_RECOVERY');
+  assert.strictEqual(session.interruptedFrom, 'EMPLOYED_INCOME_CHECK');
+  assert.ok(
+    h.messages.some(
+      (m) =>
+        m.text &&
+        m.text.includes("haven't chosen an option") &&
+        m.text.includes('*Opt-Out*')
+    ),
+    'recovery prompt should mention off-menu + bold Opt-Out'
+  );
+  const recoverySend = h.messages.filter(
+    (m) => m.meta && m.meta.stateId === 'OFF_MENU_RECOVERY'
+  );
+  assert.ok(recoverySend.length >= 1);
+  const interactive = recoverySend[recoverySend.length - 1].interactive;
+  assert.ok(interactive, 'recovery should send interactive buttons');
+  assert.strictEqual(interactive.type, 'button');
+  assert.deepStrictEqual(
+    interactive.buttons.map((b) => b.id),
+    ['human_handover', 'main_menu']
+  );
+  assert.deepStrictEqual(
+    interactive.buttons.map((b) => b.title),
+    ['Human-Handover', 'Main-Menu']
+  );
+
+  // Main-Menu → first menu (GREETING)
+  await h.tap(wa, 'main_menu', 'Main-Menu');
+  session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'GREETING');
+
+  // Off-menu again → recovery → Human-Handover → quiet
   await h.say(wa, 'zzzz');
+  session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'OFF_MENU_RECOVERY');
+  await h.tap(wa, 'human_handover', 'Human-Handover');
   const lead = lastLead(h);
   assert.strictEqual(lead.exitReason, 'human_requested');
+  session = await h.store.get(wa);
+  assert.strictEqual(session.status, 'quiet');
   // eslint-disable-next-line no-console
-  console.log('✓ invalid retry then escalate');
+  console.log('✓ off-menu recovery → Main-Menu / Human-Handover');
+}
+
+async function testOffMenuWhenSessionMissingOrSoftClosed() {
+  // Brand-new lead with free text (even gibberish) should get the main menu —
+  // never "haven't chosen an option" before any menu was shown.
+  const h = createHarness('off_menu_cold');
+  const wa = '27000000110';
+  await h.say(wa, 'sfds');
+  let session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'GREETING');
+  assert.ok(
+    h.messages.some((m) => m.meta && m.meta.stateId === 'GREETING'),
+    'first inbound on a new session must open the greeting menu'
+  );
+  assert.ok(
+    !h.messages.some((m) => m.meta && m.meta.stateId === 'OFF_MENU_RECOVERY'),
+    'must not claim the customer skipped a menu they never saw'
+  );
+
+  // Real lead opener with punctuation ("Hello!") must still open greeting.
+  const hHello = createHarness('off_menu_hello_bang');
+  const waHello = '27000000113';
+  await hHello.say(waHello, 'Hello! Can I get more info on this?');
+  session = await hHello.store.get(waHello);
+  assert.strictEqual(session.currentState, 'GREETING');
+  assert.ok(
+    hHello.messages.some((m) => m.meta && m.meta.stateId === 'GREETING')
+  );
+
+  // First message can literally be anything — still main menu (not handover).
+  const hAny = createHarness('first_msg_anything');
+  const waAny = '27000000115';
+  await hAny.say(waAny, 'how much is a Polo?');
+  assert.strictEqual((await hAny.store.get(waAny)).currentState, 'GREETING');
+  const hHelpFirst = createHarness('first_msg_help');
+  const waHelpFirst = '27000000116';
+  await hHelpFirst.say(waHelpFirst, 'help');
+  assert.strictEqual(
+    (await hHelpFirst.store.get(waHelpFirst)).currentState,
+    'GREETING',
+    'even "help" as the very first message must show the main menu'
+  );
+  assert.ok(
+    !hHelpFirst.messages.some((m) => m.meta && m.meta.stateId === 'HUMAN_HANDOVER')
+  );
+
+  // Soft-closed + gibberish → recovery (hi still reopens greeting).
+  const h2 = createHarness('off_menu_soft');
+  const wa2 = '27000000111';
+  await h2.say(wa2, 'hi');
+  await h2.say(wa2, 'qualify me');
+  await h2.say(wa2, 'no');
+  assert.strictEqual((await h2.store.get(wa2)).status, 'soft_closed');
+  await h2.say(wa2, 'sfds');
+  session = await h2.store.get(wa2);
+  assert.strictEqual(session.currentState, 'OFF_MENU_RECOVERY');
+  assert.strictEqual(session.status, 'active');
+
+  const h3 = createHarness('off_menu_soft_hi');
+  const wa3 = '27000000112';
+  await h3.say(wa3, 'hi');
+  await h3.say(wa3, 'qualify me');
+  await h3.say(wa3, 'no');
+  await h3.say(wa3, 'hello');
+  assert.strictEqual((await h3.store.get(wa3)).currentState, 'GREETING');
+
+  // Soft-closed + "Hello!" (punctuation) should reopen greeting too.
+  const h4 = createHarness('off_menu_soft_hello_bang');
+  const wa4 = '27000000114';
+  await h4.say(wa4, 'hi');
+  await h4.say(wa4, 'qualify me');
+  await h4.say(wa4, 'no');
+  await h4.say(wa4, 'Hello!');
+  assert.strictEqual((await h4.store.get(wa4)).currentState, 'GREETING');
+
+  // eslint-disable-next-line no-console
+  console.log('✓ first contact → greeting; soft_closed gibberish → recovery');
 }
 
 async function testHelpIntentFromTwoStates() {
-  const h1 = createHarness('help_employment');
+  const h1 = createHarness('help_income');
   const wa1 = '27000000011';
   await h1.say(wa1, 'hi');
   await h1.say(wa1, 'qualify me');
   await h1.say(wa1, 'help');
   const lead1 = lastLead(h1);
   assert.strictEqual(lead1.exitReason, 'human_requested');
-  assert.strictEqual(lead1.interruptedFrom, 'EMPLOYMENT_CHECK');
+  assert.strictEqual(lead1.interruptedFrom, 'EMPLOYED_INCOME_CHECK');
 
   const h2 = createHarness('help_credit');
   const wa2 = '27000000012';
   await h2.say(wa2, 'hi');
   await h2.say(wa2, 'qualify me');
   await h2.say(wa2, 'yes');
-  await h2.say(wa2, 'more than r15k');
   await h2.say(wa2, 'yes');
   await h2.say(wa2, 'help');
   const lead2 = lastLead(h2);
   assert.strictEqual(lead2.interruptedFrom, 'CREDIT_CHECK');
   // eslint-disable-next-line no-console
-  console.log('✓ help-intent interrupt from EMPLOYMENT_CHECK and CREDIT_CHECK');
+  console.log('✓ help-intent interrupt from EMPLOYED_INCOME_CHECK and CREDIT_CHECK');
 }
 
-async function testPromotionsTbd() {
-  const h = createHarness('promotions');
+async function testReleaseResumesWhereLeftOff() {
+  const h = createHarness('release_resume');
+  const wa = '27000000040';
+  await h.say(wa, 'hi');
+  await h.say(wa, 'qualify me');
+  let session = await h.store.get(wa);
+  assert.strictEqual(session.currentState, 'EMPLOYED_INCOME_CHECK');
+
+  // Staff desk takeover mid-question
+  await h.engine.takeOver(wa, { silent: true });
+  session = await h.store.get(wa);
+  assert.strictEqual(session.status, 'quiet');
+  assert.strictEqual(session.agentTakenOver, true);
+  assert.strictEqual(session.interruptedFrom, 'EMPLOYED_INCOME_CHECK');
+
+  // While staff holds the chat: no menus / quiet notices / restarts.
+  const beforeHold = h.messages.length;
+  await h.say(wa, 'hello');
+  await h.say(wa, 'hi there can you help?');
+  await h.say(wa, 'restart');
+  assert.strictEqual((await h.store.get(wa)).status, 'quiet');
+  assert.strictEqual((await h.store.get(wa)).agentTakenOver, true);
+  assert.strictEqual(
+    h.messages.length,
+    beforeHold,
+    'bot must not send anything while agentTakenOver'
+  );
+
+  await h.engine.releaseToBot(wa);
+  session = await h.store.get(wa);
+  assert.strictEqual(session.agentTakenOver, false);
+  assert.strictEqual(session.status, 'active');
+  assert.strictEqual(session.currentState, 'EMPLOYED_INCOME_CHECK');
+  assert.ok(
+    h.messages.some((m) => m.text && m.text.includes('pick up where we left off'))
+  );
+  assert.ok(
+    h.messages.filter((m) => m.meta && m.meta.stateId === 'EMPLOYED_INCOME_CHECK').length >= 2,
+    'employed+income prompt should be re-sent on resume'
+  );
+
+  // Bot-driven handover (help) then release also resumes
+  const h2 = createHarness('release_after_help');
+  const wa2 = '27000000041';
+  await h2.say(wa2, 'hi');
+  await h2.say(wa2, 'qualify me');
+  await h2.say(wa2, 'yes');
+  await h2.say(wa2, 'help');
+  assert.strictEqual((await h2.store.get(wa2)).interruptedFrom, 'LICENSE_CHECK');
+  await h2.engine.releaseToBot(wa2);
+  assert.strictEqual((await h2.store.get(wa2)).currentState, 'LICENSE_CHECK');
+
+  // No prior step → release still starts at greeting
+  const h3 = createHarness('release_fresh');
+  const wa3 = '27000000042';
+  await h3.engine.takeOver(wa3, { silent: true });
+  await h3.engine.releaseToBot(wa3);
+  assert.strictEqual((await h3.store.get(wa3)).currentState, 'GREETING');
+
+  // eslint-disable-next-line no-console
+  console.log('✓ release to bot resumes prior step (or greeting if none)');
+}
+
+async function testSpecialsMenuThenQualify() {
+  const h = createHarness('specials');
   const wa = '27000000013';
   await h.say(wa, 'hi');
-  await h.say(wa, 'promotions');
+  await h.tap(wa, 'saw_special', 'I saw a special');
   let session = await h.store.get(wa);
-  assert.strictEqual(session.currentState, 'PROMOTIONS');
-  await h.say(wa, 'main menu');
+  assert.strictEqual(session.currentState, 'SPECIALS_MENU');
+  const menu = h.messages.filter((m) => m.meta && m.meta.stateId === 'SPECIALS_MENU').pop();
+  assert.ok(menu && menu.interactive);
+  assert.deepStrictEqual(
+    menu.interactive.buttons.map((b) => b.id),
+    ['payment_holiday', 'lower_rate', 'discount']
+  );
+
+  await h.tap(wa, 'payment_holiday', 'Payment Holiday');
   session = await h.store.get(wa);
-  assert.strictEqual(session.currentState, 'GREETING');
+  assert.strictEqual(session.currentState, 'EMPLOYED_INCOME_CHECK');
+  assert.ok(session.path.includes('PAYMENT_HOLIDAY_INFO'));
+  assert.ok(
+    h.messages.some(
+      (m) => m.text && m.text.includes('Payment Holiday promotion') && m.text.includes('*R15,000*')
+    )
+  );
+  assert.ok(
+    h.messages.some((m) => m.meta && m.meta.stateId === 'EMPLOYED_INCOME_CHECK'),
+    'should auto-advance into employed+income check'
+  );
+
+  // Lower rate path from a fresh chat
+  const h2 = createHarness('specials_rate');
+  const wa2 = '27000000023';
+  await h2.say(wa2, 'hi');
+  await h2.tap(wa2, 'saw_special', 'I saw a special');
+  await h2.tap(wa2, 'lower_rate', 'Lower Interest Rate');
+  assert.strictEqual((await h2.store.get(wa2)).currentState, 'EMPLOYED_INCOME_CHECK');
+  assert.ok(
+    h2.messages.some((m) => m.text && m.text.includes('Lower Interest Rate Promotion'))
+  );
+
+  const h3 = createHarness('specials_discount');
+  const wa3 = '27000000033';
+  await h3.say(wa3, 'hi');
+  await h3.say(wa3, 'i saw a special');
+  await h3.tap(wa3, 'discount', 'Discount');
+  assert.strictEqual((await h3.store.get(wa3)).currentState, 'EMPLOYED_INCOME_CHECK');
+  assert.ok(
+    h3.messages.some((m) => m.text && m.text.includes('Deposit Assistance Special'))
+  );
+
   // eslint-disable-next-line no-console
-  console.log('✓ Promotions TBD → main menu');
+  console.log('✓ I saw a special → description → employed+income check');
 }
 
 async function testFollowUpCadence() {
@@ -383,7 +615,7 @@ async function testFollowUpSkippedOnTerminalAndScheduler() {
   const wa = '27000000015';
   await h.say(wa, 'hi');
   await h.say(wa, 'qualify me');
-  await h.say(wa, 'no');
+  await h.say(wa, 'no'); // not ready → soft terminal
   h.advance(THIRTY_MIN + 1000);
   const result = await h.engine.processFollowUp(wa, h.clock, fuCfg);
   assert.strictEqual(result.sent, false);
@@ -410,16 +642,18 @@ async function main() {
 
   await testFullQualifyPath();
   await testInteractiveQualifyPath();
-  await testSeeCarsThenQualify();
-  await testEmployedNoEndChat();
-  await testIncomeUnder5kEndChat();
+  await testQualifyMeWithoutPriorGreetingSession();
+  await testQualifyMeAfterSoftClose();
+  await testNotReadyEndChat();
   await testLicenseNoHandover();
   await testCreditBadHandover();
   await testConsentNoHandover();
   await testOptOutFromGreeting();
   await testInvalidRetryThenEscalate();
+  await testOffMenuWhenSessionMissingOrSoftClosed();
   await testHelpIntentFromTwoStates();
-  await testPromotionsTbd();
+  await testReleaseResumesWhereLeftOff();
+  await testSpecialsMenuThenQualify();
   await testFollowUpCadence();
   await testFollowUpSkippedOnTerminalAndScheduler();
 
