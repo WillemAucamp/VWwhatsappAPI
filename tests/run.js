@@ -24,6 +24,7 @@ const files = [
   'catalog-product-list.test.js',
   'agent-desk.test.js',
   'agent-bulk-actions.test.js',
+  'soft-delete-hold-revive.test.js',
   'desk-list-filters.test.js',
   'desk-unread.test.js',
   'desk-unread-postgres.test.js',

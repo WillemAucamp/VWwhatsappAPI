@@ -1021,6 +1021,33 @@ class FsmEngine {
   }
 
   /**
+   * Drop a silent agent hold without resuming/restarting the funnel.
+   * Used when the desk soft-deletes a chat: leaving agentTakenOver=true
+   * after the thread disappears from the inbox permanently orphans the
+   * customer (inbound ignored, staff cannot open/Release).
+   */
+  async clearAgentHold(waNumber) {
+    return this._withSessionLock(waNumber, async () => {
+      const session = await this.sessionStore.get(waNumber);
+      if (!session || !session.agentTakenOver) {
+        return { cleared: false };
+      }
+      session.agentTakenOver = false;
+      session.updatedAt = this._now();
+      await this.sessionStore.set(waNumber, session);
+      return {
+        cleared: true,
+        session: {
+          waNumber: session.waNumber,
+          status: session.status,
+          agentTakenOver: false,
+          currentState: session.currentState,
+        },
+      };
+    });
+  }
+
+  /**
    * Snapshot the in-progress menu step before going quiet, unless we already
    * have an interruptedFrom from a bot-driven human handover.
    */

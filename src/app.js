@@ -167,6 +167,7 @@ function createApp(overrides = {}) {
       engine,
       inboundDedupe: overrides.inboundDedupe,
       messageStore,
+      chatMetaStore,
     })
   );
 

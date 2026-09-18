@@ -373,6 +373,34 @@ function filterMessagesByClearedAt(messages, clearedAt) {
   });
 }
 
+/**
+ * Soft-deleted / archived chats are hidden from the desk inbox. When the
+ * customer messages again, revive the row so staff can see and reply —
+ * otherwise new transcript rows land in a permanent black hole (delete has
+ * only a short undo window and no recycle bin).
+ */
+async function reviveChatMetaOnInbound(chatMeta, waNumber) {
+  if (!chatMeta || typeof chatMeta.get !== 'function') {
+    return { revived: false };
+  }
+  const wa = normalizeWa(waNumber);
+  if (!wa) return { revived: false, reason: 'wa_required' };
+  const row = await chatMeta.get(wa);
+  if (!row) return { revived: false };
+  const out = { revived: false, undeleted: false, unarchived: false };
+  if (row.deletedAt && typeof chatMeta.undeleteMany === 'function') {
+    await chatMeta.undeleteMany([wa]);
+    out.undeleted = true;
+    out.revived = true;
+  }
+  if (row.archivedAt && typeof chatMeta.unarchiveMany === 'function') {
+    await chatMeta.unarchiveMany([wa]);
+    out.unarchived = true;
+    out.revived = true;
+  }
+  return out;
+}
+
 function createChatMetaStore(options) {
   if (typeof options === 'string') {
     return createFileChatMetaStore(options);
@@ -391,5 +419,6 @@ module.exports = {
   createPostgresChatMetaStore,
   applyChatMeta,
   filterMessagesByClearedAt,
+  reviveChatMetaOnInbound,
   normalizeWa,
 };

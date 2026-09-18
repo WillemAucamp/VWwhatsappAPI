@@ -12,6 +12,7 @@ const {
   placeholderText,
   normalizeMime,
 } = require('../agent/inboundMedia');
+const { reviveChatMetaOnInbound } = require('../agent/chatMetaStore');
 
 /**
  * Verify Meta X-Hub-Signature-256 against the raw request body.
@@ -232,6 +233,7 @@ function createWebhookRouter({
   inboundDedupe,
   requireSignature,
   messageStore,
+  chatMetaStore,
   downloadMediaFn,
 } = {}) {
   const router = express.Router();
@@ -244,6 +246,18 @@ function createWebhookRouter({
       : Boolean(secret) || config.nodeEnv === 'production';
   const dedupe = inboundDedupe || createInboundDedupe();
   const download = downloadMediaFn || downloadMedia;
+
+  async function reviveDeskVisibility(waNumber) {
+    try {
+      await reviveChatMetaOnInbound(chatMetaStore, waNumber);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[webhook] chat meta revive failed', {
+        waNumber,
+        message: err && err.message ? err.message : String(err),
+      });
+    }
+  }
 
   router.get('/', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -311,6 +325,7 @@ function createWebhookRouter({
                 if (messageStore) {
                   await persistInboundMedia(inbound, messageStore, download);
                 }
+                await reviveDeskVisibility(inbound.from);
                 diagnostics.recordHandled();
                 dedupe.commit(message.id);
               } catch (err) {
@@ -329,6 +344,7 @@ function createWebhookRouter({
                     }) + ' (media unavailable)',
                   wamid: message.id || null,
                 });
+                await reviveDeskVisibility(inbound.from);
                 // eslint-disable-next-line no-console
                 console.error('[webhook] inbound media processing error', {
                   messageId: message.id,
@@ -355,6 +371,7 @@ function createWebhookRouter({
                     `transcript append failed for ${inbound.inboundType || message.type}`
                   );
                 }
+                await reviveDeskVisibility(inbound.from);
                 diagnostics.recordHandled();
                 dedupe.commit(message.id);
               } catch (err) {
@@ -376,6 +393,7 @@ function createWebhookRouter({
                 wamid: message.id || null,
               });
             }
+            await reviveDeskVisibility(inbound.from);
             if (!dedupe.begin(message.id)) continue;
             try {
               await engine.handleInbound(inbound.from, inbound.text, {
