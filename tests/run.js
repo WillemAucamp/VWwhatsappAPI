@@ -23,6 +23,7 @@ const files = [
   'transport-graph.test.js',
   'catalog-product-list.test.js',
   'agent-desk.test.js',
+  'agent-bulk-actions.test.js',
   'desk-list-filters.test.js',
   'desk-unread.test.js',
   'desk-unread-postgres.test.js',

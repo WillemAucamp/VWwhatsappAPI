@@ -8,6 +8,13 @@ const { createShortcutStore } = require('./shortcutStore');
 const { createLabelStore } = require('./labelStore');
 const { createChatReadStore } = require('./chatReadStore');
 const {
+  createChatMetaStore,
+  applyChatMeta,
+  filterMessagesByClearedAt,
+} = require('./chatMetaStore');
+const { createUndoTokenStore } = require('./undoTokenStore');
+const { executeBulkAction, executeUndo } = require('./bulkActions');
+const {
   inferDeskLabelNames,
   syncInferredDeskLabels,
 } = require('./deskAutoLabels');
@@ -108,6 +115,8 @@ function createAgentRouter({
   shortcutStore,
   labelStore,
   chatReadStore,
+  chatMetaStore,
+  undoTokenStore,
   sendMessage,
   markMessageRead,
 } = {}) {
@@ -117,6 +126,8 @@ function createAgentRouter({
   const shortcuts = shortcutStore || createShortcutStore();
   const labels = labelStore || createLabelStore();
   const chatReads = chatReadStore || createChatReadStore();
+  const chatMeta = chatMetaStore || createChatMetaStore();
+  const undoStore = undoTokenStore || createUndoTokenStore();
   const autoLabels = createAutoLabelSync({ labels, messageStore });
   const sendReadReceipt = markMessageRead || transportMarkMessageRead;
   // A slow read-state query must not reset every badge to "never opened".
@@ -285,13 +296,17 @@ function createAgentRouter({
       let readsMap = {};
       let forcedUnread = {};
       let labelBundle = { labels: [], chatLabels: {} };
+      let metaMap = {};
       const sessionByWa = new Map();
+      const includeArchived =
+        String((req.query && req.query.archived) || '') === '1';
 
       // Labels + read cursors stay on even in emergency mode. Skipping reads
       // made every chat look unread again after a browser refresh whenever
       // the desk had flipped to ?emergency=1 (auto or manual). Only the
       // heavier session list is optional under emergency.
       const labelPromise = withTimeout(labels.getChatLabelsMap(), enrichMs, null);
+      const metaPromise = withTimeout(chatMeta.getMap(), enrichMs, null);
       const loadReads = () =>
         typeof chatReads.getState === 'function'
           ? chatReads.getState()
@@ -316,15 +331,17 @@ function createAgentRouter({
       }
 
       if (!emergency) {
-        const [labelsMap, sessions] = await Promise.all([
+        const [labelsMap, sessions, meta] = await Promise.all([
           labelPromise,
           sessionStore && typeof sessionStore.listAll === 'function'
             ? withTimeout(sessionStore.listAll(), enrichMs, null)
             : Promise.resolve(null),
+          metaPromise,
         ]);
         if (labelsMap && typeof labelsMap === 'object') {
           labelBundle = labelsMap;
         }
+        if (meta && typeof meta === 'object') metaMap = meta;
         if (Array.isArray(sessions)) {
           for (const session of sessions) {
             const wa = String((session && session.waNumber) || '').replace(/\D/g, '');
@@ -332,10 +349,11 @@ function createAgentRouter({
           }
         }
       } else {
-        const labelsMap = await labelPromise;
+        const [labelsMap, meta] = await Promise.all([labelPromise, metaPromise]);
         if (labelsMap && typeof labelsMap === 'object') {
           labelBundle = labelsMap;
         }
+        if (meta && typeof meta === 'object') metaMap = meta;
       }
 
       const query = String((req.query && (req.query.q || req.query.search)) || '').trim();
@@ -362,7 +380,8 @@ function createAgentRouter({
       }
 
       const labelById = new Map((labelBundle.labels || []).map((l) => [l.id, l]));
-      const enriched = chats.map((chat) => {
+      const enriched = [];
+      for (const chat of chats) {
         const existingLabelIds = (labelBundle.chatLabels &&
           labelBundle.chatLabels[chat.waNumber]) || [];
         const session = sessionByWa.get(chat.waNumber) || null;
@@ -372,26 +391,88 @@ function createAgentRouter({
         }
         const lastReadAt =
           chat.lastReadAt || readsMap[chat.waNumber] || null;
-        return {
-          ...chat,
-          unreadCount,
-          lastReadAt,
-          forcedUnread: Boolean(forcedUnread[chat.waNumber]),
-          status: session ? session.status : 'bot',
-          currentState: session ? session.currentState : null,
-          agentTakenOver: Boolean(session && session.agentTakenOver),
-          labelIds: existingLabelIds,
-          labels: publicLabels(existingLabelIds, labelById),
-        };
-      });
+        const row = applyChatMeta(
+          {
+            ...chat,
+            unreadCount,
+            lastReadAt,
+            forcedUnread: Boolean(forcedUnread[chat.waNumber]),
+            status: session ? session.status : 'bot',
+            currentState: session ? session.currentState : null,
+            agentTakenOver: Boolean(session && session.agentTakenOver),
+            labelIds: existingLabelIds,
+            labels: publicLabels(existingLabelIds, labelById),
+          },
+          metaMap,
+          { includeArchived }
+        );
+        if (row) enriched.push(row);
+      }
       res.json({
         chats: enriched,
         emergency,
-        inbox: 'reads-survive-refresh-2026-09-17',
+        inbox: 'bulk-multiselect-2026-09-18',
         search: searching ? query : null,
       });
     } catch (err) {
       res.status(500).json({ error: err.message || String(err) });
+    }
+  });
+
+  router.post('/api/chats/bulk-action', requireAuth, express.json(), async (req, res) => {
+    try {
+      const action = req.body && req.body.action;
+      const chatIds = req.body && req.body.chatIds;
+      const payload = (req.body && req.body.payload) || {};
+      const result = await executeBulkAction({
+        action,
+        chatIds,
+        payload,
+        chatReads,
+        labels,
+        chatMeta,
+        undoStore,
+      });
+      if (result.action === 'mark_read' || result.action === 'mark_unread') {
+        for (const wa of result.chatIds || []) {
+          if (!lastKnownReadState.reads) lastKnownReadState.reads = {};
+          if (!lastKnownReadState.forcedUnread) {
+            lastKnownReadState.forcedUnread = {};
+          }
+          if (result.action === 'mark_read') {
+            lastKnownReadState.reads[wa] = new Date().toISOString();
+            delete lastKnownReadState.forcedUnread[wa];
+          } else {
+            lastKnownReadState.forcedUnread[wa] = true;
+          }
+        }
+      }
+      res.json(result);
+    } catch (err) {
+      const status = err && err.status ? err.status : 500;
+      return res.status(status).json({
+        error: err.message || String(err),
+        details: err.details || undefined,
+      });
+    }
+  });
+
+  router.post('/api/chats/undo', requireAuth, express.json(), async (req, res) => {
+    try {
+      const undoToken = req.body && req.body.undoToken;
+      const result = await executeUndo({
+        undoToken,
+        chatReads,
+        labels,
+        chatMeta,
+        undoStore,
+      });
+      res.json(result);
+    } catch (err) {
+      const status = err && err.status ? err.status : 500;
+      return res.status(status).json({
+        error: err.message || String(err),
+      });
     }
   });
 
@@ -498,10 +579,18 @@ function createAgentRouter({
   router.get('/api/chats/:wa', requireAuth, async (req, res) => {
     try {
       const wa = String(req.params.wa || '').replace(/\D/g, '');
-      const [messages, session] = await Promise.all([
+      if (!wa) {
+        return res.status(400).json({ error: 'wa_required' });
+      }
+      const meta = await chatMeta.get(wa);
+      if (meta && meta.deletedAt) {
+        return res.status(404).json({ error: 'Chat was deleted' });
+      }
+      const [rawMessages, session] = await Promise.all([
         messageStore.listMessages(wa),
         sessionStore.get(wa),
       ]);
+      const messages = filterMessagesByClearedAt(rawMessages, meta && meta.clearedAt);
       let labelIds = [];
       let allLabels = [];
       try {
@@ -539,6 +628,8 @@ function createAgentRouter({
         messages,
         lastReadAt,
         forcedUnread,
+        archivedAt: meta && meta.archivedAt ? meta.archivedAt : null,
+        clearedAt: meta && meta.clearedAt ? meta.clearedAt : null,
         labelIds,
         labels: publicLabels(labelIds, labelById),
         session: session

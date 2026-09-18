@@ -15,6 +15,7 @@ const { createMessageStore } = require('./agent/messageStore');
 const { createShortcutStore } = require('./agent/shortcutStore');
 const { createLabelStore } = require('./agent/labelStore');
 const { createChatReadStore } = require('./agent/chatReadStore');
+const { createChatMetaStore } = require('./agent/chatMetaStore');
 const { createAgentRouter } = require('./agent/routes');
 
 function createApp(overrides = {}) {
@@ -24,6 +25,7 @@ function createApp(overrides = {}) {
   const shortcutStore = overrides.shortcutStore || createShortcutStore();
   const labelStore = overrides.labelStore || createLabelStore();
   const chatReadStore = overrides.chatReadStore || createChatReadStore();
+  const chatMetaStore = overrides.chatMetaStore || createChatMetaStore();
 
   const baseSend = overrides.sendMessage || sendMessage;
   const loggingSend = async (to, payload = {}) => {
@@ -177,6 +179,7 @@ function createApp(overrides = {}) {
       shortcutStore,
       labelStore,
       chatReadStore,
+      chatMetaStore,
       sendMessage: loggingSend,
     })
   );
@@ -190,6 +193,7 @@ function createApp(overrides = {}) {
   app.locals.shortcutStore = shortcutStore;
   app.locals.labelStore = labelStore;
   app.locals.chatReadStore = chatReadStore;
+  app.locals.chatMetaStore = chatMetaStore;
   app.locals.config = config;
 
   // Rewrite any shortcuts that were flattened by the old single-line editor.
