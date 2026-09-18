@@ -897,6 +897,120 @@
       cursor: pointer;
     }
     .check-row input { width: auto; }
+
+    /* —— Multi-select bulk actions —— */
+    .multi-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #f0faf4;
+      min-height: 48px;
+    }
+    .multi-head .multi-count {
+      flex: 1;
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+    .multi-head .select-all {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      font-weight: 500;
+      cursor: pointer;
+      user-select: none;
+    }
+    .multi-head .select-all input { width: auto; margin: 0; }
+    .chat-item.multi-on {
+      grid-template-columns: 28px 1fr auto;
+    }
+    .chat-item.multi-on .chat-check {
+      grid-row: 1 / span 3;
+      align-self: center;
+    }
+    .chat-item.multi-on .preview {
+      grid-column: 2;
+    }
+    .chat-item.multi-on .label-row {
+      grid-column: 2 / -1;
+    }
+    .chat-item .chat-check {
+      width: 18px;
+      height: 18px;
+      margin-top: 2px;
+      accent-color: var(--green-deep);
+      cursor: pointer;
+    }
+    .chat-item.picked {
+      background: #e7f8ef;
+    }
+    .chat-item.picked:hover { background: #d9f3e6; }
+    .chat-ctx-menu {
+      position: fixed;
+      z-index: 80;
+      min-width: 180px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(11, 20, 26, 0.16);
+      padding: 4px;
+      display: flex;
+      flex-direction: column;
+    }
+    .chat-ctx-menu button {
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-weight: 500;
+      font-size: 0.9rem;
+    }
+    .chat-ctx-menu button:hover:not(:disabled) { background: var(--line-soft); }
+    .chat-ctx-menu button.danger-item { color: var(--danger); }
+    .chat-ctx-menu .ctx-sep {
+      height: 1px;
+      background: var(--line);
+      margin: 4px 6px;
+    }
+    .toast-stack {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-width: min(360px, calc(100vw - 32px));
+      pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto;
+      background: #111b21;
+      color: #fff;
+      border-radius: 10px;
+      padding: 12px 14px;
+      box-shadow: 0 8px 24px rgba(11, 20, 26, 0.2);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.9rem;
+    }
+    .toast.error { background: #b42318; }
+    .toast .toast-msg { flex: 1; line-height: 1.35; }
+    .toast .toast-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .toast button {
+      background: rgba(255,255,255,0.16);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+    }
+    .toast button:hover:not(:disabled) { background: rgba(255,255,255,0.28); }
+    .toast button:disabled { opacity: 0.4; }
   </style>
 </head>
 <body>
@@ -915,7 +1029,7 @@
 
   <section id="app" class="hidden">
     <aside>
-      <div class="aside-head">
+      <div class="aside-head" id="asideHeadNormal">
         <h2>Chats</h2>
         <div class="head-actions">
           <button type="button" class="icon-btn" id="menuBtn" aria-label="Menu" title="Menu">
@@ -933,6 +1047,13 @@
             <button type="button" id="logoutBtn" role="menuitem">Log out</button>
           </div>
         </div>
+      </div>
+      <div class="multi-head hidden" id="multiSelectHead">
+        <button type="button" class="icon-btn" id="multiSelectClose" aria-label="Exit multi-select" title="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.3 5.71 12 12.01 5.7 5.7 4.29 7.11 10.59 13.4 4.29 19.7 5.7 21.11 12 14.82l6.3 6.29 1.41-1.41-6.29-6.3 6.29-6.29z"/></svg>
+        </button>
+        <div class="multi-count" id="multiSelectCount">0 selected</div>
+        <label class="select-all"><input type="checkbox" id="multiSelectAll" /> All</label>
       </div>
       <div id="authBanner" class="banner danger hidden"></div>
       <div id="inboxBanner" class="banner hidden"></div>
@@ -1095,6 +1216,35 @@
     </div>
   </div>
 
+  <!-- Chat list context menu (right-click) -->
+  <div id="chatCtxMenu" class="chat-ctx-menu hidden" role="menu"></div>
+
+  <!-- Bulk confirm -->
+  <div id="bulkConfirmModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal">
+      <h3 id="bulkConfirmTitle">Confirm</h3>
+      <p class="modal-sub" id="bulkConfirmBody">Are you sure?</p>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="bulkConfirmCancel">Cancel</button>
+        <button type="button" class="danger" id="bulkConfirmOk">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk add/remove label picker -->
+  <div id="bulkLabelModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal">
+      <h3 id="bulkLabelTitle">Choose a label</h3>
+      <p class="modal-sub" id="bulkLabelSub">Select a label for the selected chats.</p>
+      <div class="manage-list" id="bulkLabelList"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="bulkLabelCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
   <script src="/agent/static/emojis.js"></script>
   <script src="/agent/static/deskListFilters.js"></script>
   <script>
@@ -1125,6 +1275,13 @@
       assignDraft: [],
       sending: false,
       emergencyInbox: localStorage.getItem('agentEmergencyInbox') === '1',
+      multiSelect: {
+        isActive: false,
+        selectedChatIds: new Set(),
+        isProcessing: false,
+        pendingUndoAction: null,
+        lastFailed: null,
+      },
     };
 
     const el = (id) => document.getElementById(id);
@@ -1238,6 +1395,13 @@
     document.addEventListener('click', (e) => {
       if (e.target.closest('.menu') || e.target.closest('.head-actions')) return;
       closeMenus();
+      if (!e.target.closest('#chatCtxMenu')) hideChatCtxMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hideChatCtxMenu();
+        if (state.multiSelect.isActive) exitMultiSelect();
+      }
     });
     el('sideMenu').addEventListener('click', (e) => e.stopPropagation());
     el('threadMenu').addEventListener('click', (e) => e.stopPropagation());
@@ -1270,6 +1434,16 @@
     el('menuShortcuts').addEventListener('click', () => { closeMenus(); openShortcutsModal(); });
     el('menuLabels').addEventListener('click', () => { closeMenus(); openLabelsModal(); });
     el('newMsgBtn').addEventListener('click', () => openEmergencyModal());
+    el('multiSelectClose').addEventListener('click', () => exitMultiSelect());
+    el('multiSelectAll').addEventListener('change', (e) => {
+      selectAllVisibleChats(Boolean(e.target.checked));
+    });
+    el('bulkConfirmModal').addEventListener('click', (e) => {
+      if (e.target === el('bulkConfirmModal')) el('bulkConfirmCancel').click();
+    });
+    el('bulkLabelModal').addEventListener('click', (e) => {
+      if (e.target === el('bulkLabelModal')) el('bulkLabelCancel').click();
+    });
     el('menuEmergencyMsg').addEventListener('click', () => { closeMenus(); openEmergencyModal(); });
     el('menuEmergencyInbox').addEventListener('click', () => {
       closeMenus();
@@ -1523,9 +1697,478 @@
       return { searching, searchDigits, chats };
     }
 
+    function syncMultiSelectHeader() {
+      const active = state.multiSelect.isActive;
+      const normal = el('asideHeadNormal');
+      const head = el('multiSelectHead');
+      if (normal) normal.classList.toggle('hidden', active);
+      if (head) head.classList.toggle('hidden', !active);
+      const n = state.multiSelect.selectedChatIds.size;
+      const count = el('multiSelectCount');
+      if (count) count.textContent = n + ' selected';
+      const allBox = el('multiSelectAll');
+      if (allBox) {
+        const visible = listedChatsForSearch().chats.map((c) => c.waNumber);
+        const allOn =
+          visible.length > 0 &&
+          visible.every((wa) => state.multiSelect.selectedChatIds.has(wa));
+        allBox.checked = allOn;
+        allBox.indeterminate =
+          !allOn && visible.some((wa) => state.multiSelect.selectedChatIds.has(wa));
+      }
+    }
+
+    function enterMultiSelect(chatId) {
+      const wa = String(chatId || '').replace(/\D/g, '');
+      state.multiSelect.isActive = true;
+      state.multiSelect.selectedChatIds = new Set(wa ? [wa] : []);
+      state.multiSelect.isProcessing = false;
+      hideChatCtxMenu();
+      syncMultiSelectHeader();
+      renderChatList();
+    }
+
+    function exitMultiSelect() {
+      state.multiSelect.isActive = false;
+      state.multiSelect.selectedChatIds = new Set();
+      state.multiSelect.isProcessing = false;
+      hideChatCtxMenu();
+      syncMultiSelectHeader();
+      renderChatList();
+    }
+
+    function toggleMultiChat(chatId) {
+      const wa = String(chatId || '').replace(/\D/g, '');
+      if (!wa || !state.multiSelect.isActive) return;
+      if (state.multiSelect.selectedChatIds.has(wa)) {
+        state.multiSelect.selectedChatIds.delete(wa);
+      } else {
+        state.multiSelect.selectedChatIds.add(wa);
+      }
+      syncMultiSelectHeader();
+      renderChatList();
+    }
+
+    function selectAllVisibleChats(on) {
+      const visible = listedChatsForSearch().chats.map((c) => c.waNumber);
+      if (on) {
+        visible.forEach((wa) => state.multiSelect.selectedChatIds.add(wa));
+      } else {
+        visible.forEach((wa) => state.multiSelect.selectedChatIds.delete(wa));
+      }
+      syncMultiSelectHeader();
+      renderChatList();
+    }
+
+    function hideChatCtxMenu() {
+      const menu = el('chatCtxMenu');
+      if (menu) {
+        menu.classList.add('hidden');
+        menu.innerHTML = '';
+      }
+    }
+
+    function showToast(message, { error = false, undo = null, retry = null, ttlMs = 10000 } = {}) {
+      const stack = el('toastStack');
+      if (!stack) return null;
+      const toast = document.createElement('div');
+      toast.className = 'toast' + (error ? ' error' : '');
+      const msg = document.createElement('div');
+      msg.className = 'toast-msg';
+      msg.textContent = message;
+      const actions = document.createElement('div');
+      actions.className = 'toast-actions';
+      let undoBtn = null;
+      let retryBtn = null;
+      if (undo) {
+        undoBtn = document.createElement('button');
+        undoBtn.type = 'button';
+        undoBtn.textContent = 'Undo';
+        undoBtn.addEventListener('click', () => {
+          undoBtn.disabled = true;
+          Promise.resolve(undo()).finally(() => {
+            toast.remove();
+          });
+        });
+        actions.appendChild(undoBtn);
+      }
+      if (retry) {
+        retryBtn = document.createElement('button');
+        retryBtn.type = 'button';
+        retryBtn.textContent = 'Retry';
+        retryBtn.addEventListener('click', () => {
+          retryBtn.disabled = true;
+          Promise.resolve(retry()).finally(() => {
+            toast.remove();
+          });
+        });
+        actions.appendChild(retryBtn);
+      }
+      toast.appendChild(msg);
+      if (actions.childNodes.length) toast.appendChild(actions);
+      stack.appendChild(toast);
+      const timer = setTimeout(() => {
+        if (undoBtn) undoBtn.disabled = true;
+        toast.remove();
+      }, ttlMs);
+      toast.addEventListener('remove', () => clearTimeout(timer));
+      return toast;
+    }
+
+    function snapshotChats(waList) {
+      const set = new Set(waList);
+      return state.chats
+        .filter((c) => set.has(c.waNumber))
+        .map((c) => JSON.parse(JSON.stringify(c)));
+    }
+
+    function restoreChatSnapshots(snaps) {
+      if (!Array.isArray(snaps) || !snaps.length) return;
+      const byWa = new Map(state.chats.map((c) => [c.waNumber, c]));
+      for (const snap of snaps) {
+        byWa.set(snap.waNumber, snap);
+      }
+      state.chats = Array.from(byWa.values()).sort((a, b) =>
+        String(b.lastAt || '').localeCompare(String(a.lastAt || ''))
+      );
+      renderChatList();
+    }
+
+    function applyOptimisticBulk(action, chatIds, payload) {
+      const idSet = new Set(chatIds);
+      const snaps = snapshotChats(chatIds);
+      if (action === 'mark_read') {
+        const at = new Date().toISOString();
+        state.chats = state.chats.map((c) => {
+          if (!idSet.has(c.waNumber)) return c;
+          state.readByWa[c.waNumber] = at;
+          return { ...c, unreadCount: 0, forcedUnread: false, lastReadAt: at };
+        });
+      } else if (action === 'mark_unread') {
+        state.chats = state.chats.map((c) => {
+          if (!idSet.has(c.waNumber)) return c;
+          return {
+            ...c,
+            unreadCount: Math.max(Number(c.unreadCount) || 0, 1),
+            forcedUnread: true,
+          };
+        });
+      } else if (action === 'add_label') {
+        const label = state.labels.find((l) => l.id === payload.labelId);
+        if (label) {
+          state.chats = state.chats.map((c) => {
+            if (!idSet.has(c.waNumber)) return c;
+            const labels = (c.labels || []).slice();
+            if (!labels.some((l) => l.id === label.id)) labels.push(label);
+            const labelIds = (c.labelIds || []).slice();
+            if (!labelIds.includes(label.id)) labelIds.push(label.id);
+            return { ...c, labels, labelIds };
+          });
+        }
+      } else if (action === 'remove_label') {
+        state.chats = state.chats.map((c) => {
+          if (!idSet.has(c.waNumber)) return c;
+          return {
+            ...c,
+            labels: (c.labels || []).filter((l) => l.id !== payload.labelId),
+            labelIds: (c.labelIds || []).filter((id) => id !== payload.labelId),
+          };
+        });
+      } else if (action === 'archive' || action === 'delete') {
+        state.chats = state.chats.filter((c) => !idSet.has(c.waNumber));
+        if (state.selected && idSet.has(state.selected)) {
+          state.selected = null;
+          el('messages').innerHTML =
+            '<div class="empty">Choose a conversation on the left.</div>';
+          el('threadTitle').textContent = 'Select a chat';
+          el('threadStatus').textContent = '';
+          renderThreadLabels([]);
+        }
+      } else if (action === 'clear') {
+        state.chats = state.chats.map((c) => {
+          if (!idSet.has(c.waNumber)) return c;
+          return { ...c, lastText: '', unreadCount: 0 };
+        });
+      }
+      renderChatList();
+      return snaps;
+    }
+
+    function actionSuccessMessage(action, count, payload) {
+      const n = count;
+      if (action === 'mark_read') return n + ' chats marked as read';
+      if (action === 'mark_unread') return n + ' chats marked as unread';
+      if (action === 'add_label') {
+        const label = state.labels.find((l) => l.id === (payload && payload.labelId));
+        const name = label ? label.name : 'label';
+        return n + " chats labeled '" + name + "'";
+      }
+      if (action === 'remove_label') return n + ' chats unlabeled';
+      if (action === 'archive') return n + ' chats archived';
+      if (action === 'delete') return n + ' chats deleted';
+      if (action === 'clear') return n + ' chats cleared';
+      return n + ' chats updated';
+    }
+
+    async function fireBulkAction(action, chatIds, payload, { snaps } = {}) {
+      try {
+        const result = await api('/api/chats/bulk-action', {
+          method: 'POST',
+          body: JSON.stringify({ action, chatIds, payload: payload || {} }),
+        });
+        const undoable = ['delete', 'archive', 'clear', 'remove_label'].includes(action);
+        if (undoable && result && result.undoToken) {
+          state.multiSelect.pendingUndoAction = {
+            action,
+            chatIds: result.chatIds || chatIds,
+            undoToken: result.undoToken,
+            timestamp: Date.now(),
+            snaps,
+          };
+          showToast(actionSuccessMessage(action, chatIds.length, payload), {
+            undo: () => undoLastBulk(),
+            ttlMs: 10000,
+          });
+        } else {
+          showToast(actionSuccessMessage(action, chatIds.length, payload), {
+            ttlMs: 4000,
+          });
+        }
+        state.multiSelect.lastFailed = null;
+        state.multiSelect.isProcessing = false;
+        return result;
+      } catch (err) {
+        if (snaps) restoreChatSnapshots(snaps);
+        else await loadChats();
+        const msg =
+          (err && err.status === 401 && 'Session expired, please log in') ||
+          (err && err.status === 403 && "You don't have permission") ||
+          (err && err.status === 404 && (err.message || 'Not found')) ||
+          (err && err.message) ||
+          'Bulk action failed';
+        state.multiSelect.lastFailed = { action, chatIds, payload };
+        state.multiSelect.isProcessing = false;
+        showToast(msg, {
+          error: true,
+          retry: () =>
+            executeBulkAction(action, payload, {
+              chatIds,
+              skipExit: true,
+            }),
+          ttlMs: 12000,
+        });
+        throw err;
+      }
+    }
+
+    async function undoLastBulk() {
+      const pending = state.multiSelect.pendingUndoAction;
+      if (!pending || !pending.undoToken) {
+        showToast('Undo expired', { error: true, ttlMs: 4000 });
+        return;
+      }
+      try {
+        await api('/api/chats/undo', {
+          method: 'POST',
+          body: JSON.stringify({ undoToken: pending.undoToken }),
+        });
+        state.multiSelect.pendingUndoAction = null;
+        if (pending.snaps) restoreChatSnapshots(pending.snaps);
+        else await loadChats();
+        showToast('Undo complete', { ttlMs: 3000 });
+      } catch (err) {
+        showToast(
+          err && err.status === 410
+            ? 'Undo window expired'
+            : 'Undo failed, but changes were saved',
+          {
+            error: true,
+            retry: () => undoLastBulk(),
+            ttlMs: 8000,
+          }
+        );
+      }
+    }
+
+    async function executeBulkAction(action, payload = {}, opts = {}) {
+      const chatIds = (opts.chatIds || Array.from(state.multiSelect.selectedChatIds)).map(
+        (wa) => String(wa).replace(/\D/g, '')
+      ).filter(Boolean);
+      if (!chatIds.length) return;
+      state.multiSelect.isProcessing = true;
+      const snaps = applyOptimisticBulk(action, chatIds, payload || {});
+      if (!opts.skipExit) {
+        state.multiSelect.isActive = false;
+        state.multiSelect.selectedChatIds = new Set();
+        syncMultiSelectHeader();
+        renderChatList();
+      }
+      // Fire in background — do not await at call sites that should exit ASAP.
+      return fireBulkAction(action, chatIds, payload || {}, { snaps });
+    }
+
+    function openBulkConfirm(title, body) {
+      return new Promise((resolve) => {
+        el('bulkConfirmTitle').textContent = title;
+        el('bulkConfirmBody').textContent = body;
+        el('bulkConfirmModal').classList.remove('hidden');
+        const ok = el('bulkConfirmOk');
+        const cancel = el('bulkConfirmCancel');
+        const cleanup = (value) => {
+          el('bulkConfirmModal').classList.add('hidden');
+          ok.removeEventListener('click', onOk);
+          cancel.removeEventListener('click', onCancel);
+          resolve(value);
+        };
+        const onOk = () => cleanup(true);
+        const onCancel = () => cleanup(false);
+        ok.addEventListener('click', onOk);
+        cancel.addEventListener('click', onCancel);
+      });
+    }
+
+    function openBulkLabelPicker(mode) {
+      return new Promise((resolve) => {
+        const title = el('bulkLabelTitle');
+        const sub = el('bulkLabelSub');
+        const list = el('bulkLabelList');
+        title.textContent = mode === 'remove' ? 'Remove label' : 'Add label';
+        sub.textContent =
+          mode === 'remove'
+            ? 'Pick a label to remove from the selected chats.'
+            : 'Pick a label to apply to the selected chats.';
+        if (!state.labels.length) {
+          list.innerHTML = '<div class="slash-empty">Create labels first from the ⋮ menu.</div>';
+        } else {
+          list.innerHTML = state.labels
+            .map(
+              (l) =>
+                '<button type="button" class="secondary" data-label-id="' +
+                escapeHtml(l.id) +
+                '" style="width:100%;justify-content:flex-start;display:flex;gap:8px;align-items:center;margin-bottom:6px;">' +
+                '<span class="label-pill" style="background:' +
+                escapeHtml(l.color) +
+                '">' +
+                escapeHtml(l.name) +
+                '</span></button>'
+            )
+            .join('');
+        }
+        el('bulkLabelModal').classList.remove('hidden');
+        const onPick = (e) => {
+          const btn = e.target.closest('[data-label-id]');
+          if (!btn) return;
+          cleanup(btn.getAttribute('data-label-id'));
+        };
+        const onCancel = () => cleanup(null);
+        const cleanup = (value) => {
+          el('bulkLabelModal').classList.add('hidden');
+          list.removeEventListener('click', onPick);
+          el('bulkLabelCancel').removeEventListener('click', onCancel);
+          resolve(value);
+        };
+        list.addEventListener('click', onPick);
+        el('bulkLabelCancel').addEventListener('click', onCancel);
+      });
+    }
+
+    function showChatCtxMenu(clientX, clientY, waNumber) {
+      const menu = el('chatCtxMenu');
+      if (!menu) return;
+      const wa = String(waNumber || '').replace(/\D/g, '');
+      const multi = state.multiSelect.isActive;
+      const selected = state.multiSelect.selectedChatIds;
+      const inSelection = selected.has(wa);
+      hideChatCtxMenu();
+      menu.classList.remove('hidden');
+
+      const addItem = (label, onClick, opts = {}) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('role', 'menuitem');
+        btn.textContent = label;
+        if (opts.danger) btn.classList.add('danger-item');
+        btn.addEventListener('click', async () => {
+          hideChatCtxMenu();
+          await onClick();
+        });
+        menu.appendChild(btn);
+      };
+      const sep = () => {
+        const d = document.createElement('div');
+        d.className = 'ctx-sep';
+        menu.appendChild(d);
+      };
+
+      if (!multi) {
+        addItem('Select', () => enterMultiSelect(wa));
+      } else if (inSelection && selected.size > 0) {
+        addItem('Mark as Read', () => executeBulkAction('mark_read'));
+        addItem('Mark as Unread', () => executeBulkAction('mark_unread'));
+        addItem('Add Label…', async () => {
+          const labelId = await openBulkLabelPicker('add');
+          if (labelId) await executeBulkAction('add_label', { labelId });
+        });
+        addItem('Remove Label…', async () => {
+          const labelId = await openBulkLabelPicker('remove');
+          if (labelId) await executeBulkAction('remove_label', { labelId });
+        });
+        addItem('Archive', async () => {
+          const ok = await openBulkConfirm(
+            'Archive chats?',
+            'Archive ' + selected.size + ' chat' + (selected.size === 1 ? '' : 's') + '?'
+          );
+          if (ok) await executeBulkAction('archive');
+        });
+        addItem('Clear Chat', async () => {
+          const ok = await openBulkConfirm(
+            'Clear chat history?',
+            'Clear chat history for ' + selected.size + ' chat' + (selected.size === 1 ? '' : 's') + '?'
+          );
+          if (ok) await executeBulkAction('clear');
+        });
+        sep();
+        addItem(
+          'Delete Chat',
+          async () => {
+            const ok = await openBulkConfirm(
+              'Delete chats?',
+              'Delete ' +
+                selected.size +
+                ' chat' +
+                (selected.size === 1 ? '' : 's') +
+                '? This action cannot be undone.'
+            );
+            if (ok) await executeBulkAction('delete');
+          },
+          { danger: true }
+        );
+      } else {
+        addItem('Select', () => {
+          state.multiSelect.selectedChatIds.add(wa);
+          syncMultiSelectHeader();
+          renderChatList();
+        });
+      }
+
+      const pad = 8;
+      const rect = menu.getBoundingClientRect();
+      let left = clientX;
+      let top = clientY;
+      if (left + rect.width > window.innerWidth - pad) {
+        left = Math.max(pad, window.innerWidth - rect.width - pad);
+      }
+      if (top + rect.height > window.innerHeight - pad) {
+        top = Math.max(pad, window.innerHeight - rect.height - pad);
+      }
+      menu.style.left = left + 'px';
+      menu.style.top = top + 'px';
+    }
+
     function renderChatList() {
       const list = el('chatList');
       const { searching, searchDigits, chats } = listedChatsForSearch();
+      syncMultiSelectHeader();
       if (searching && !chats.length) {
         const emptyMsg = deskFilterEmptyMessage(state);
         list.innerHTML =
@@ -1549,11 +2192,13 @@
         list.innerHTML = '<div class="empty" style="margin:24px auto;">' + emptyMsg + '</div>';
         return;
       }
+      const multi = state.multiSelect.isActive;
       list.innerHTML = chats.map((c) => {
         const unreadCount = chatUnreadCount(c);
         const unread = unreadCount > 0;
         const active = state.selected === c.waNumber ? 'active' : '';
         const unreadCls = unread ? ' unread' : '';
+        const picked = multi && state.multiSelect.selectedChatIds.has(c.waNumber);
         const badges = [];
         const statusBadge = chatListStatusBadge(c);
         if (statusBadge) {
@@ -1572,18 +2217,44 @@
             '<span class="chat-time">' + escapeHtml(formatBubbleTime(c.lastAt)) + '</span>' +
             (unread ? '<span class="unread-badge" title="Unread">' + escapeHtml(badgeCount) + '</span>' : '') +
           '</div>';
+        const checkHtml = multi
+          ? '<input type="checkbox" class="chat-check" data-wa-check="' +
+            c.waNumber +
+            '" ' +
+            (picked ? 'checked ' : '') +
+            'aria-label="Select chat" />'
+          : '';
         return (
-          '<button type="button" class="chat-item ' + active + unreadCls + '" data-wa="' + c.waNumber + '">' +
-            '<div class="wa"><span class="wa-num">+' + c.waNumber + '</span>' + badges.join('') + '</div>' +
+          '<button type="button" class="chat-item ' +
+            active +
+            unreadCls +
+            (multi ? ' multi-on' : '') +
+            (picked ? ' picked' : '') +
+            '" data-wa="' +
+            c.waNumber +
+            '">' +
+            checkHtml +
+            '<div class="wa"><span class="wa-num">+' +
+            c.waNumber +
+            '</span>' +
+            badges.join('') +
+            '</div>' +
             metaHtml +
-            '<div class="preview">' + escapeHtml(c.lastText || '') + '</div>' +
+            '<div class="preview">' +
+            escapeHtml(c.lastText || '') +
+            '</div>' +
             (labelHtml ? '<div class="label-row">' + labelHtml + '</div>' : '') +
           '</button>'
         );
       }).join('');
       list.querySelectorAll('.chat-item').forEach((btn) => {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', async (e) => {
           const next = btn.getAttribute('data-wa');
+          if (state.multiSelect.isActive) {
+            e.preventDefault();
+            toggleMultiChat(next);
+            return;
+          }
           if (next !== state.selected) clearPendingImages();
           state.selected = next;
           renderChatList();
@@ -1595,6 +2266,16 @@
               'Could not mark this chat as read. Check your connection and try again.';
           }
           await loadThread(state.selected);
+        });
+        btn.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          showChatCtxMenu(e.clientX, e.clientY, btn.getAttribute('data-wa'));
+        });
+      });
+      list.querySelectorAll('.chat-check').forEach((box) => {
+        box.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleMultiChat(box.getAttribute('data-wa-check'));
         });
       });
     }

@@ -23,7 +23,7 @@ The agent desk can store WhatsApp transcripts in **Supabase** so history survive
    - The bot also auto-encodes on connect, but Render is more reliable if you paste the encoded URI.
    - Forgot it? Same page → **Reset database password**, then update the URI.
 
-You do **not** create tables by hand — on first message the bot creates `chat_messages`.
+You do **not** create tables by hand — on first message the bot creates `chat_messages`. Desk settings also auto-create `agent_labels`, `agent_chat_labels`, `agent_chat_reads`, and `agent_chat_meta` (soft-delete / archive / clear cursors for bulk actions).
 
 ### 2. Paste it into Render
 
