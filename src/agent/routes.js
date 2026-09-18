@@ -433,6 +433,23 @@ function createAgentRouter({
         chatMeta,
         undoStore,
       });
+      if (result.action === 'delete' && engine && typeof engine.clearAgentHold === 'function') {
+        // Soft-delete hides the thread from every desk list / open. If we leave
+        // agentTakenOver set, the customer stays in silent hold with no way for
+        // staff to Release or reply after the short undo window expires.
+        for (const wa of result.chatIds || []) {
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await engine.clearAgentHold(wa);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('[agent] clearAgentHold after soft-delete failed', {
+              wa,
+              message: err && err.message ? err.message : String(err),
+            });
+          }
+        }
+      }
       if (result.action === 'mark_read' || result.action === 'mark_unread') {
         for (const wa of result.chatIds || []) {
           if (!lastKnownReadState.reads) lastKnownReadState.reads = {};
@@ -583,9 +600,9 @@ function createAgentRouter({
         return res.status(400).json({ error: 'wa_required' });
       }
       const meta = await chatMeta.get(wa);
-      if (meta && meta.deletedAt) {
-        return res.status(404).json({ error: 'Chat was deleted' });
-      }
+      // Soft-deleted threads stay hidden from the inbox list, but staff who
+      // still have the number (search / deep link) must be able to open, reply,
+      // and Release — otherwise delete + agent hold is a permanent orphan.
       const [rawMessages, session] = await Promise.all([
         messageStore.listMessages(wa),
         sessionStore.get(wa),
@@ -629,6 +646,7 @@ function createAgentRouter({
         lastReadAt,
         forcedUnread,
         archivedAt: meta && meta.archivedAt ? meta.archivedAt : null,
+        deletedAt: meta && meta.deletedAt ? meta.deletedAt : null,
         clearedAt: meta && meta.clearedAt ? meta.clearedAt : null,
         labelIds,
         labels: publicLabels(labelIds, labelById),
