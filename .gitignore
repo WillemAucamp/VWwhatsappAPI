@@ -8,5 +8,7 @@ data/transcripts/*
 !data/transcripts/.gitkeep
 data/agent/*
 !data/agent/.gitkeep
+data/media/*
+!data/media/.gitkeep
 *.log
 .DS_Store
