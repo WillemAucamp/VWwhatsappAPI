@@ -206,7 +206,7 @@ async function testNotReadyEndChat() {
   assert.ok(
     String(h.messages[h.messages.length - 1].text).includes('R9,500')
   );
-  await h.say(wa, 'hello again');
+  await h.say(wa, 'hello');
   const session = await h.store.get(wa);
   assert.strictEqual(session.currentState, 'GREETING');
   // eslint-disable-next-line no-console
