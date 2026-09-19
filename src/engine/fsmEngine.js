@@ -24,7 +24,7 @@ function normalizeInput(text) {
     .replace(/\s+/g, ' ');
 }
 
-function matchesKeywordList(normalized, keywords) {
+function matchesKeywordList(normalized, keywords, { exactSingleWord = false } = {}) {
   if (!normalized) return false;
   // Strip punctuation so "Hello!" / "hi," still match reopen words.
   const softened = normalized
@@ -39,8 +39,14 @@ function matchesKeywordList(normalized, keywords) {
     if (!k) return false;
     return candidates.some((text) => {
       if (text === k) return true;
+      // Multi-word phrases may appear inside a longer message.
       if (k.includes(' ') && text.includes(k)) return true;
       if (!k.includes(' ')) {
+        // Reopen words like "start" / "hi" / "hello" must be the whole
+        // message. Whole-word-in-sentence matching falsely _restart()s
+        // soft_closed chats on e.g. "when can I start the paperwork?"
+        // and can produce a second CRM lead if they re-qualify.
+        if (exactSingleWord) return false;
         const re = new RegExp(`(^|\\s)${escapeRegex(k)}(\\s|$)`, 'i');
         return re.test(text);
       }
@@ -950,7 +956,9 @@ class FsmEngine {
     // Genuine reopen / first hello → main menu. Anything else off-menu → recovery.
     if (
       !normalized ||
-      matchesKeywordList(normalized, config.fsm.reopenKeywords)
+      matchesKeywordList(normalized, config.fsm.reopenKeywords, {
+        exactSingleWord: true,
+      })
     ) {
       return this._enterState(session, ENTRY_STATE);
     }
@@ -1135,7 +1143,11 @@ class FsmEngine {
       if (session.pendingTerminalOutbound) {
         return this._retryTerminalOutbound(session);
       }
-      if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
+      if (
+        matchesKeywordList(normalized, config.fsm.reopenKeywords, {
+          exactSingleWord: true,
+        })
+      ) {
         return this._restart(session);
       }
       const quietNotice = resolveCopy('quiet_thread_notice', {
@@ -1158,7 +1170,11 @@ class FsmEngine {
         return this._beginFromMainMenuIntent(session, normalized, replyId);
       }
       // Explicit reopen words still restart the greeting.
-      if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
+      if (
+        matchesKeywordList(normalized, config.fsm.reopenKeywords, {
+          exactSingleWord: true,
+        })
+      ) {
         return this._restart(session);
       }
       // Off-menu free text → Human-Handover / Main-Menu, not a silent main-menu dump.
@@ -1210,7 +1226,11 @@ class FsmEngine {
       if (resolveGreetingDestination(normalized, replyId)) {
         return this._beginFromMainMenuIntent(session, normalized, replyId);
       }
-      if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
+      if (
+        matchesKeywordList(normalized, config.fsm.reopenKeywords, {
+          exactSingleWord: true,
+        })
+      ) {
         return this._restart(session);
       }
       return this._enterOffMenuRecoveryFresh(session);
