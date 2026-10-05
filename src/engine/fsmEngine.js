@@ -101,21 +101,46 @@ function resolveOptionKey(state, normalized, replyId) {
  *
  * Also recognises stocklist "Check if I qualify" (`any_car`) so a wiped or
  * soft-closed session does not bounce that tap back to the main menu.
+ *
+ * Soft-closed / wiped recovery must NOT free-text-match broad optionLabels:
+ * - GREETING synonyms like "1" / "2" / "3" / "special" would restart qualify,
+ *   open specials, or silent-hold via Opt-Out → HUMAN_HANDOVER.
+ * - STOCKLIST synonyms like "ok" / "yes" / "continue" / "1" would yank the
+ *   customer back into employment screening after SEND_LINK.
+ * Only honour an interactive reply id or the exact button title.
  */
 function resolveGreetingDestination(normalized, replyId) {
   const greeting = STATES[ENTRY_STATE];
-  if (greeting) {
-    const optionKey = resolveOptionKey(greeting, normalized, replyId);
-    if (optionKey && greeting.options[optionKey]) {
-      return greeting.options[optionKey];
+  if (greeting && greeting.options) {
+    if (replyId && greeting.options[replyId]) {
+      return greeting.options[replyId];
+    }
+    if (normalized && greeting.optionTitles) {
+      for (const [optionKey, title] of Object.entries(greeting.optionTitles)) {
+        if (
+          normalizeInput(title) === normalized &&
+          greeting.options[optionKey]
+        ) {
+          return greeting.options[optionKey];
+        }
+      }
     }
   }
 
   const stocklist = STATES.STOCKLIST_CAROUSEL;
-  if (stocklist) {
-    const stockKey = resolveOptionKey(stocklist, normalized, replyId);
-    if (stockKey && stocklist.options[stockKey]) {
-      return stocklist.options[stockKey];
+  if (stocklist && stocklist.options) {
+    if (replyId && stocklist.options[replyId]) {
+      return stocklist.options[replyId];
+    }
+    if (normalized && stocklist.optionTitles) {
+      for (const [optionKey, title] of Object.entries(stocklist.optionTitles)) {
+        if (
+          normalizeInput(title) === normalized &&
+          stocklist.options[optionKey]
+        ) {
+          return stocklist.options[optionKey];
+        }
+      }
     }
   }
 
