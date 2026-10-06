@@ -416,6 +416,145 @@ async function testOneFailedMessageDoesNotAbortSiblingInBatch() {
   console.log('✓ one failed message does not abort later messages in batch');
 }
 
+async function testDeskPersistFailureDoesNotAdvanceFsmOrCommit() {
+  // Concrete failure before fix: persistDeskRow returned false, handleInbound
+  // still ran and dedupe.commit() fired — Meta never retried, desk forever
+  // missing the customer answer that the FSM already applied.
+  const store = new MemorySessionStore();
+  const logger = new CapturingLogger();
+  let handleCount = 0;
+  const engine = new FsmEngine({
+    sessionStore: store,
+    leadLogger: logger,
+    sendMessage: async () => {
+      handleCount += 1;
+      return { ok: true };
+    },
+    notifyAgent: async () => ({ delivered: false }),
+    options: { stubMarker: true },
+  });
+
+  const appendAttempts = [];
+  const messageStore = {
+    append: async (row) => {
+      appendAttempts.push(row);
+      throw new Error('postgres unavailable');
+    },
+  };
+
+  const dedupe = createInboundDedupe();
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/webhook',
+    createWebhookRouter({
+      engine,
+      inboundDedupe: dedupe,
+      requireSignature: false,
+      messageStore,
+    })
+  );
+
+  const wa = '27009990010';
+  const payload = buildTextWebhook({
+    from: wa,
+    text: 'hi',
+    id: 'wamid.desk-fail-then-retry',
+  });
+
+  const { server, port } = await listen(app);
+  try {
+    const first = await postJson(port, '/webhook', payload);
+    assert.strictEqual(first.status, 200);
+    assert.ok(
+      appendAttempts.length >= 2,
+      'persistDeskRow should attempt primary + stripped retry'
+    );
+    assert.strictEqual(
+      handleCount,
+      0,
+      'FSM must not run when desk transcript cannot be stored'
+    );
+    assert.strictEqual(dedupe.size(), 0, 'wamid must stay uncommitted');
+    assert.strictEqual(dedupe.inFlightSize(), 0, 'wamid must be released');
+
+    const session = await store.get(wa);
+    assert.ok(
+      !session || session.currentState !== 'GREETING',
+      'failed desk persist must not leave GREETING on disk'
+    );
+
+    // Recovering store: Meta retry should both persist and advance FSM.
+    let saved = 0;
+    messageStore.append = async (row) => {
+      saved += 1;
+      return row;
+    };
+    const second = await postJson(port, '/webhook', payload);
+    assert.strictEqual(second.status, 200);
+    assert.strictEqual(saved, 1);
+    assert.ok(handleCount >= 1, 'retry after desk recovery must run FSM');
+    assert.strictEqual(dedupe.size(), 1);
+
+    const recovered = await store.get(wa);
+    assert.strictEqual(recovered.currentState, 'GREETING');
+  } finally {
+    server.close();
+  }
+  // eslint-disable-next-line no-console
+  console.log('✓ desk persist failure releases wamid and skips FSM until retry');
+}
+
+async function testCommittedFsmInboundDoesNotDuplicateDeskRow() {
+  // Concrete failure before fix: desk append ran BEFORE dedupe.begin, so a
+  // Meta redelivery after commit appended a second inbound + inflated unread.
+  const rows = [];
+  const messageStore = {
+    append: async (row) => {
+      rows.push(row);
+      return row;
+    },
+  };
+  const engine = {
+    handleInbound: async () => ({ ok: true }),
+  };
+  const dedupe = createInboundDedupe();
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/webhook',
+    createWebhookRouter({
+      engine,
+      inboundDedupe: dedupe,
+      requireSignature: false,
+      messageStore,
+    })
+  );
+
+  const payload = buildTextWebhook({
+    from: '27009990011',
+    text: 'qualify me',
+    id: 'wamid.desk-no-dup',
+  });
+
+  const { server, port } = await listen(app);
+  try {
+    const first = await postJson(port, '/webhook', payload);
+    const second = await postJson(port, '/webhook', payload);
+    assert.strictEqual(first.status, 200);
+    assert.strictEqual(second.status, 200);
+    assert.strictEqual(
+      rows.length,
+      1,
+      'Meta redelivery after commit must not append a second desk row'
+    );
+  } finally {
+    server.close();
+  }
+  // eslint-disable-next-line no-console
+  console.log('✓ committed FSM inbound does not duplicate desk transcript row');
+}
+
 async function testInteractiveButtonReplyAdvancesMenu() {
   const store = new MemorySessionStore();
   const logger = new CapturingLogger();
@@ -473,6 +612,8 @@ async function main() {
   await testDuplicateDoesNotDoubleAdvanceInfoState();
   await testFailedHandleInboundReleasesClaimForRetry();
   await testOneFailedMessageDoesNotAbortSiblingInBatch();
+  await testDeskPersistFailureDoesNotAdvanceFsmOrCommit();
+  await testCommittedFsmInboundDoesNotDuplicateDeskRow();
   await testInteractiveButtonReplyAdvancesMenu();
   // eslint-disable-next-line no-console
   console.log('\nAll webhook dedupe tests passed.');
