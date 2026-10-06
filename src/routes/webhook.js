@@ -364,20 +364,30 @@ function createWebhookRouter({
               continue;
             }
 
-            if (messageStore) {
-              await persistDeskRow(messageStore, {
-                waNumber: inbound.from,
-                direction: 'in',
-                source: 'customer',
-                text: inbound.replyId
-                  ? `${inbound.text}${inbound.text ? ' ' : ''}[${inbound.replyId}]`
-                  : inbound.text,
-                replyId: inbound.replyId,
-                wamid: message.id || null,
-              });
-            }
+            // Desk + FSM under the same begin/commit/release window.
+            // Persist before handleInbound so a transcript failure does not
+            // advance the funnel then commit (Meta would never retry the desk
+            // row). begin() first so a Meta redelivery after commit cannot
+            // append a duplicate inbound before we notice the wamid is done.
             if (!dedupe.begin(message.id)) continue;
             try {
+              if (messageStore) {
+                const saved = await persistDeskRow(messageStore, {
+                  waNumber: inbound.from,
+                  direction: 'in',
+                  source: 'customer',
+                  text: inbound.replyId
+                    ? `${inbound.text}${inbound.text ? ' ' : ''}[${inbound.replyId}]`
+                    : inbound.text,
+                  replyId: inbound.replyId,
+                  wamid: message.id || null,
+                });
+                if (!saved) {
+                  throw new Error(
+                    `transcript append failed for FSM inbound ${message.type || 'text'}`
+                  );
+                }
+              }
               await engine.handleInbound(inbound.from, inbound.text, {
                 replyId: inbound.replyId,
                 productRetailerId: inbound.productRetailerId,
