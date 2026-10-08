@@ -39,12 +39,11 @@ function matchesKeywordList(normalized, keywords) {
     if (!k) return false;
     return candidates.some((text) => {
       if (text === k) return true;
-      if (k.includes(' ') && text.includes(k)) return true;
-      if (!k.includes(' ')) {
-        const re = new RegExp(`(^|\\s)${escapeRegex(k)}(\\s|$)`, 'i');
-        return re.test(text);
-      }
-      return false;
+      // Single- and multi-word keywords use word boundaries. Multi-word used
+      // to be a raw includes() check, so "opt out" matched inside
+      // "opt outside" / "adopt outlet" and falsely routed to silent hold.
+      const re = new RegExp(`(^|\\s)${escapeRegex(k)}(\\s|$)`, 'i');
+      return re.test(text);
     });
   });
 }

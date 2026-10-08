@@ -6,6 +6,7 @@ const path = require('path');
 const files = [
   'manual-test.js',
   'critical-bugs.test.js',
+  'help-opt-out-phrase.test.js',
   'terminal-send-failure.test.js',
   'terminal-outbound-retry.test.js',
   'terminal-persist-before-lead.test.js',
