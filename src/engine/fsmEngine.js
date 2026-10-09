@@ -53,13 +53,34 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Soften punctuation the same way help/reopen keyword matching does, so
+ * free-text answers like "Yes!" / "yes." / "Yes, send it!" still hit the
+ * intended option instead of burning an invalid attempt.
+ */
+function softenForMatch(text) {
+  return String(text || '')
+    .replace(/[^a-z0-9\s]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function matchTextsEqual(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const softA = softenForMatch(a);
+  const softB = softenForMatch(b);
+  return Boolean(softA) && softA === softB;
+}
+
 function matchOption(state, normalized) {
   if (!state || !normalized) return null;
 
   // Exact match on optionTitles (button / list labels customers tap or type).
+  // Also accept punctuated free-text that softens to the same title.
   if (state.optionTitles) {
     for (const [optionKey, title] of Object.entries(state.optionTitles)) {
-      if (normalizeInput(title) === normalized) return optionKey;
+      if (matchTextsEqual(normalizeInput(title), normalized)) return optionKey;
     }
   }
 
@@ -67,7 +88,7 @@ function matchOption(state, normalized) {
   for (const [optionKey, labels] of Object.entries(state.optionLabels)) {
     const list = Array.isArray(labels) ? labels : [labels];
     for (const label of list) {
-      if (normalizeInput(label) === normalized) {
+      if (matchTextsEqual(normalizeInput(label), normalized)) {
         return optionKey;
       }
     }
