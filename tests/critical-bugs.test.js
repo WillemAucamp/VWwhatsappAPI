@@ -258,6 +258,73 @@ async function testConcurrentInboundSerialization() {
   console.log('✓ concurrent inbound messages serialize per WhatsApp number');
 }
 
+/**
+ * Free-text answers with trailing/surrounding punctuation must still match
+ * Yes/No (and similar) options. Without softening, "Yes!" misses the option,
+ * lands on OFF_MENU_RECOVERY, and a second punctuated answer falsely
+ * HUMAN_HANDOVER + agentTakenOver until staff Release.
+ */
+async function testPunctuatedFreeTextMustNotFalseHandover() {
+  const store = new MemorySessionStore();
+  const logger = new CapturingLogger();
+  const engine = new FsmEngine({
+    sessionStore: store,
+    leadLogger: logger,
+    sendMessage: async () => ({ ok: true }),
+    notifyAgent: async () => ({ delivered: true }),
+    options: { stubMarker: true },
+  });
+
+  const wa = '27823334444';
+  await engine.handleInbound(wa, 'hi');
+  await engine.handleInbound(wa, 'qualify me');
+
+  let session = await store.get(wa);
+  assert.strictEqual(session.currentState, 'EMPLOYED_INCOME_CHECK');
+
+  await engine.handleInbound(wa, 'Yes!');
+  session = await store.get(wa);
+  assert.strictEqual(
+    session.currentState,
+    'LICENSE_CHECK',
+    'punctuated Yes! must advance employment check, not OFF_MENU_RECOVERY'
+  );
+  assert.notStrictEqual(session.currentState, 'OFF_MENU_RECOVERY');
+  assert.notStrictEqual(session.currentState, 'HUMAN_HANDOVER');
+  assert.strictEqual(session.agentTakenOver, false);
+
+  await engine.handleInbound(wa, 'yes.');
+  session = await store.get(wa);
+  assert.strictEqual(
+    session.currentState,
+    'CREDIT_CHECK',
+    'punctuated yes. must advance licence check'
+  );
+
+  await engine.handleInbound(wa, 'Good!');
+  session = await store.get(wa);
+  assert.strictEqual(
+    session.currentState,
+    'FINAL_CONSENT',
+    'punctuated Good! must advance credit check'
+  );
+
+  await engine.handleInbound(wa, 'Yes, send it!');
+  session = await store.get(wa);
+  assert.strictEqual(
+    session.currentState,
+    'SEND_LINK',
+    'punctuated Yes, send it! must deliver the application link path'
+  );
+  assert.strictEqual(session.agentTakenOver, false);
+  assert.notStrictEqual(session.lastExitReason, 'human_requested');
+
+  // eslint-disable-next-line no-console
+  console.log(
+    '✓ punctuated free-text Yes!/Good! must not false-handover into silent hold'
+  );
+}
+
 async function main() {
   // eslint-disable-next-line no-console
   console.log('Running critical-bug regression tests…\n');
@@ -265,6 +332,7 @@ async function main() {
   await testSignatureHelpers();
   await testWebhookRejectsForgedRequests();
   await testConcurrentInboundSerialization();
+  await testPunctuatedFreeTextMustNotFalseHandover();
   // eslint-disable-next-line no-console
   console.log('\nAll critical-bug regression tests passed.');
 }
