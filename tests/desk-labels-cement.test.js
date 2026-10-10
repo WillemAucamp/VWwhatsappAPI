@@ -151,12 +151,60 @@ async function testLegacyVipCatalogIsReplaced() {
   console.log('✓ old VIP/Complaint defaults are swapped for cemented labels');
 }
 
+async function testPostSeedVipCatalogIsNotWiped() {
+  const file = tmpPath();
+  const store = createLabelStore(file);
+  for (const row of await store.listLabels()) {
+    await store.removeLabel(row.id);
+  }
+  const vip = await store.createLabel({ name: 'VIP', color: '#128c7e' });
+  const follow = await store.createLabel({ name: 'Follow Up', color: '#027eb5' });
+  const hot = await store.createLabel({ name: 'Hot Lead', color: '#c4530a' });
+  const complaint = await store.createLabel({
+    name: 'Complaint',
+    color: '#b42318',
+  });
+  await store.setChatLabels('27821110001', [vip.id, follow.id]);
+  await store.setChatLabels('27821110002', [hot.id, complaint.id]);
+
+  const listed = await store.listLabels();
+  assert.deepStrictEqual(
+    listed.map((l) => l.name).sort(),
+    ['Complaint', 'Follow Up', 'Hot Lead', 'VIP']
+  );
+  assert.deepStrictEqual(await store.getChatLabelIds('27821110001'), [
+    vip.id,
+    follow.id,
+  ]);
+  assert.deepStrictEqual(await store.getChatLabelIds('27821110002'), [
+    hot.id,
+    complaint.id,
+  ]);
+
+  const again = createLabelStore(file);
+  const after = await again.getChatLabelsMap();
+  assert.deepStrictEqual(
+    after.labels.map((l) => l.name).sort(),
+    ['Complaint', 'Follow Up', 'Hot Lead', 'VIP']
+  );
+  assert.deepStrictEqual(after.chatLabels['27821110001'], [vip.id, follow.id]);
+  assert.deepStrictEqual(after.chatLabels['27821110002'], [
+    hot.id,
+    complaint.id,
+  ]);
+  // eslint-disable-next-line no-console
+  console.log(
+    '✓ after seed, VIP/Follow Up staff catalogs keep labels + chat assignments'
+  );
+}
+
 async function main() {
   await testDefaultCatalog();
   await testEditsSurviveReopen();
   await testDeleteDoesNotReseed();
   await testMissingCementedLabelsAreFilledOnce();
   await testLegacyVipCatalogIsReplaced();
+  await testPostSeedVipCatalogIsNotWiped();
   // eslint-disable-next-line no-console
   console.log('\ndesk cemented-label tests passed.');
 }
