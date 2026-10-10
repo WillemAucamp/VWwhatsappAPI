@@ -86,8 +86,8 @@ function stampedDefaultLabels() {
 }
 
 /**
- * First boot only: swap the old VIP catalog, or add any missing cemented
- * names. Later boots leave staff edits (renames, deletes, extras) alone.
+ * First-boot migration helper (caller must gate on !META_SEEDED):
+ * swap the old VIP catalog, or add any missing cemented names.
  */
 function ensureCementedLabels(labels) {
   if (isLegacyBuiltinCatalog(labels)) {
