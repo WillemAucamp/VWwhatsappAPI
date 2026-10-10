@@ -146,7 +146,11 @@ function createFileLabelStore(filePath = config.agent.labelsPath) {
           : {};
       const meta =
         parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : {};
-      if (isLegacyBuiltinCatalog(labels) || !meta[META_SEEDED]) {
+      // Legacy VIP→cemented swap is a one-shot first-boot migration only.
+      // After META_SEEDED, staff may delete cemented labels and recreate
+      // names like VIP / Follow Up — re-running the detector would wipe
+      // those labels and every chatLabels assignment.
+      if (!meta[META_SEEDED]) {
         const ensured = ensureCementedLabels(labels);
         labels = ensured.labels;
         if (ensured.replaced) chatLabels = {};
@@ -413,7 +417,9 @@ function createPostgresLabelStore(connectionString, opts = {}) {
     const { rows } = await pool.query(
       `SELECT id, name, color, updated_at FROM agent_labels`
     );
-    if (isLegacyBuiltinCatalog(rows.map(mapLabelRow))) {
+    // One-shot only: after labels_seeded, never treat staff VIP/Follow Up
+    // catalogs as "legacy" or DELETE chat assignments on deploy/restart.
+    if (!alreadySeeded && isLegacyBuiltinCatalog(rows.map(mapLabelRow))) {
       await pool.query(`DELETE FROM agent_chat_labels`);
       await pool.query(`DELETE FROM agent_labels`);
       await insertDefaultLabels();
