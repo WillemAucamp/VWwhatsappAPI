@@ -18,6 +18,7 @@ const files = [
   'followup-inbound-race.test.js',
   'webhook-dedupe.test.js',
   'inbound-media.test.js',
+  'agent-outbound-media.test.js',
   'followup-tick-isolation.test.js',
   'meta-readiness.test.js',
   'transport-graph.test.js',

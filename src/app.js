@@ -44,6 +44,35 @@ function createApp(overrides = {}) {
         const source =
           (payload.meta && payload.meta.source) ||
           (payload.meta && payload.meta.quiet ? 'bot' : 'bot');
+        // Persist image bytes when the send path still has them (agent
+        // reply-media). mediaId-only sends cannot be re-downloaded here.
+        const mediaFields = {};
+        if (isImage) {
+          let buffer = Buffer.isBuffer(payload.mediaBuffer)
+            ? payload.mediaBuffer
+            : null;
+          if (!buffer && payload.imageBase64) {
+            try {
+              buffer = Buffer.from(
+                String(payload.imageBase64).replace(/^data:[^;]+;base64,/, ''),
+                'base64'
+              );
+            } catch (_) {
+              buffer = null;
+            }
+          }
+          if (buffer && buffer.length) {
+            mediaFields.mediaKind = 'image';
+            mediaFields.mediaMime =
+              payload.mimeType ||
+              payload.mediaMimeType ||
+              payload.mediaMime ||
+              'image/jpeg';
+            mediaFields.mediaFilename =
+              payload.filename || payload.mediaFilename || null;
+            mediaFields.mediaBuffer = buffer;
+          }
+        }
         await messageStore.append({
           waNumber: to,
           direction: 'out',
@@ -56,6 +85,7 @@ function createApp(overrides = {}) {
             result.messages[0].id
               ? result.messages[0].id
               : null,
+          ...mediaFields,
         });
       } catch (err) {
         // eslint-disable-next-line no-console
