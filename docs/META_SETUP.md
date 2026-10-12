@@ -117,7 +117,9 @@ Free-form bot text (and interactive menus) only work inside the **24-hour** wind
 | `src/transport/whatsapp.js` | Graph `type=interactive` (reply buttons ≤3, else list) |
 | `POST /webhook` | Accepts `text` and `interactive` (`button_reply` / `list_reply`) |
 
-Staff can still reply in the WhatsApp Business app on the same thread (Coexistence). The bot goes quiet after `help` / `stop` / handover.
+Staff can still reply in the WhatsApp Business app on the same thread (Coexistence). The bot goes quiet after `help` / `stop` / handover, and after any **agent desk** reply (silent takeover until Release to bot — [AGENT_DESK.md](./AGENT_DESK.md)).
+
+Customer images and documents show on the desk when Graph download succeeds; other inbound types (audio, video, sticker, …) store a placeholder row and skip the menu. The webhook returns **200 before** media download — a failed download is a permanent `(media unavailable)` row, not a Meta retry. Staff paste/attach images still reach WhatsApp; the desk transcript does not keep those outbound bytes. Details: [OPERATIONS.md](./OPERATIONS.md), [AGENT_DESK.md](./AGENT_DESK.md).
 
 ## Troubleshooting
 
@@ -133,3 +135,5 @@ Staff can still reply in the WhatsApp Business app on the same thread (Coexisten
 | Empty replies | Copy key blank or env links unset |
 | `check-meta` Graph fail | Wrong token, phone-number ID, or app does not own that WABA |
 | Coexistence missing | You used migrate/API-only; reconnect with Business app onboarding |
+
+Day-2 webhook, session, and follow-up behaviour: [OPERATIONS.md](./OPERATIONS.md). Staff inbox: [AGENT_DESK.md](./AGENT_DESK.md).
