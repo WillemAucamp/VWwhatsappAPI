@@ -217,7 +217,70 @@ async function persistInboundMedia(inbound, messageStore, downloadFn) {
     mediaFilename: filename,
     mediaByteLength: downloaded.buffer.length,
     mediaBuffer: downloaded.buffer,
+    mediaGraphId: inbound.mediaId || null,
   });
+}
+
+/**
+ * Webhook already returned 200 to Meta before media download runs, so a single
+ * Graph blip would permanently drop the image/document. Retry transient
+ * download/persist failures before writing an unavailable placeholder.
+ */
+async function persistInboundMediaWithRetries(
+  inbound,
+  messageStore,
+  downloadFn,
+  { attempts = 3, delayMs = 250 } = {}
+) {
+  const total = Math.max(1, Number(attempts) || 1);
+  const baseDelay = Math.max(0, Number(delayMs) || 0);
+  let lastErr;
+  for (let i = 0; i < total; i++) {
+    try {
+      return await persistInboundMedia(inbound, messageStore, downloadFn);
+    } catch (err) {
+      lastErr = err;
+      if (i + 1 < total && baseDelay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, baseDelay * (i + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Leave a desk row that keeps the Graph media id so a later recovery can
+ * re-download. Do not set mediaKind alone (that would advertise hasMedia
+ * without bytes).
+ */
+async function persistUnavailableMediaPlaceholder(inbound, messageStore) {
+  if (!messageStore || typeof messageStore.append !== 'function') return false;
+  const text =
+    placeholderText({
+      mediaKind: inbound.mediaKind,
+      filename: inbound.filename,
+      caption: inbound.text,
+    }) + ' (media unavailable)';
+  try {
+    await messageStore.append({
+      waNumber: inbound.from,
+      direction: 'in',
+      source: 'customer',
+      text,
+      wamid: inbound.wamid || null,
+      mediaGraphId: inbound.mediaId || null,
+    });
+    return true;
+  } catch (err) {
+    diagnostics.recordTranscriptAppendError(err);
+    return persistDeskRow(messageStore, {
+      waNumber: inbound.from,
+      direction: 'in',
+      source: 'customer',
+      text,
+      wamid: inbound.wamid || null,
+    });
+  }
 }
 
 /**
@@ -233,6 +296,7 @@ function createWebhookRouter({
   requireSignature,
   messageStore,
   downloadMediaFn,
+  inboundMediaRetries,
 } = {}) {
   const router = express.Router();
   const token = verifyToken || config.whatsapp.verifyToken;
@@ -244,6 +308,16 @@ function createWebhookRouter({
       : Boolean(secret) || config.nodeEnv === 'production';
   const dedupe = inboundDedupe || createInboundDedupe();
   const download = downloadMediaFn || downloadMedia;
+  const mediaRetryOpts = {
+    attempts:
+      inboundMediaRetries && inboundMediaRetries.attempts != null
+        ? inboundMediaRetries.attempts
+        : 3,
+    delayMs:
+      inboundMediaRetries && inboundMediaRetries.delayMs != null
+        ? inboundMediaRetries.delayMs
+        : 250,
+  };
 
   router.get('/', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -309,30 +383,28 @@ function createWebhookRouter({
               if (!dedupe.begin(message.id)) continue;
               try {
                 if (messageStore) {
-                  await persistInboundMedia(inbound, messageStore, download);
+                  // POST already returned 200 — retry Graph download/persist so a
+                  // single transient failure cannot permanently drop the bytes.
+                  await persistInboundMediaWithRetries(
+                    inbound,
+                    messageStore,
+                    download,
+                    mediaRetryOpts
+                  );
                 }
                 diagnostics.recordHandled();
                 dedupe.commit(message.id);
               } catch (err) {
                 diagnostics.recordHandleError(err);
                 dedupe.release(message.id);
-                // Still leave a placeholder so staff see that something arrived.
-                await persistDeskRow(messageStore, {
-                  waNumber: inbound.from,
-                  direction: 'in',
-                  source: 'customer',
-                  text:
-                    placeholderText({
-                      mediaKind: inbound.mediaKind,
-                      filename: inbound.filename,
-                      caption: inbound.text,
-                    }) + ' (media unavailable)',
-                  wamid: message.id || null,
-                });
+                // Placeholder keeps mediaGraphId so a later recovery can retry
+                // the Graph download (Meta will not redeliver after our 200).
+                await persistUnavailableMediaPlaceholder(inbound, messageStore);
                 // eslint-disable-next-line no-console
                 console.error('[webhook] inbound media processing error', {
                   messageId: message.id,
                   from: inbound.from,
+                  mediaId: inbound.mediaId || null,
                   message: err && err.message ? err.message : String(err),
                 });
               }
@@ -417,4 +489,6 @@ module.exports = {
   verifyWhatsAppSignature,
   extractInboundMessage,
   persistInboundMedia,
+  persistInboundMediaWithRetries,
+  persistUnavailableMediaPlaceholder,
 };
