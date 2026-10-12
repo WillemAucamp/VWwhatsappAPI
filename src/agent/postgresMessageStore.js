@@ -30,6 +30,7 @@ const MEDIA_COLUMNS_SQL = [
   'ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_filename TEXT',
   'ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_byte_length INTEGER',
   'ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_bytes BYTEA',
+  'ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS media_graph_id TEXT',
 ];
 
 function mapRow(row) {
@@ -50,6 +51,9 @@ function mapRow(row) {
     out.mediaByteLength =
       row.media_byte_length != null ? Number(row.media_byte_length) : null;
     out.hasMedia = true;
+  }
+  if (row.media_graph_id) {
+    out.mediaGraphId = row.media_graph_id;
   }
   return out;
 }
@@ -140,13 +144,15 @@ function createPostgresMessageStore(connectionString) {
             ? message.mediaBuffer.length
             : null,
       mediaBuffer: message.mediaBuffer || null,
+      mediaGraphId: message.mediaGraphId ? String(message.mediaGraphId) : null,
     };
     await pool.query(
       `INSERT INTO chat_messages
         (id, wa_number, direction, source, text, reply_id, wamid, at,
-         media_kind, media_mime, media_filename, media_byte_length, media_bytes)
+         media_kind, media_mime, media_filename, media_byte_length, media_bytes,
+         media_graph_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz,
-         $9, $10, $11, $12, $13)
+         $9, $10, $11, $12, $13, $14)
        ON CONFLICT (id) DO NOTHING`,
       [
         row.id,
@@ -162,6 +168,7 @@ function createPostgresMessageStore(connectionString) {
         row.mediaFilename,
         row.mediaByteLength,
         row.mediaBuffer,
+        row.mediaGraphId,
       ]
     );
     return mapRow({
@@ -177,6 +184,7 @@ function createPostgresMessageStore(connectionString) {
       media_mime: row.mediaMime,
       media_filename: row.mediaFilename,
       media_byte_length: row.mediaByteLength,
+      media_graph_id: row.mediaGraphId,
     });
   }
 
@@ -191,10 +199,12 @@ function createPostgresMessageStore(connectionString) {
     if (!keys.length) return [];
     const { rows } = await pool.query(
       `SELECT id, wa_number, direction, source, text, reply_id, wamid, at,
-              media_kind, media_mime, media_filename, media_byte_length
+              media_kind, media_mime, media_filename, media_byte_length,
+              media_graph_id
        FROM (
          SELECT id, wa_number, direction, source, text, reply_id, wamid, at,
-                media_kind, media_mime, media_filename, media_byte_length
+                media_kind, media_mime, media_filename, media_byte_length,
+                media_graph_id
          FROM chat_messages
          WHERE regexp_replace(wa_number, '\\D', '', 'g') = ANY($1::text[])
             OR wa_number = ANY($1::text[])

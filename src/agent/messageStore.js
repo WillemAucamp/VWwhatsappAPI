@@ -83,6 +83,11 @@ function createFileMessageStore(
         row.mediaPath = String(message.mediaPath);
       }
     }
+    // Graph media id retained on success and on "media unavailable" rows so a
+    // later recovery can re-download after the webhook already returned 200.
+    if (message.mediaGraphId) {
+      row.mediaGraphId = String(message.mediaGraphId);
+    }
     await fs.promises.appendFile(fileFor(waNumber), `${JSON.stringify(row)}\n`, 'utf8');
     return publicMediaFields(row);
   }
