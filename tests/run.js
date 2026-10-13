@@ -29,6 +29,8 @@ const files = [
   'desk-auto-labels.test.js',
   'desk-labels-cement.test.js',
   'desk-shortcuts-persist.test.js',
+  'set-chat-labels-tx.test.js',
+  'outbound-transcript-append.test.js',
   'message-store.test.js',
 ];
 
