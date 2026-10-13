@@ -638,6 +638,14 @@ function createAgentRouter({
           ? result.messages[0].id
           : null;
 
+      if (result && result.transcriptSaved === false) {
+        return res.status(503).json({
+          error: 'transcript_append_failed',
+          wamid,
+          graph: result,
+        });
+      }
+
       res.json({
         ok: true,
         message: {
@@ -714,6 +722,14 @@ function createAgentRouter({
             ? result.messages[0].id
             : null;
         const text = caption || '[Image]';
+
+        if (result && result.transcriptSaved === false) {
+          return res.status(503).json({
+            error: 'transcript_append_failed',
+            wamid,
+            graph: result,
+          });
+        }
 
         res.json({
           ok: true,

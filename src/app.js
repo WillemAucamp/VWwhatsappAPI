@@ -28,6 +28,7 @@ function createApp(overrides = {}) {
   const baseSend = overrides.sendMessage || sendMessage;
   const loggingSend = async (to, payload = {}) => {
     const result = await baseSend(to, payload);
+    let transcriptSaved = !messageStore;
     if (messageStore) {
       try {
         const isImage =
@@ -57,11 +58,18 @@ function createApp(overrides = {}) {
               ? result.messages[0].id
               : null,
         });
+        transcriptSaved = true;
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[transcript] outbound append failed', err.message);
         webhookDiagnostics.recordTranscriptAppendError(err);
+        transcriptSaved = false;
       }
+    }
+    // Graph may already have delivered; surface desk-of-record failure so
+    // agent routes do not return ok:true for a message that never persisted.
+    if (result && typeof result === 'object') {
+      result.transcriptSaved = transcriptSaved;
     }
     return result;
   };
