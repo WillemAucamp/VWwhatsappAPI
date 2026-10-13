@@ -670,7 +670,7 @@ function createAgentRouter({
   router.post(
     '/api/chats/:wa/reply-media',
     requireAuth,
-    express.json({ limit: '24mb' }),
+    express.json({ limit: '8mb' }),
     async (req, res) => {
       try {
         const wa = String(req.params.wa || '').replace(/\D/g, '');

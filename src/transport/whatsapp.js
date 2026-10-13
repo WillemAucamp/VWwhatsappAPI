@@ -8,10 +8,15 @@ const config = require('../config');
  * Never put internal fields (mediaSlot, meta, mediaBuffer) on Graph bodies.
  */
 
-const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-/** Desk / inbound accept up to 16MB. Meta inline image send is still 5MB. */
-const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
-const GRAPH_INLINE_IMAGE_BYTES = 5 * 1024 * 1024;
+/** Graph image messages: JPEG/PNG only. WebP is sticker-only on Cloud API. */
+const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png']);
+/**
+ * Outbound image upload/send hard-caps at Meta's image limit (5MB).
+ * Larger pastes cannot be rescued by type=document: Graph still rejects
+ * image/* uploads over 5MB before any send-as-document branch runs.
+ */
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const GRAPH_INLINE_IMAGE_BYTES = MAX_IMAGE_BYTES;
 
 function messagesUrl() {
   const { graphBaseUrl, apiVersion, phoneNumberId } = config.whatsapp;
@@ -36,14 +41,14 @@ function assertImagePayload({ mimeType, byteLength }) {
   const mime = normalizeImageMime(mimeType);
   if (!IMAGE_MIME_TYPES.has(mime)) {
     const err = new Error(
-      'Unsupported image type. Use JPEG, PNG, or WebP (WhatsApp image limits).'
+      'Unsupported image type. Use JPEG or PNG (WhatsApp Cloud API image limits).'
     );
     err.code = 'WHATSAPP_MEDIA_TYPE_UNSUPPORTED';
     err.status = 400;
     throw err;
   }
   if (!byteLength || byteLength > MAX_IMAGE_BYTES) {
-    const err = new Error('Image must be under 16MB.');
+    const err = new Error('Image must be under 5MB (WhatsApp image upload limit).');
     err.code = 'WHATSAPP_MEDIA_TOO_LARGE';
     err.status = 400;
     throw err;
@@ -302,9 +307,7 @@ async function uploadMedia({ buffer, mimeType, filename } = {}) {
   const { token } = requireCredentials();
   const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
   const mime = assertImagePayload({ mimeType, byteLength: bytes.length });
-  const name =
-    filename ||
-    (mime === 'image/png' ? 'image.png' : mime === 'image/webp' ? 'image.webp' : 'image.jpg');
+  const name = filename || (mime === 'image/png' ? 'image.png' : 'image.jpg');
 
   const form = new FormData();
   form.append('messaging_product', 'whatsapp');
@@ -427,21 +430,15 @@ async function cloudApiSendMessage(to, payload = {}) {
       mediaId = uploaded.id;
     }
     const caption = joinTextAndLink(payload.text, payload.link) || payload.caption || '';
-    // Meta inline images max out at 5MB; larger desk pastes go as documents.
-    const asDocument =
-      payload.type === 'document' ||
-      (buffer && buffer.length > GRAPH_INLINE_IMAGE_BYTES);
-    if (asDocument) {
+    // Explicit document sends only. Oversized images are rejected in uploadMedia
+    // (Graph image/* upload max is 5MB — there is no send-as-document escape hatch).
+    if (payload.type === 'document') {
       return cloudApiSendDocument(toDigits, {
         mediaId,
         caption,
         filename:
           filename ||
-          (normalizeImageMime(mimeType) === 'image/png'
-            ? 'image.png'
-            : normalizeImageMime(mimeType) === 'image/webp'
-              ? 'image.webp'
-              : 'image.jpg'),
+          (normalizeImageMime(mimeType) === 'image/png' ? 'image.png' : 'image.jpg'),
       });
     }
     return cloudApiSendImage(toDigits, { mediaId, caption });

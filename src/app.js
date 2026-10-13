@@ -88,8 +88,8 @@ function createApp(overrides = {}) {
   const app = express();
   app.use(
     express.json({
-      // Agent desk paste-image sends base64 (~4/3 of binary; desk allows up to 16MB).
-      limit: '24mb',
+      // Agent desk paste-image sends base64 (~4/3 of binary; Graph image max 5MB).
+      limit: '8mb',
       verify: (req, _res, buf) => {
         req.rawBody = Buffer.from(buf);
       },
