@@ -1161,6 +1161,17 @@ class FsmEngine {
       if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
         return this._restart(session);
       }
+      // Catalog product / order after soft_closed: start qualify with the car
+      // kept — empty product inquiries must not fall through to OFF_MENU →
+      // second invalid → false HUMAN_HANDOVER silent hold.
+      if (productRetailerId) {
+        this._resetSessionForFreshStart(session);
+        session.selectedProductRetailerId = productRetailerId;
+        session.selectedCatalogId =
+          inboundCatalogId || config.whatsapp.catalogId || null;
+        session.path = [ENTRY_STATE];
+        return this._enterState(session, 'EMPLOYED_INCOME_CHECK');
+      }
       // Off-menu free text → Human-Handover / Main-Menu, not a silent main-menu dump.
       return this._enterOffMenuRecoveryFresh(session);
     }
@@ -1171,6 +1182,13 @@ class FsmEngine {
       // "help") — never off-menu recovery and never skip straight to a
       // later step unless they tapped an interactive button reply id.
       this._resetSessionForFreshStart(session);
+      // Keep catalog product id across the greeting so a first-touch product
+      // inquiry is not wiped by _resetSessionForFreshStart above.
+      if (productRetailerId) {
+        session.selectedProductRetailerId = productRetailerId;
+        session.selectedCatalogId =
+          inboundCatalogId || config.whatsapp.catalogId || null;
+      }
       if (replyId) {
         const destination = resolveGreetingDestination(normalized, replyId);
         if (destination) {
@@ -1213,14 +1231,27 @@ class FsmEngine {
       if (matchesKeywordList(normalized, config.fsm.reopenKeywords)) {
         return this._restart(session);
       }
+      if (productRetailerId) {
+        this._resetSessionForFreshStart(session);
+        session.selectedProductRetailerId = productRetailerId;
+        session.selectedCatalogId =
+          inboundCatalogId || config.whatsapp.catalogId || null;
+        session.path = [ENTRY_STATE];
+        return this._enterState(session, 'EMPLOYED_INCOME_CHECK');
+      }
       return this._enterOffMenuRecoveryFresh(session);
     }
 
-    // Customer messaged about / ordered a catalog car while on stock browse.
-    if (state.catalogProductList && productRetailerId) {
+    // Persist catalog product / order selection whenever present. Stock browse
+    // still advances into qualify; other active states must not treat an empty
+    // product inquiry as off-menu (that cascades into false HUMAN_HANDOVER).
+    if (productRetailerId) {
       session.selectedProductRetailerId = productRetailerId;
       session.selectedCatalogId =
         inboundCatalogId || config.whatsapp.catalogId || null;
+    }
+
+    if (state.catalogProductList && productRetailerId) {
       const nextId =
         (state.options && state.options.any_car) || 'EMPLOYED_INCOME_CHECK';
       return this._enterState(session, nextId);
@@ -1236,6 +1267,9 @@ class FsmEngine {
         (!state.options || !Object.keys(state.options).length)
       ) {
         return this._enterState(session, state.next);
+      }
+      if (productRetailerId) {
+        return this._enterState(session, state.id);
       }
       return this._handleInvalid(session, state);
     }

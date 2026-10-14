@@ -51,7 +51,10 @@ const STATES = {
       promotions: ['promotions', 'promo'],
       // Not shown on the menu; kept for leftover old buttons / later re-enable.
       see_cars: ['see our cars', 'see cars', 'cars', 'stock', 'see_cars'],
-      opt_out: ['opt-out', 'opt out', 'optout', 'unsubscribe', '3'],
+      // Opt-Out is text-only now (no 3rd reply button). Do not keep legacy
+      // numeral "3" — typing 3 on the 2-button main menu falsely handed over
+      // into quiet + agentTakenOver until staff Release.
+      opt_out: ['opt-out', 'opt out', 'optout', 'unsubscribe'],
     },
   },
 
