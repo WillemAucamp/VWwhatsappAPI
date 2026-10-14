@@ -29,6 +29,17 @@ const DEFAULT_LABELS = [
 
 const OLD_BUILTIN_NAMES = ['vip', 'follow up', 'hot lead', 'complaint'];
 
+/**
+ * Funnel auto-labels. When staff remove one via setChatLabels, remember that
+ * so thread-open / backfill addChatLabelByName cannot silently put it back.
+ */
+const AUTO_LABEL_NAMES = [
+  'Unqualified',
+  'No License',
+  'Bad Credit',
+  'App-Link sent',
+];
+
 const META_SEEDED = 'labels_seeded';
 
 function normalizeName(name) {
@@ -45,6 +56,30 @@ function foldName(name) {
 
 function namesMatch(a, b) {
   return foldName(a) === foldName(b);
+}
+
+function isAutoLabelName(name) {
+  const folded = foldName(name);
+  return AUTO_LABEL_NAMES.some((n) => foldName(n) === folded);
+}
+
+/**
+ * Staff replaced chat labels: suppress auto-names they just removed, and
+ * clear suppress for any they explicitly put back.
+ */
+function nextChatLabelSuppress(previousIds, nextIds, labels, priorSuppress) {
+  const known = new Map((labels || []).map((l) => [l.id, l]));
+  const nextSet = new Set(nextIds || []);
+  const out = new Set(
+    (priorSuppress || []).filter((id) => known.has(id) && !nextSet.has(id))
+  );
+  for (const id of previousIds || []) {
+    if (nextSet.has(id)) continue;
+    const label = known.get(id);
+    if (label && isAutoLabelName(label.name)) out.add(id);
+  }
+  for (const id of nextSet) out.delete(id);
+  return [...out];
 }
 
 function normalizeColor(color, fallback = LABEL_COLORS[0]) {
@@ -128,6 +163,7 @@ function createFileLabelStore(filePath = config.agent.labelsPath) {
       const seeded = {
         labels: stampedDefaultLabels(),
         chatLabels: {},
+        chatLabelSuppress: {},
         meta: { [META_SEEDED]: true },
       };
       await writeAllUnlocked(seeded);
@@ -137,30 +173,38 @@ function createFileLabelStore(filePath = config.agent.labelsPath) {
       const raw = await fs.promises.readFile(file, 'utf8');
       const parsed = JSON.parse(raw);
       if (!parsed || !Array.isArray(parsed.labels)) {
-        return { labels: [], chatLabels: {}, meta: {} };
+        return { labels: [], chatLabels: {}, chatLabelSuppress: {}, meta: {} };
       }
       let labels = parsed.labels;
       let chatLabels =
         parsed.chatLabels && typeof parsed.chatLabels === 'object'
           ? parsed.chatLabels
           : {};
+      let chatLabelSuppress =
+        parsed.chatLabelSuppress && typeof parsed.chatLabelSuppress === 'object'
+          ? parsed.chatLabelSuppress
+          : {};
       const meta =
         parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : {};
       if (isLegacyBuiltinCatalog(labels) || !meta[META_SEEDED]) {
         const ensured = ensureCementedLabels(labels);
         labels = ensured.labels;
-        if (ensured.replaced) chatLabels = {};
+        if (ensured.replaced) {
+          chatLabels = {};
+          chatLabelSuppress = {};
+        }
         const nextMeta = { ...meta, [META_SEEDED]: true };
         await writeAllUnlocked({
           labels,
           chatLabels,
+          chatLabelSuppress,
           meta: nextMeta,
         });
-        return { labels, chatLabels, meta: nextMeta };
+        return { labels, chatLabels, chatLabelSuppress, meta: nextMeta };
       }
-      return { labels, chatLabels, meta };
+      return { labels, chatLabels, chatLabelSuppress, meta };
     } catch {
-      return { labels: [], chatLabels: {}, meta: {} };
+      return { labels: [], chatLabels: {}, chatLabelSuppress: {}, meta: {} };
     }
   }
 
@@ -168,7 +212,17 @@ function createFileLabelStore(filePath = config.agent.labelsPath) {
     const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random()
       .toString(36)
       .slice(2, 8)}.tmp`;
-    await fs.promises.writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+    const payload = {
+      labels: data.labels || [],
+      chatLabels: data.chatLabels || {},
+      chatLabelSuppress: data.chatLabelSuppress || {},
+      meta: data.meta || {},
+    };
+    await fs.promises.writeFile(
+      tmp,
+      `${JSON.stringify(payload, null, 2)}\n`,
+      'utf8'
+    );
     await fs.promises.rename(tmp, file);
   }
 
@@ -265,6 +319,15 @@ function createFileLabelStore(filePath = config.agent.labelsPath) {
         );
         if (!data.chatLabels[wa].length) delete data.chatLabels[wa];
       }
+      if (!data.chatLabelSuppress) data.chatLabelSuppress = {};
+      for (const wa of Object.keys(data.chatLabelSuppress)) {
+        data.chatLabelSuppress[wa] = (data.chatLabelSuppress[wa] || []).filter(
+          (lid) => lid !== id
+        );
+        if (!data.chatLabelSuppress[wa].length) {
+          delete data.chatLabelSuppress[wa];
+        }
+      }
       await writeAllUnlocked(data);
       return { ok: true };
     });
@@ -302,12 +365,22 @@ function createFileLabelStore(filePath = config.agent.labelsPath) {
       }
       const data = await readAllUnlocked();
       const known = new Set(data.labels.map((l) => l.id));
+      const previous = (data.chatLabels[wa] || []).filter((id) => known.has(id));
       const unique = [];
       for (const id of Array.isArray(labelIds) ? labelIds : []) {
         const lid = String(id || '');
         if (!lid || !known.has(lid) || unique.includes(lid)) continue;
         unique.push(lid);
       }
+      if (!data.chatLabelSuppress) data.chatLabelSuppress = {};
+      const suppressed = nextChatLabelSuppress(
+        previous,
+        unique,
+        data.labels,
+        data.chatLabelSuppress[wa]
+      );
+      if (suppressed.length) data.chatLabelSuppress[wa] = suppressed;
+      else delete data.chatLabelSuppress[wa];
       if (unique.length) data.chatLabels[wa] = unique;
       else delete data.chatLabels[wa];
       await writeAllUnlocked(data);
@@ -326,6 +399,16 @@ function createFileLabelStore(filePath = config.agent.labelsPath) {
       const label = data.labels.find((l) => namesMatch(l.name, want));
       if (!label) {
         return { applied: false, reason: 'label_not_found', name: want };
+      }
+      const suppressed = data.chatLabelSuppress && data.chatLabelSuppress[wa];
+      if (Array.isArray(suppressed) && suppressed.includes(label.id)) {
+        return {
+          applied: false,
+          reason: 'staff_removed',
+          waNumber: wa,
+          labelIds: (data.chatLabels[wa] || []).slice(),
+          label,
+        };
       }
       const known = new Set(data.labels.map((l) => l.id));
       const current = (data.chatLabels[wa] || []).filter((id) => known.has(id));
@@ -414,6 +497,7 @@ function createPostgresLabelStore(connectionString, opts = {}) {
       `SELECT id, name, color, updated_at FROM agent_labels`
     );
     if (isLegacyBuiltinCatalog(rows.map(mapLabelRow))) {
+      await pool.query(`DELETE FROM agent_chat_label_suppress`);
       await pool.query(`DELETE FROM agent_chat_labels`);
       await pool.query(`DELETE FROM agent_labels`);
       await insertDefaultLabels();
@@ -464,6 +548,12 @@ CREATE TABLE IF NOT EXISTS agent_labels (
 )`);
         await pool.query(`
 CREATE TABLE IF NOT EXISTS agent_chat_labels (
+  wa_number TEXT NOT NULL,
+  label_id TEXT NOT NULL REFERENCES agent_labels(id) ON DELETE CASCADE,
+  PRIMARY KEY (wa_number, label_id)
+)`);
+        await pool.query(`
+CREATE TABLE IF NOT EXISTS agent_chat_label_suppress (
   wa_number TEXT NOT NULL,
   label_id TEXT NOT NULL REFERENCES agent_labels(id) ON DELETE CASCADE,
   PRIMARY KEY (wa_number, label_id)
@@ -621,22 +711,68 @@ CREATE TABLE IF NOT EXISTS agent_chat_labels (
         err.status = 400;
         throw err;
       }
-      const known = await pool.query(`SELECT id FROM agent_labels`);
-      const knownSet = new Set(known.rows.map((r) => r.id));
+      const known = await pool.query(
+        `SELECT id, name, color, updated_at FROM agent_labels`
+      );
+      const labels = known.rows.map(mapLabelRow);
+      const knownSet = new Set(labels.map((r) => r.id));
+      const previousRows = await pool.query(
+        `SELECT label_id FROM agent_chat_labels WHERE wa_number = $1`,
+        [wa]
+      );
+      const previous = previousRows.rows.map((r) => r.label_id);
+      const priorSuppressRows = await pool.query(
+        `SELECT label_id FROM agent_chat_label_suppress WHERE wa_number = $1`,
+        [wa]
+      );
+      const priorSuppress = priorSuppressRows.rows.map((r) => r.label_id);
       const unique = [];
       for (const id of Array.isArray(labelIds) ? labelIds : []) {
         const lid = String(id || '');
         if (!lid || !knownSet.has(lid) || unique.includes(lid)) continue;
         unique.push(lid);
       }
-      await pool.query(`DELETE FROM agent_chat_labels WHERE wa_number = $1`, [
-        wa,
-      ]);
-      for (const lid of unique) {
-        await pool.query(
-          `INSERT INTO agent_chat_labels (wa_number, label_id) VALUES ($1, $2)`,
-          [wa, lid]
+      const suppressed = nextChatLabelSuppress(
+        previous,
+        unique,
+        labels,
+        priorSuppress
+      );
+      // Replace must be atomic: a bare DELETE then INSERT left the chat with
+      // zero labels when any INSERT failed or the process died mid-loop.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`DELETE FROM agent_chat_labels WHERE wa_number = $1`, [
+          wa,
+        ]);
+        for (const lid of unique) {
+          await client.query(
+            `INSERT INTO agent_chat_labels (wa_number, label_id) VALUES ($1, $2)`,
+            [wa, lid]
+          );
+        }
+        await client.query(
+          `DELETE FROM agent_chat_label_suppress WHERE wa_number = $1`,
+          [wa]
         );
+        for (const lid of suppressed) {
+          await client.query(
+            `INSERT INTO agent_chat_label_suppress (wa_number, label_id)
+             VALUES ($1, $2)`,
+            [wa, lid]
+          );
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (_) {
+          /* ignore rollback errors */
+        }
+        throw err;
+      } finally {
+        client.release();
       }
       return { waNumber: wa, labelIds: unique };
     });
@@ -656,6 +792,24 @@ CREATE TABLE IF NOT EXISTS agent_chat_labels (
       const label = rows.map(mapLabelRow).find((l) => namesMatch(l.name, want));
       if (!label) {
         return { applied: false, reason: 'label_not_found', name: want };
+      }
+      const suppressed = await pool.query(
+        `SELECT 1 FROM agent_chat_label_suppress
+          WHERE wa_number = $1 AND label_id = $2`,
+        [wa, label.id]
+      );
+      if (suppressed.rows.length) {
+        const current = await pool.query(
+          `SELECT label_id FROM agent_chat_labels WHERE wa_number = $1`,
+          [wa]
+        );
+        return {
+          applied: false,
+          reason: 'staff_removed',
+          waNumber: wa,
+          labelIds: current.rows.map((r) => r.label_id),
+          label,
+        };
       }
       const current = await pool.query(
         `SELECT label_id FROM agent_chat_labels WHERE wa_number = $1`,
@@ -722,4 +876,6 @@ module.exports = {
   createPostgresLabelStore,
   LABEL_COLORS,
   DEFAULT_LABELS,
+  AUTO_LABEL_NAMES,
+  nextChatLabelSuppress,
 };
