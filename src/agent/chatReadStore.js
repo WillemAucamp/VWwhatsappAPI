@@ -113,11 +113,25 @@ function createFileChatReadStore(filePath = config.agent.chatReadsPath) {
     return Boolean(state.forcedUnread[wa]);
   }
 
-  async function markRead(waNumber, at = new Date().toISOString()) {
+  async function markRead(
+    waNumber,
+    at = new Date().toISOString(),
+    { force = true } = {}
+  ) {
     const wa = requireWa(waNumber);
     const when = at || new Date().toISOString();
     return withLock(async () => {
       const data = await readAllUnlocked();
+      // Poll / background refresh must not clear a manual unread. Check and
+      // write under the same lock so an in-flight markUnread cannot lose.
+      if (!force && data.forcedUnread && data.forcedUnread[wa]) {
+        return {
+          waNumber: wa,
+          skipped: 'forced_unread',
+          lastReadAt: data.reads[wa] || null,
+          forcedUnread: true,
+        };
+      }
       data.reads[wa] = when;
       if (data.forcedUnread) delete data.forcedUnread[wa];
       await writeAllUnlocked(data);
@@ -254,12 +268,58 @@ function createPostgresChatReadStore(connectionString) {
     return Boolean(rows[0] && rows[0].forced_unread);
   }
 
-  async function markRead(waNumber, at = new Date().toISOString()) {
+  async function markRead(
+    waNumber,
+    at = new Date().toISOString(),
+    { force = true } = {}
+  ) {
     const wa = requireWa(waNumber);
     const when = at || new Date().toISOString();
     await ensureSchema();
     // Do not reference updated_at: legacy Render tables may not have it yet,
     // and mark-read must succeed even when the ALTER migrate is blocked.
+    // When force=false, leave forced_unread rows untouched (poll must not
+    // clear a manual unread that landed after a concurrent isForcedUnread).
+    if (!force) {
+      const { rows } = await pool.query(
+        `INSERT INTO agent_chat_reads (wa_number, last_read_at, forced_unread)
+         VALUES ($1, $2::timestamptz, FALSE)
+         ON CONFLICT (wa_number) DO UPDATE
+           SET last_read_at = EXCLUDED.last_read_at,
+               forced_unread = FALSE
+           WHERE agent_chat_reads.forced_unread IS NOT TRUE
+         RETURNING last_read_at, forced_unread`,
+        [wa, when]
+      );
+      if (!rows.length) {
+        const existing = await pool.query(
+          `SELECT last_read_at, forced_unread FROM agent_chat_reads
+            WHERE wa_number = $1`,
+          [wa]
+        );
+        return {
+          waNumber: wa,
+          skipped: 'forced_unread',
+          lastReadAt: existing.rows[0]
+            ? isoOf(existing.rows[0].last_read_at)
+            : null,
+          forcedUnread: true,
+        };
+      }
+      if (rows[0].forced_unread) {
+        return {
+          waNumber: wa,
+          skipped: 'forced_unread',
+          lastReadAt: isoOf(rows[0].last_read_at),
+          forcedUnread: true,
+        };
+      }
+      return {
+        waNumber: wa,
+        lastReadAt: isoOf(rows[0].last_read_at) || when,
+        forcedUnread: false,
+      };
+    }
     await pool.query(
       `INSERT INTO agent_chat_reads (wa_number, last_read_at, forced_unread)
        VALUES ($1, $2::timestamptz, FALSE)

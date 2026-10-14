@@ -429,17 +429,6 @@ function createAgentRouter({
         return res.status(400).json({ error: 'wa_required' });
       }
       const force = Boolean(req.body && req.body.force);
-      if (!force && typeof chatReads.isForcedUnread === 'function') {
-        const forced = await chatReads.isForcedUnread(wa);
-        if (forced) {
-          return res.json({
-            ok: true,
-            waNumber: wa,
-            skipped: 'forced_unread',
-            forcedUnread: true,
-          });
-        }
-      }
       // Prefer an explicit cursor from the desk (covers on-screen lastAt), then
       // fall back to max(now, latest stored message) so refresh cannot re-badge
       // a chat whose last message timestamp sat slightly ahead of "now".
@@ -459,7 +448,19 @@ function createAgentRouter({
       } catch (_) {
         /* keep at */
       }
-      const marked = await chatReads.markRead(wa, at);
+      // Pass force into the store so "skip if forced unread" is atomic with the
+      // cursor write — a separate isForcedUnread check raced markUnread and
+      // let an in-flight poll clear a manual unread.
+      const marked = await chatReads.markRead(wa, at, { force });
+      if (marked && marked.skipped === 'forced_unread') {
+        return res.json({
+          ok: true,
+          waNumber: wa,
+          skipped: 'forced_unread',
+          forcedUnread: true,
+          lastReadAt: marked.lastReadAt || null,
+        });
+      }
       if (lastKnownReadState.reads) {
         lastKnownReadState.reads[wa] = marked.lastReadAt;
         delete lastKnownReadState.forcedUnread[wa];

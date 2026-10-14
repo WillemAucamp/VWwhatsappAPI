@@ -105,13 +105,67 @@ async function testReadCursorAndStickyUnread() {
   assert.strictEqual(state.forcedUnread[wa], true);
   assert.strictEqual(state.reads[wa], opened.lastReadAt);
 
-  // Opening the chat again clears the manual flag.
+  // Background poll (force=false) must not clear the manual flag.
+  const polled = await reads.markRead(wa, new Date().toISOString(), {
+    force: false,
+  });
+  assert.strictEqual(polled.skipped, 'forced_unread');
+  assert.strictEqual(await reads.isForcedUnread(wa), true);
+
+  // Opening the chat again (force=true, default) clears the manual flag.
   await reads.markRead(wa);
   assert.strictEqual(await reads.isForcedUnread(wa), false);
 
   fs.rmSync(dir, { recursive: true, force: true });
   // eslint-disable-next-line no-console
   console.log('✓ read cursor clears manual unread only on an explicit open');
+}
+
+/**
+ * markUnread can land after a poll has already decided the chat was not
+ * forced-unread. markRead(force=false) must still refuse under the store lock
+ * so the manual badge is not cleared by that in-flight poll.
+ */
+async function testForcedUnreadWinsOverInflightPollMarkRead() {
+  const dir = tmpDir('desk-unread-race-');
+  const reads = createFileChatReadStore(path.join(dir, 'chat_reads.json'));
+  const wa = '27615554433';
+  await reads.markRead(wa, '2026-10-14T10:00:00.000Z');
+
+  let releaseCheck;
+  const gate = new Promise((resolve) => {
+    releaseCheck = resolve;
+  });
+  const original = reads.isForcedUnread.bind(reads);
+  // Simulate the old routes pattern: check, then later markRead(force=false).
+  // Between them, staff marks unread.
+  const checkPromise = (async () => {
+    const forced = await original(wa);
+    await gate;
+    return forced;
+  })();
+
+  const unreadPromise = (async () => {
+    await new Promise((r) => setTimeout(r, 5));
+    return reads.markUnread(wa);
+  })();
+
+  const unread = await unreadPromise;
+  assert.strictEqual(unread.forcedUnread, true);
+  releaseCheck();
+  const checked = await checkPromise;
+  assert.strictEqual(checked, false, 'check happened before markUnread');
+
+  const polled = await reads.markRead(wa, '2026-10-14T11:00:00.000Z', {
+    force: false,
+  });
+  assert.strictEqual(polled.skipped, 'forced_unread');
+  assert.strictEqual(await reads.isForcedUnread(wa), true);
+  assert.strictEqual(await reads.get(wa), '2026-10-14T10:00:00.000Z');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  // eslint-disable-next-line no-console
+  console.log('✓ in-flight poll markRead cannot clear a concurrent markUnread');
 }
 
 /**
@@ -527,6 +581,7 @@ async function main() {
   await testBotRepliesCountAsUnread();
   await testOpeningChatCanSendWhatsAppReadReceipt();
   await testReadCursorAndStickyUnread();
+  await testForcedUnreadWinsOverInflightPollMarkRead();
   await testForcedUnreadShowsInInbox();
   await testReadPersistsAcrossEmergencyRefresh();
   await testReadCursorCoversLatestMessage();
