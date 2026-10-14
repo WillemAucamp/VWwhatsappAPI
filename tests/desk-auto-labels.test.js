@@ -279,6 +279,127 @@ async function testBackfillWorkerDoesNotUseInboxList() {
   console.log('✓ background backfill labels a chat without GET /api/chats');
 }
 
+async function testStaffRemovedAutoLabelIsNotReapplied() {
+  const { syncInferredDeskLabels } = require('../src/agent/deskAutoLabels');
+  const labels = tmpLabelStore();
+  await seedQualificationLabels(labels);
+  const wa = '27821117777';
+  const botCopy =
+    "Ah, unfortunately we wouldn't be able to move forward just yet, but the good news is you can definitely build towards it to get your dream car!";
+  await syncInferredDeskLabels(labels, wa, {
+    messages: [{ direction: 'out', source: 'bot', text: botCopy }],
+  });
+  assert.deepStrictEqual(await labelNamesFor(labels, wa), ['Unqualified']);
+
+  // Staff clears the auto-tag on purpose (deal progressed / false tag).
+  await labels.setChatLabels(wa, []);
+  assert.deepStrictEqual(await labelNamesFor(labels, wa), []);
+
+  // Thread reopen / poll sync must not put it back.
+  await syncInferredDeskLabels(labels, wa, {
+    messages: [{ direction: 'out', source: 'bot', text: botCopy }],
+  });
+  assert.deepStrictEqual(
+    await labelNamesFor(labels, wa),
+    [],
+    'staff-removed auto labels must stay cleared across sync'
+  );
+
+  // Additive auto for a name staff never removed still works after setChatLabels.
+  const listed = await labels.listLabels();
+  const validated = listed.find((l) => l.name === 'Validated');
+  await labels.setChatLabels(wa, [validated.id]);
+  const added = await labels.addChatLabelByName(wa, 'Bad Credit');
+  assert.strictEqual(added.applied, true);
+  const names = await labelNamesFor(labels, wa);
+  assert.ok(names.includes('Validated'));
+  assert.ok(names.includes('Bad Credit'));
+  assert.ok(!names.includes('Unqualified'));
+  // eslint-disable-next-line no-console
+  console.log('✓ staff-removed auto labels are not re-applied on sync');
+}
+
+async function testStaffRemovedAutoLabelSurvivesThreadOpen() {
+  const express = require('express');
+  const { createMessageStore } = require('../src/agent/messageStore');
+  const { createShortcutStore } = require('../src/agent/shortcutStore');
+  const { createChatReadStore } = require('../src/agent/chatReadStore');
+  const { createAgentRouter } = require('../src/agent/routes');
+  const { MemorySessionStore } = require('../src/session/store');
+  const config = require('../src/config');
+  const prevEnabled = config.agent.deskEnabled;
+  const prevPassword = config.agent.deskPassword;
+  config.agent.deskEnabled = true;
+  config.agent.deskPassword = 'desk-secret';
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-label-staff-'));
+  const messageStore = createMessageStore(path.join(dir, 'tx'));
+  const labels = createLabelStore(path.join(dir, 'labels.json'));
+  await seedQualificationLabels(labels);
+  const wa = '27821116666';
+  await messageStore.append({
+    waNumber: wa,
+    direction: 'out',
+    source: 'bot',
+    text: "Ah, unfortunately we wouldn't be able to move forward just yet, but the good news is you can definitely build towards it to get your dream car!",
+  });
+
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/agent',
+    createAgentRouter({
+      engine: { takeOver: async () => ({}), releaseToBot: async () => ({}) },
+      sessionStore: new MemorySessionStore(),
+      messageStore,
+      shortcutStore: createShortcutStore(path.join(dir, 'sc.json')),
+      labelStore: labels,
+      chatReadStore: createChatReadStore(path.join(dir, 'reads.json')),
+      sendMessage: async () => ({ messages: [{ id: 'wamid.t' }] }),
+    })
+  );
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, () => resolve(s));
+  });
+  const port = server.address().port;
+  const headers = {
+    Authorization: 'Bearer desk-secret',
+    'Content-Type': 'application/json',
+  };
+  try {
+    const opened = await fetch(`http://127.0.0.1:${port}/agent/api/chats/${wa}`, {
+      headers,
+    }).then((r) => r.json());
+    assert.ok(
+      (opened.labels || []).some((l) => l.name === 'Unqualified'),
+      'first open should cement Unqualified from transcript'
+    );
+
+    await fetch(`http://127.0.0.1:${port}/agent/api/chats/${wa}/labels`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ labelIds: [] }),
+    }).then((r) => r.json());
+
+    const reopened = await fetch(
+      `http://127.0.0.1:${port}/agent/api/chats/${wa}`,
+      { headers }
+    ).then((r) => r.json());
+    assert.deepStrictEqual(
+      (reopened.labels || []).map((l) => l.name),
+      [],
+      'poll/open must not restore a staff-cleared auto label'
+    );
+  } finally {
+    server.close();
+    config.agent.deskEnabled = prevEnabled;
+    config.agent.deskPassword = prevPassword;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  // eslint-disable-next-line no-console
+  console.log('✓ thread open does not restore staff-cleared auto labels');
+}
+
 async function testBackfillSkipsWhenEmergency() {
   const { createLabelBackfill } = require('../src/agent/labelBackfill');
   const config = require('../src/config');
@@ -311,6 +432,8 @@ async function main() {
   await testInferFromSessionPath();
   await testInferFromTranscriptWithoutSession();
   await testSyncPersistsInferredLabels();
+  await testStaffRemovedAutoLabelIsNotReapplied();
+  await testStaffRemovedAutoLabelSurvivesThreadOpen();
   await testBackfillWorkerDoesNotUseInboxList();
   await testBackfillSkipsWhenEmergency();
   // eslint-disable-next-line no-console
