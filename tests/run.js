@@ -19,6 +19,7 @@ const files = [
   'webhook-dedupe.test.js',
   'inbound-media.test.js',
   'followup-tick-isolation.test.js',
+  'sticky-interrupted-from-release.test.js',
   'meta-readiness.test.js',
   'transport-graph.test.js',
   'catalog-product-list.test.js',
