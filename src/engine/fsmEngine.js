@@ -615,6 +615,14 @@ class FsmEngine {
 
     if (fromInterrupt) {
       session.interruptedFrom = fromInterrupt;
+    } else if (!(state.terminal && state.quiet)) {
+      // Normal progress (incl. OFF_MENU → Main-Menu → GREETING) must drop a
+      // stale interrupt bookmark. Otherwise takeOver/_rememberResumePoint keeps
+      // the earlier OFF_MENU source and Release re-asks that step — wiping later
+      // answers or re-opening a finished qualify (duplicate CRM lead risk).
+      // Quiet terminals (HUMAN_HANDOVER / LICENSE_NO / …) keep the bookmark so
+      // Release can resume the pre-handover choice.
+      session.interruptedFrom = null;
     }
 
     let sendError = null;
