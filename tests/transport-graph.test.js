@@ -236,48 +236,60 @@ async function testImageUploadThenSend() {
   }
 }
 
-async function testLargeImageSendsAsDocument() {
+async function testOversizedImageRejectedBeforeUpload() {
   const snap = { ...config.whatsapp };
   config.whatsapp.token = 'test-token';
   config.whatsapp.phoneNumberId = '123456';
   const originalFetch = global.fetch;
-  const calls = [];
-  global.fetch = async (url, options) => {
-    const href = String(url);
-    calls.push({ href, options });
-    if (href.includes('/media')) {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ id: 'media.big' }),
-      };
-    }
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({ messages: [{ id: 'wamid.doc' }] }),
-    };
+  let fetchCalls = 0;
+  global.fetch = async () => {
+    fetchCalls += 1;
+    return { ok: true, status: 200, json: async () => ({ id: 'should-not-upload' }) };
   };
   try {
-    // Just over Meta's 5MB inline image cap.
+    // Graph rejects image/* uploads over 5MB; the old send-as-document branch
+    // never ran because upload failed first.
     const big = Buffer.alloc(5 * 1024 * 1024 + 10, 1);
-    await cloudApiSendMessage('27821234567', {
-      type: 'image',
-      mediaBuffer: big,
-      mimeType: 'image/jpeg',
-      filename: 'big.jpg',
-      text: 'Large photo',
-    });
-    assert.strictEqual(calls.length, 2);
-    const sendBody = JSON.parse(calls[1].options.body);
-    assert.strictEqual(sendBody.type, 'document');
-    assert.strictEqual(sendBody.document.id, 'media.big');
-    assert.strictEqual(sendBody.document.caption, 'Large photo');
-    assert.strictEqual(sendBody.document.filename, 'big.jpg');
+    await assert.rejects(
+      () =>
+        cloudApiSendMessage('27821234567', {
+          type: 'image',
+          mediaBuffer: big,
+          mimeType: 'image/jpeg',
+          filename: 'big.jpg',
+          text: 'Large photo',
+        }),
+      (err) =>
+        err &&
+        err.code === 'WHATSAPP_MEDIA_TOO_LARGE' &&
+        /5MB/i.test(String(err.message || ''))
+    );
+    assert.strictEqual(fetchCalls, 0, 'must fail closed before Graph upload');
     // eslint-disable-next-line no-console
-    console.log('✓ images over 5MB send as Graph type=document');
+    console.log('✓ images over 5MB rejected before Graph upload');
   } finally {
     global.fetch = originalFetch;
+    restore(snap);
+  }
+}
+
+async function testWebpImageRejected() {
+  const snap = { ...config.whatsapp };
+  config.whatsapp.token = 'test-token';
+  config.whatsapp.phoneNumberId = '123456';
+  try {
+    await assert.rejects(
+      () =>
+        cloudApiSendMessage('27821234567', {
+          type: 'image',
+          mediaBuffer: Buffer.from([1, 2, 3, 4]),
+          mimeType: 'image/webp',
+        }),
+      (err) => err && err.code === 'WHATSAPP_MEDIA_TYPE_UNSUPPORTED'
+    );
+    // eslint-disable-next-line no-console
+    console.log('✓ outbound WebP rejected (sticker-only on Cloud API)');
+  } finally {
     restore(snap);
   }
 }
@@ -290,7 +302,8 @@ async function main() {
   await testAuthErrorIncludesTokenHint();
   await testTextDoesNotDuplicateLinkAlreadyInBody();
   await testImageUploadThenSend();
-  await testLargeImageSendsAsDocument();
+  await testOversizedImageRejectedBeforeUpload();
+  await testWebpImageRejected();
   // eslint-disable-next-line no-console
   console.log('\ntransport graph tests passed.');
 }

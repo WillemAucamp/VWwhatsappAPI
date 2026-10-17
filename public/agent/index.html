@@ -986,7 +986,7 @@
           <div id="attachThumbs" class="attach-thumbs"></div>
           <button type="button" class="attach-add" id="attachAddBtn" title="Add photos" aria-label="Add photos">+</button>
           <span id="attachCount" class="attach-count"></span>
-          <input id="attachFileInput" type="file" accept="image/jpeg,image/png,image/webp,image/jpg" multiple hidden />
+          <input id="attachFileInput" type="file" accept="image/jpeg,image/png,image/jpg" multiple hidden />
         </div>
         <div class="composer-row">
           <button type="button" class="emoji-toggle" id="emojiBtn" title="Insert emoji" aria-label="Insert emoji" disabled>😀</button>
@@ -2172,16 +2172,17 @@
 
     async function acceptImageFile(file) {
       if (!file || !String(file.type || '').startsWith('image/')) {
-        el('threadError').textContent = 'Only image files can be attached (JPEG, PNG, WebP).';
+        el('threadError').textContent = 'Only image files can be attached (JPEG or PNG).';
         return false;
       }
       const mime = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
-      if (!['image/jpeg', 'image/png', 'image/webp'].includes(mime)) {
-        el('threadError').textContent = 'Only JPEG, PNG, or WebP images are supported.';
+      if (!['image/jpeg', 'image/png'].includes(mime)) {
+        el('threadError').textContent = 'Only JPEG or PNG images are supported.';
         return false;
       }
-      if (file.size > 16 * 1024 * 1024) {
-        el('threadError').textContent = 'Image must be under 16MB.';
+      // WhatsApp Cloud API image upload max is 5MB (not 16MB).
+      if (file.size > 5 * 1024 * 1024) {
+        el('threadError').textContent = 'Image must be under 5MB (WhatsApp limit).';
         return false;
       }
       if (state.pendingImages.length >= MAX_PENDING_IMAGES) {
@@ -2190,7 +2191,7 @@
       }
       el('threadError').textContent = '';
       const base64 = await fileToBase64(file);
-      const filename = file.name || (mime === 'image/png' ? 'paste.png' : mime === 'image/webp' ? 'paste.webp' : 'paste.jpg');
+      const filename = file.name || (mime === 'image/png' ? 'paste.png' : 'paste.jpg');
       return addPendingImage({ blob: file, mimeType: mime, filename, base64 });
     }
 

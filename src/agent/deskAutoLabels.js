@@ -157,10 +157,18 @@ function labelsFromMessages(messages) {
     const text = row && row.text != null ? String(row.text) : '';
     if (isBotOutbound(row)) {
       names.push(...labelsFromText(text));
+      // Keep waiting for an answer when a bot nudge does not look like a new prompt.
       pending = promptKindFromBotText(text) || pending;
       continue;
     }
-    if (!isCustomerInbound(row) || !pending) continue;
+    // Agent (or other non-customer) turns break bot-prompt → answer coupling.
+    // Otherwise a takeover chat saying "no" / "send it" false-tags Unqualified
+    // or App-Link sent from a stale pending prompt.
+    if (!isCustomerInbound(row)) {
+      pending = null;
+      continue;
+    }
+    if (!pending) continue;
     if (pending === 'employed' && isNoAnswer(text)) names.push('Unqualified');
     if (pending === 'license' && isNoAnswer(text)) names.push('No License');
     if (pending === 'credit' && isBadCreditAnswer(text)) names.push('Bad Credit');

@@ -629,14 +629,30 @@ CREATE TABLE IF NOT EXISTS agent_chat_labels (
         if (!lid || !knownSet.has(lid) || unique.includes(lid)) continue;
         unique.push(lid);
       }
-      await pool.query(`DELETE FROM agent_chat_labels WHERE wa_number = $1`, [
-        wa,
-      ]);
-      for (const lid of unique) {
-        await pool.query(
-          `INSERT INTO agent_chat_labels (wa_number, label_id) VALUES ($1, $2)`,
-          [wa, lid]
-        );
+      // Replace must be atomic: a bare DELETE then INSERT left the chat with
+      // zero labels when any INSERT failed or the process died mid-loop.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`DELETE FROM agent_chat_labels WHERE wa_number = $1`, [
+          wa,
+        ]);
+        for (const lid of unique) {
+          await client.query(
+            `INSERT INTO agent_chat_labels (wa_number, label_id) VALUES ($1, $2)`,
+            [wa, lid]
+          );
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (_) {
+          /* ignore rollback errors */
+        }
+        throw err;
+      } finally {
+        client.release();
       }
       return { waNumber: wa, labelIds: unique };
     });

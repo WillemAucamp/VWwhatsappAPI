@@ -232,6 +232,49 @@ async function testInferFromTranscriptWithoutSession() {
   console.log('✓ infer labels from transcript when session is gone');
 }
 
+async function testAgentTurnClearsPendingPromptCoupling() {
+  const { inferDeskLabelNames, labelsFromMessages } = require('../src/agent/deskAutoLabels');
+  const { resolveCopy } = require('../src/content/resolve');
+  const employed = resolveCopy('employed_income_prompt');
+  const consent = resolveCopy('final_consent_prompt');
+
+  // Bot asked employment → staff takeover → customer says "no" to the agent.
+  assert.deepStrictEqual(
+    labelsFromMessages([
+      { direction: 'out', source: 'bot', text: employed },
+      { direction: 'out', source: 'agent', text: 'Can you visit tomorrow?' },
+      { direction: 'in', source: 'customer', text: 'no' },
+    ]),
+    [],
+    'agent turn must not leave pending employed prompt for a later customer no'
+  );
+
+  // Bot asked consent → agent chat → customer "yes send it" about something else.
+  assert.deepStrictEqual(
+    inferDeskLabelNames({
+      messages: [
+        { direction: 'out', source: 'bot', text: consent },
+        { direction: 'out', source: 'agent', text: 'I can email the form instead' },
+        { direction: 'in', source: 'customer', text: 'yes send it' },
+      ],
+    }),
+    [],
+    'agent turn must not false-tag App-Link sent from a stale consent prompt'
+  );
+
+  // Direct bot → customer answer still works.
+  assert.deepStrictEqual(
+    labelsFromMessages([
+      { direction: 'out', source: 'bot', text: employed },
+      { direction: 'in', source: 'customer', text: 'no' },
+    ]),
+    ['Unqualified']
+  );
+
+  // eslint-disable-next-line no-console
+  console.log('✓ agent turns clear pending bot-prompt label coupling');
+}
+
 async function testSyncPersistsInferredLabels() {
   const { syncInferredDeskLabels } = require('../src/agent/deskAutoLabels');
   const labels = tmpLabelStore();
@@ -310,6 +353,7 @@ async function main() {
   await testGoodCreditDoesNotTag();
   await testInferFromSessionPath();
   await testInferFromTranscriptWithoutSession();
+  await testAgentTurnClearsPendingPromptCoupling();
   await testSyncPersistsInferredLabels();
   await testBackfillWorkerDoesNotUseInboxList();
   await testBackfillSkipsWhenEmergency();
