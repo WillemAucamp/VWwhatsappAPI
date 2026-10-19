@@ -862,13 +862,53 @@ class FsmEngine {
     });
   }
 
+  /**
+   * Recovery menus (OFF_MENU / QUALIFY_CONSENT_NO) are bridges — Release should
+   * resume the qualify step that was interrupted, not the recovery menu itself.
+   */
+  _isRecoveryMenuStateId(stateId) {
+    return stateId === 'OFF_MENU_RECOVERY' || stateId === 'QUALIFY_CONSENT_NO';
+  }
+
+  /**
+   * On a recovery menu, free-text often answers the prior Yes/No step (e.g. typed
+   * "yes please" then retried "1" / "yes"). Prefer that over a second-miss handover.
+   * Interactive replyIds still bind to the recovery buttons only.
+   */
+  _matchInterruptedChoice(session, normalized) {
+    if (!normalized || !session.interruptedFrom) return null;
+    if (this._isRecoveryMenuStateId(session.interruptedFrom)) return null;
+    const prior = STATES[session.interruptedFrom];
+    if (!prior || prior.type !== 'choice' || !prior.options) return null;
+    const priorKey = resolveOptionKey(prior, normalized, null);
+    if (!priorKey || !prior.options[priorKey]) return null;
+    return { priorKey, nextId: prior.options[priorKey] };
+  }
+
+  async _applyInterruptedChoice(session, nextId) {
+    session.invalidAttempts = 0;
+    session.interruptedFrom = null;
+    if (Array.isArray(session.path) && session.path.length) {
+      const last = session.path[session.path.length - 1];
+      if (this._isRecoveryMenuStateId(last)) {
+        session.path = session.path.slice(0, -1);
+      }
+    }
+    return this._enterState(session, nextId);
+  }
+
   async _handleInvalid(session, state) {
     // Already on a recovery menu and still off-option → hand over quietly.
-    if (
-      state &&
-      (state.id === 'OFF_MENU_RECOVERY' || state.id === 'QUALIFY_CONSENT_NO')
-    ) {
-      return this._routeToHuman(session, state.id);
+    // Keep the original interruptedFrom (e.g. LICENSE_CHECK) so desk Release
+    // resumes the qualify step, not OFF_MENU_RECOVERY itself.
+    if (state && this._isRecoveryMenuStateId(state.id)) {
+      const resumeFrom =
+        session.interruptedFrom &&
+        session.interruptedFrom !== state.id &&
+        this._isResumableStateId(session.interruptedFrom)
+          ? session.interruptedFrom
+          : state.id;
+      return this._routeToHuman(session, resumeFrom);
     }
 
     session.interruptedFrom = state ? state.id : session.currentState;
@@ -1038,6 +1078,8 @@ class FsmEngine {
     const state = stateId ? STATES[stateId] : null;
     if (!state || state.terminal) return false;
     if (state.autoAdvanceTo) return false;
+    // Recovery bridges are not resume targets — walk path / interruptedFrom instead.
+    if (this._isRecoveryMenuStateId(stateId)) return false;
     return state.type === 'choice';
   }
 
@@ -1236,6 +1278,14 @@ class FsmEngine {
         (!state.options || !Object.keys(state.options).length)
       ) {
         return this._enterState(session, state.next);
+      }
+      // Recovery free-text that answers the interrupted Yes/No menu (e.g. "1"
+      // after a typo on EMPLOYED) — apply that answer instead of handing over.
+      if (!replyId && this._isRecoveryMenuStateId(state.id)) {
+        const priorMatch = this._matchInterruptedChoice(session, normalized);
+        if (priorMatch) {
+          return this._applyInterruptedChoice(session, priorMatch.nextId);
+        }
       }
       return this._handleInvalid(session, state);
     }

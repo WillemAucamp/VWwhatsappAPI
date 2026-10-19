@@ -236,6 +236,9 @@ const STATES = {
       main_menu: 'Main-Menu',
     },
     optionLabels: {
+      // Do not map free-text "1" here — qualify Yes/No menus teach "1"=Yes, so
+      // after a typo customers retry "1" meaning Yes, not Human-Handover.
+      // Interactive button replyId "human_handover" still works.
       human_handover: [
         'human-handover',
         'human handover',
@@ -244,7 +247,6 @@ const STATES = {
         'agent',
         'speak to me',
         'talk to me',
-        '1',
       ],
       main_menu: [
         'main-menu',
@@ -528,6 +530,9 @@ const STATES = {
       main_menu: 'Main-Menu',
     },
     optionLabels: {
+      // Do not map free-text "1" here — qualify Yes/No menus teach "1"=Yes, so
+      // after a typo customers retry "1" meaning Yes, not Human-Handover.
+      // Interactive button replyId "human_handover" still works.
       human_handover: [
         'human-handover',
         'human handover',
@@ -536,7 +541,6 @@ const STATES = {
         'agent',
         'speak to me',
         'talk to me',
-        '1',
       ],
       main_menu: [
         'main-menu',
