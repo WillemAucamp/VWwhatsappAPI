@@ -23,7 +23,22 @@ The agent desk can store WhatsApp transcripts in **Supabase** so history survive
    - The bot also auto-encodes on connect, but Render is more reliable if you paste the encoded URI.
    - Forgot it? Same page → **Reset database password**, then update the URI.
 
-You do **not** create tables by hand — on first message the bot creates `chat_messages`.
+You do **not** create tables by hand. The bot creates them on first use:
+
+| Table | When | Contents |
+|---|---|---|
+| `chat_messages` | First transcript write | Text + **inbound** image/document bytes (`media_bytes`). Staff outbound images are caption/`[Image]` text only. |
+| `agent_labels` | First label-store use | Cemented catalog + staff labels |
+| `agent_chat_labels` | Same | Per-number tag ids |
+| `agent_desk_meta` | Labels or shortcuts first use | Seed flags so deploys do not rewrite staff edits |
+| `agent_shortcuts` | First shortcut-store use | Canned replies (`/` composer). Seeded once; file import if `data/agent/shortcuts.json` exists |
+| `agent_chat_reads` | First unread/read use | Last-opened cursor + `forced_unread` (Mark unread) |
+
+Desk settings (labels, shortcuts, unread) prefer Postgres **whenever `DATABASE_URL` is set**, even if `MESSAGE_STORE=file`.
+
+`PUT /api/chats/:wa/labels` on Postgres deletes then inserts **without a transaction**. A mid-replace error can empty `agent_chat_labels` for that number. Funnel auto-tags also re-apply on thread open even after staff cleared them — see [AGENT_DESK.md](./AGENT_DESK.md).
+
+**Still file-only** (wiped on Render free): FSM sessions (`data/sessions/`), lead log (`data/logs/leads.jsonl`). Details: [AGENT_DESK.md](./AGENT_DESK.md).
 
 ### 2. Paste it into Render
 
@@ -38,10 +53,10 @@ Save → **Manual Deploy** (or wait for auto-deploy of this branch).
 
 ### 3. Confirm
 
-1. Open `https://your-host/health` → `agentDesk.messageStore` should be `"postgres"`.
+1. Open `https://your-host/health` → `agentDesk.messageStore` and `agentDesk.shortcutStore` should be `"postgres"`.
 2. Send a WhatsApp message (or reply from `/agent`).
-3. Open `/agent` — the chat should remain **after the next Render deploy**.
-4. Optional: Supabase → **Table Editor** → `chat_messages`.
+3. Open `/agent` — the chat, labels, shortcuts, and unread badges should remain **after the next Render deploy**.
+4. Optional: Supabase → **Table Editor** → `chat_messages` (and `agent_labels` / `agent_shortcuts` / `agent_chat_reads` after you open `/agent` once).
 
 ## Troubleshooting
 
@@ -49,7 +64,11 @@ Save → **Manual Deploy** (or wait for auto-deploy of this branch).
 |---------|-----|
 | `/health` still says `"file"` | `DATABASE_URL` missing/empty on Render; redeploy after setting it |
 | App crash / DB connection errors | Wrong password, or password not URL-encoded; try Session pooler URI |
-| Empty agent desk after deploy | Confirm you deployed the branch that includes Postgres transcript support |
+| Empty agent desk after deploy | Confirm you deployed the branch that includes Postgres transcript support; `/health` → `agentDesk.messageStore` is `"postgres"` |
+| Labels reset to VIP / Follow-up, then to funnel names | First boot of an **unseeded** VIP catalog is supposed to swap once. If staff later delete every cemented label and recreate only VIP / Follow Up / Hot Lead / Complaint, `seedIfNeeded` still treats that as legacy and **wipes assignments**. Mixed catalogs after `labels_seeded` are left alone. |
+| Shortcuts / unread badges reset after deploy | `DATABASE_URL` missing so those stores used JSON files. `/health` → `agentDesk.shortcutStore` and `/agent/api/status` → `chatReadsBackend` should be `"postgres"` |
+| Inbox empty but Table Editor has rows | Inbox request timed out — desk should switch to emergency list; do not scan transcripts on `GET /api/chats` (see [AGENT_DESK.md](./AGENT_DESK.md)) |
+| Chat labels emptied after one desk save | Postgres `setChatLabels` deletes then inserts with no transaction — re-tag the number. Funnel names also return on thread open even after a staff clear. |
 
 ## Local development
 
