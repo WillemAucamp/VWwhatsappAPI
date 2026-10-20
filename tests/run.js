@@ -14,6 +14,7 @@ const files = [
   'pending-lead-prepersist.test.js',
   'pending-lead-ttl.test.js',
   'pending-terminal-outbound-ttl.test.js',
+  'offmenu-reopen-no-false-handover.test.js',
   'scheduler-terminal-outbound-retry.test.js',
   'followup-inbound-race.test.js',
   'webhook-dedupe.test.js',
