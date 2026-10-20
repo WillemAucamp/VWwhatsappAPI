@@ -15,10 +15,22 @@ function now() {
  * application link / handover Graph send still needs a retry. listAll()/get()
  * (and Redis EX) would otherwise delete them forever once the lead flush
  * cleared pendingLead and refreshed the TTL clock.
+ *
+ * Sessions with agentTakenOver must also be pinned: desk Take over / reply
+ * auto-takeOver leave status=quiet with no pending* flags, and inbound while
+ * held intentionally does not rewrite the session — so updatedAt freezes at
+ * takeover. Without this pin, SESSION_TTL_MS deletes the hold and the next
+ * customer message starts a fresh GREETING, wiping funnel progress.
  */
 function isSessionExpired(session, ttlMs = config.session.ttlMs, at = now()) {
   if (!session || !session.updatedAt) return true;
-  if (session.pendingLead || session.pendingTerminalOutbound) return false;
+  if (
+    session.pendingLead ||
+    session.pendingTerminalOutbound ||
+    session.agentTakenOver
+  ) {
+    return false;
+  }
   return at - session.updatedAt > ttlMs;
 }
 
@@ -204,9 +216,14 @@ class RedisSessionStore {
     session.updatedAt = now();
     const key = this._key(waNumber);
     const payload = JSON.stringify(session);
-    // Queued leads and undelivered terminal outbounds must outlive the normal
-    // session TTL or Redis EX drops the only retry/CRM recovery state.
-    if (session.pendingLead || session.pendingTerminalOutbound) {
+    // Queued leads, undelivered terminal outbounds, and active agent holds
+    // must outlive the normal session TTL or Redis EX drops the only
+    // retry/CRM recovery state / staff takeover.
+    if (
+      session.pendingLead ||
+      session.pendingTerminalOutbound ||
+      session.agentTakenOver
+    ) {
       await this.client.set(key, payload);
     } else {
       await this.client.set(key, payload, 'EX', this.ttlSec);
