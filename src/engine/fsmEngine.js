@@ -24,7 +24,7 @@ function normalizeInput(text) {
     .replace(/\s+/g, ' ');
 }
 
-function matchesKeywordList(normalized, keywords) {
+function matchesKeywordList(normalized, keywords, { exactSingleWord = false } = {}) {
   if (!normalized) return false;
   // Strip punctuation so "Hello!" / "hi," still match reopen words.
   const softened = normalized
@@ -39,8 +39,14 @@ function matchesKeywordList(normalized, keywords) {
     if (!k) return false;
     return candidates.some((text) => {
       if (text === k) return true;
+      // Multi-word phrases ("opt out") may appear inside a longer message.
       if (k.includes(' ') && text.includes(k)) return true;
       if (!k.includes(' ')) {
+        // Help intents like "stop" / "human" / "agent" must be the whole
+        // message. Whole-word-in-sentence matching falsely handed over
+        // answers such as "I am a human resources manager" into silent
+        // agentTakenOver hold until staff Release.
+        if (exactSingleWord) return false;
         const re = new RegExp(`(^|\\s)${escapeRegex(k)}(\\s|$)`, 'i');
         return re.test(text);
       }
@@ -1188,7 +1194,11 @@ class FsmEngine {
       return this._enterState(session, ENTRY_STATE);
     }
 
-    if (matchesKeywordList(normalized, config.fsm.helpIntentKeywords)) {
+    if (
+      matchesKeywordList(normalized, config.fsm.helpIntentKeywords, {
+        exactSingleWord: true,
+      })
+    ) {
       return this._routeToHuman(session, session.currentState);
     }
 
