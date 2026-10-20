@@ -15,6 +15,7 @@ const files = [
   'pending-lead-ttl.test.js',
   'pending-terminal-outbound-ttl.test.js',
   'scheduler-terminal-outbound-retry.test.js',
+  'release-preserves-terminal-recovery.test.js',
   'followup-inbound-race.test.js',
   'webhook-dedupe.test.js',
   'followup-tick-isolation.test.js',
