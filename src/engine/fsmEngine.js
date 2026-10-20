@@ -1228,14 +1228,20 @@ class FsmEngine {
 
     const optionKey = resolveOptionKey(state, normalized, replyId);
     if (!optionKey) {
-      // Info states with a fixed next: allow any non-help tap/text to continue
-      // only when there are no options defined.
+      // Info slides (specials PAYMENT_HOLIDAY_INFO / LOWER_RATE_INFO /
+      // DISCOUNT_INFO) use autoAdvanceTo, not next. If Graph fails on the
+      // immediate follow-on question after the info body was already
+      // persisted, the next inbound must resume that advance — otherwise
+      // _handleInvalid dumps the customer into OFF_MENU_RECOVERY mid-funnel.
+      const continueTo =
+        state.type === 'info'
+          ? state.autoAdvanceTo || state.next || null
+          : null;
       if (
-        state.type === 'info' &&
-        state.next &&
+        continueTo &&
         (!state.options || !Object.keys(state.options).length)
       ) {
-        return this._enterState(session, state.next);
+        return this._enterState(session, continueTo);
       }
       return this._handleInvalid(session, state);
     }
