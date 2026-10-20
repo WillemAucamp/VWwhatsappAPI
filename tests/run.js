@@ -30,6 +30,7 @@ const files = [
   'desk-labels-cement.test.js',
   'desk-shortcuts-persist.test.js',
   'message-store.test.js',
+  'soft-closed-ack-not-stocklist.test.js',
 ];
 
 let failed = 0;

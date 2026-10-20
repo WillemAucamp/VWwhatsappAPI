@@ -101,6 +101,11 @@ function resolveOptionKey(state, normalized, replyId) {
  *
  * Also recognises stocklist "Check if I qualify" (`any_car`) so a wiped or
  * soft-closed session does not bounce that tap back to the main menu.
+ *
+ * Stocklist synonyms like "ok" / "yes" / "continue" must NOT free-text-match
+ * here: after SEND_LINK soft_closed, customers often acknowledge the form
+ * link with those words and must not be yanked back into employment screening.
+ * Only honour an interactive reply id or the exact button title.
  */
 function resolveGreetingDestination(normalized, replyId) {
   const greeting = STATES[ENTRY_STATE];
@@ -112,10 +117,19 @@ function resolveGreetingDestination(normalized, replyId) {
   }
 
   const stocklist = STATES.STOCKLIST_CAROUSEL;
-  if (stocklist) {
-    const stockKey = resolveOptionKey(stocklist, normalized, replyId);
-    if (stockKey && stocklist.options[stockKey]) {
-      return stocklist.options[stockKey];
+  if (stocklist && stocklist.options) {
+    if (replyId && stocklist.options[replyId]) {
+      return stocklist.options[replyId];
+    }
+    if (normalized && stocklist.optionTitles) {
+      for (const [optionKey, title] of Object.entries(stocklist.optionTitles)) {
+        if (
+          normalizeInput(title) === normalized &&
+          stocklist.options[optionKey]
+        ) {
+          return stocklist.options[optionKey];
+        }
+      }
     }
   }
 
