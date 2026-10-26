@@ -115,9 +115,11 @@ Free-form bot text (and interactive menus) only work inside the **24-hour** wind
 | `src/fsm/states.js` | Branching tree: option key → next state; `optionTitles` = button labels |
 | `src/content/copy.js` | Body text above the buttons |
 | `src/transport/whatsapp.js` | Graph `type=interactive` (reply buttons ≤3, else list) |
-| `POST /webhook` | Accepts `text` and `interactive` (`button_reply` / `list_reply`) |
+| `POST /webhook` | Accepts `text`, `interactive` (`button_reply` / `list_reply`), catalog `order`, `image`, `document`. Returns **200 before** FSM / Graph media download. |
 
-Staff can still reply in the WhatsApp Business app on the same thread (Coexistence). The bot goes quiet after `help` / `stop` / handover.
+Staff can still reply in the WhatsApp Business app on the same thread (Coexistence). The bot goes quiet after `help` / `stop` / handover, and after any **agent desk** reply (silent takeover until Release to bot — [AGENT_DESK.md](./AGENT_DESK.md)).
+
+Customer images and documents show on the desk when Graph download succeeds; other inbound types (audio, video, sticker, …) store a placeholder row and skip the menu. The webhook returns **200 before** media download — a failed download is a permanent `(media unavailable)` row, not a Meta retry. Staff paste/attach images still reach WhatsApp; the desk transcript does not keep those outbound bytes. Details: [OPERATIONS.md](./OPERATIONS.md), [AGENT_DESK.md](./AGENT_DESK.md).
 
 ## Troubleshooting
 
@@ -127,9 +129,14 @@ Staff can still reply in the WhatsApp Business app on the same thread (Coexisten
 | POST 403 | `WHATSAPP_APP_SECRET` must match the app that signed the webhook |
 | POST 503 in production | App secret missing |
 | Taps do nothing | Webhook subscribed to **messages**; bot logs show `interactive` inbound |
+| Customer went quiet after typing `ok` / `1` / `thanks` | Exact free-text labels + off-menu second miss → silent hold. Staff **Release to bot** (or Take over). Details: [OPERATIONS.md](./OPERATIONS.md) |
+| Soft-closed “when can I start …?” restarted the menu | Live reopen keyword `start` is whole-word-in-sentence. Exact-reopen hosts require the whole message to be `hi` / `hello` / `start` / `restart`. [OPERATIONS.md](./OPERATIONS.md) |
+| Customer vanished after staff deleted the desk chat | Soft-delete hides the inbox row; it does not erase WhatsApp or transcripts. Hold-revive clears `agentTakenOver` and undeletes on the next inbound. [AGENT_DESK.md](./AGENT_DESK.md) |
 | Send `#100` | Payload had a non-Graph field (this bot strips `mediaSlot`) |
 | Send `#190` | Token expired — create a system-user token |
 | Send `#131047` | Outside 24h — use a template |
 | Empty replies | Copy key blank or env links unset |
 | `check-meta` Graph fail | Wrong token, phone-number ID, or app does not own that WABA |
 | Coexistence missing | You used migrate/API-only; reconnect with Business app onboarding |
+
+Day-2 webhook, session, and follow-up behaviour: [OPERATIONS.md](./OPERATIONS.md). Staff inbox: [AGENT_DESK.md](./AGENT_DESK.md).
