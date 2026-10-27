@@ -301,44 +301,63 @@ function createPostgresShortcutStore(connectionString, opts = {}) {
 
   async function importFromFileIfPresent() {
     if (!fs.existsSync(fileFallback)) return { found: false, imported: 0 };
+    let parsed;
     try {
-      const parsed = JSON.parse(fs.readFileSync(fileFallback, 'utf8'));
-      if (!parsed || !Array.isArray(parsed.shortcuts)) {
-        return { found: false, imported: 0 };
-      }
-      let imported = 0;
-      for (const raw of parsed.shortcuts) {
-        const key = normalizeKey(raw && raw.key);
-        const text = repairCollapsedShortcutText(raw && raw.text);
-        if (!key || !text) continue;
+      parsed = JSON.parse(fs.readFileSync(fileFallback, 'utf8'));
+    } catch {
+      // Corrupt / unreadable before we know it is a catalog — allow defaults.
+      return { found: false, imported: 0 };
+    }
+    if (!parsed || !Array.isArray(parsed.shortcuts)) {
+      return { found: false, imported: 0 };
+    }
+    let imported = 0;
+    // Do not swallow INSERT failures: a mid-import blip used to return
+    // found:false, which reseeds stamped defaults and sets shortcuts_seeded,
+    // permanently dropping the remaining staff rows on the next boot.
+    for (const raw of parsed.shortcuts) {
+      const key = normalizeKey(raw && raw.key);
+      const text = repairCollapsedShortcutText(raw && raw.text);
+      if (!key || !text) continue;
+      try {
         await insertRow({
           id: raw.id || newShortcutId(),
           key,
           text,
           updatedAt: raw.updatedAt || new Date().toISOString(),
         });
-        imported += 1;
+      } catch (err) {
+        // Prior partial boot may already hold this key under another id.
+        if (err && err.code === '23505') {
+          imported += 1;
+          continue;
+        }
+        throw err;
       }
-      // File existed (even empty): honour staff deletes, never reseed defaults.
-      return { found: true, imported };
-    } catch {
-      return { found: false, imported: 0 };
+      imported += 1;
     }
+    // File existed (even empty): honour staff deletes, never reseed defaults.
+    return { found: true, imported };
   }
 
   async function seedIfNeeded() {
     const seeded = await getMeta(META_SEEDED);
     if (seeded === '1' || seeded === 'true') return;
+    // Import before the "any row exists" short-circuit so a prior partial
+    // file import (crash / blip before shortcuts_seeded) can finish instead of
+    // permanently sealing an incomplete catalog.
+    const fromFile = await importFromFileIfPresent();
+    if (fromFile.found) {
+      await setMeta(META_SEEDED, '1');
+      return;
+    }
     const { rows } = await pool.query(`SELECT id FROM agent_shortcuts LIMIT 1`);
     if (rows.length) {
       await setMeta(META_SEEDED, '1');
       return;
     }
-    const fromFile = await importFromFileIfPresent();
-    if (!fromFile.found) {
-      for (const row of stampedDefaults()) {
-        await insertRow(row);
-      }
+    for (const row of stampedDefaults()) {
+      await insertRow(row);
     }
     await setMeta(META_SEEDED, '1');
   }

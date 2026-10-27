@@ -273,6 +273,103 @@ async function testPostgresImportsExistingFile() {
   console.log('✓ first postgres boot imports existing shortcuts instead of defaults');
 }
 
+/**
+ * Regression: a DB blip mid file→Postgres import used to return found:false,
+ * reseed stamped defaults, and set shortcuts_seeded — permanently dropping the
+ * remaining staff shortcuts. Partial rows + no meta must finish the import on
+ * the next boot instead of sealing an incomplete catalog.
+ */
+async function testPostgresPartialImportDoesNotReseedOrSeal() {
+  const file = tmpPath();
+  fs.writeFileSync(
+    file,
+    `${JSON.stringify(
+      {
+        shortcuts: [
+          {
+            id: 'sc_a',
+            key: 'alpha',
+            text: 'Staff A',
+            updatedAt: '2026-09-01T00:00:00.000Z',
+          },
+          {
+            id: 'sc_b',
+            key: 'bravo',
+            text: 'Staff B',
+            updatedAt: '2026-09-01T00:00:00.000Z',
+          },
+          {
+            id: 'sc_c',
+            key: 'charlie',
+            text: 'Staff C',
+            updatedAt: '2026-09-01T00:00:00.000Z',
+          },
+        ],
+      },
+      null,
+      2
+    )}\n`
+  );
+
+  const url = 'postgresql://u:p@localhost:5432/shortcuts_partial_import';
+  const store = createShortcutStore({
+    backend: 'postgres',
+    databaseUrl: url,
+    filePath: file,
+  });
+
+  // Reach the shared FakePool for this URL and fail the 2nd shortcut INSERT.
+  const { getSharedPool } = require('../src/agent/pg');
+  const pool = getSharedPool(url);
+  assert.ok(pool instanceof FakePool, 'test must use FakePool');
+  let inserts = 0;
+  const baseQuery = pool.query.bind(pool);
+  pool.query = async (sql, params) => {
+    if (/INSERT INTO agent_shortcuts/i.test(String(sql))) {
+      inserts += 1;
+      if (inserts === 2) {
+        const err = new Error('simulated db blip mid-import');
+        err.code = '57P01';
+        throw err;
+      }
+    }
+    return baseQuery(sql, params);
+  };
+
+  await assert.rejects(
+    () => store.list(),
+    /simulated db blip mid-import/,
+    'mid-import failure must surface so shortcuts_seeded is not set'
+  );
+  assert.strictEqual(
+    pool.meta.get('shortcuts_seeded'),
+    undefined,
+    'failed seed must not mark shortcuts_seeded'
+  );
+  assert.deepStrictEqual(
+    [...pool.byKey.keys()].sort(),
+    ['alpha'],
+    'only the rows imported before the blip should be present'
+  );
+
+  // Healthy retry on the same durable FakePool finishes the file import.
+  pool.query = baseQuery;
+  const again = createShortcutStore({
+    backend: 'postgres',
+    databaseUrl: url,
+    filePath: file,
+  });
+  const listed = await again.list();
+  assert.deepStrictEqual(keysOf(listed), ['alpha', 'bravo', 'charlie']);
+  assert.ok(
+    !listed.some((s) => s.key === 'greeting'),
+    'must not fall back to stamped defaults after a partial staff import'
+  );
+  assert.strictEqual(pool.meta.get('shortcuts_seeded'), '1');
+  // eslint-disable-next-line no-console
+  console.log('✓ partial postgres import retries without reseeding defaults');
+}
+
 function testHealthExposesShortcutBackend() {
   const src = fs.readFileSync(path.join(__dirname, '../src/app.js'), 'utf8');
   assert.ok(
@@ -296,6 +393,7 @@ async function main() {
   await testPostgresAddAndDeleteSurviveReopen();
   await testPostgresEmptyFileIsNotReseeded();
   await testPostgresImportsExistingFile();
+  await testPostgresPartialImportDoesNotReseedOrSeal();
   testHealthExposesShortcutBackend();
   // eslint-disable-next-line no-console
   console.log('\ndesk shortcut persist tests passed.');
