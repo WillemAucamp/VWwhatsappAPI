@@ -752,10 +752,42 @@ async function testInboxSurvivesHangingLabels() {
   }
 }
 
+function testMultiImageSendPinsDestinationWa() {
+  const html = fs.readFileSync(
+    path.join(__dirname, '../public/agent/index.html'),
+    'utf8'
+  );
+  assert.ok(
+    /async function sendReply\(\) \{[\s\S]*?const wa = state\.selected;/.test(html),
+    'sendReply must pin the destination WA before any await'
+  );
+  assert.ok(
+    html.includes("encodeURIComponent(wa) + '/reply-media'"),
+    'multi-image send must POST reply-media to the pinned WA'
+  );
+  assert.ok(
+    html.includes("encodeURIComponent(wa) + '/reply'"),
+    'text reply must POST to the pinned WA'
+  );
+  assert.ok(
+    !/await api\('\/api\/chats\/' \+ encodeURIComponent\(state\.selected\) \+ '\/reply-media'/.test(
+      html
+    ),
+    'reply-media must not re-read state.selected each batch iteration'
+  );
+  assert.ok(
+    /if \(state\.sending\) \{[\s\S]*?Wait for the current send to finish/.test(html),
+    'chat switch must be blocked while a send is in flight'
+  );
+  // eslint-disable-next-line no-console
+  console.log('✓ multi-image send pins WA and blocks mid-batch chat switch');
+}
+
 async function main() {
   await testMessageStoreAndApis();
   await testThreadOpenReturnsWhenLabelWriteFails();
   await testInboxSurvivesHangingLabels();
+  testMultiImageSendPinsDestinationWa();
   // eslint-disable-next-line no-console
   console.log('\nagent desk tests passed.');
 }

@@ -1583,6 +1583,13 @@
       }).join('');
       list.querySelectorAll('.chat-item').forEach((btn) => {
         btn.addEventListener('click', async () => {
+          // Multi-image send posts sequentially; switching mid-batch would retarget
+          // remaining /reply-media calls (and silent takeOver) at the new WA.
+          if (state.sending) {
+            el('threadError').textContent =
+              'Wait for the current send to finish before opening another chat.';
+            return;
+          }
           const next = btn.getAttribute('data-wa');
           if (next !== state.selected) clearPendingImages();
           state.selected = next;
@@ -2030,7 +2037,10 @@
     async function sendReply() {
       const text = el('replyBox').value.trim();
       const pending = state.pendingImages.slice();
-      if (!state.selected) return;
+      // Pin the destination before any await — multi-image loops must not follow
+      // a mid-batch chat switch (wrong customer + unintended silent takeOver).
+      const wa = state.selected;
+      if (!wa) return;
       if (!pending.length && !text) return;
       if (state.sending) return;
       state.sending = true;
@@ -2042,7 +2052,7 @@
         if (pending.length) {
           for (let i = 0; i < pending.length; i++) {
             const item = pending[i];
-            await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply-media', {
+            await api('/api/chats/' + encodeURIComponent(wa) + '/reply-media', {
               method: 'POST',
               body: JSON.stringify({
                 imageBase64: item.base64,
@@ -2063,13 +2073,13 @@
           }
           clearPendingImages();
         } else {
-          await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply', {
+          await api('/api/chats/' + encodeURIComponent(wa) + '/reply', {
             method: 'POST',
             body: JSON.stringify({ text }),
           });
           el('replyBox').value = '';
         }
-        await loadThread(state.selected);
+        await loadThread(wa);
         await loadChats(true);
       } catch (err) {
         el('threadError').textContent = err.data && err.data.error ? err.data.error : err.message;
