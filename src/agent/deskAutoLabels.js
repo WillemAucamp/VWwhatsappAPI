@@ -125,16 +125,24 @@ function isBadCreditAnswer(text) {
   return t === 'bad' || t === 'poor' || t === '2' || t === 'credit bad';
 }
 
+/**
+ * Exact consent_yes allowlist — must match FINAL_CONSENT optionTitles/Labels.
+ * Substring includes('send it') falsely tags declines like "don't send it" /
+ * "send it later" as App-Link sent when SEND_LINK never ran.
+ */
 function isYesSendAnswer(text) {
   const t = fold(text);
-  return (
-    t === 'yes' ||
-    t === 'y' ||
-    t === '1' ||
-    t === 'send' ||
-    t.includes('yes send it') ||
-    t.includes('send it')
-  );
+  if (!t) return false;
+  const state = STATES.FINAL_CONSENT;
+  if (!state) return false;
+  const candidates = [];
+  if (state.optionTitles && state.optionTitles.consent_yes) {
+    candidates.push(state.optionTitles.consent_yes);
+  }
+  const labels = state.optionLabels && state.optionLabels.consent_yes;
+  if (Array.isArray(labels)) candidates.push(...labels);
+  else if (labels) candidates.push(labels);
+  return candidates.some((label) => fold(label) === t);
 }
 
 function promptKindFromBotText(text) {

@@ -232,6 +232,51 @@ async function testInferFromTranscriptWithoutSession() {
   console.log('✓ infer labels from transcript when session is gone');
 }
 
+async function testConsentDeclineMustNotTagAppLinkSent() {
+  const { labelsFromMessages } = require('../src/agent/deskAutoLabels');
+  const consentPrompt = {
+    direction: 'out',
+    source: 'bot',
+    text: 'To take the next step, I can send over a short, simple application form.\n\nReady for me to send it?',
+  };
+  const declines = [
+    "don't send it",
+    'do not send it',
+    'never send it',
+    'send it later',
+    "don't send it please",
+    'please send it',
+    'can you send it',
+  ];
+  for (const text of declines) {
+    assert.deepStrictEqual(
+      labelsFromMessages([consentPrompt, { direction: 'in', source: 'customer', text }]),
+      [],
+      `decline ${JSON.stringify(text)} must not tag App-Link sent`
+    );
+  }
+  const accepts = [
+    'Yes, send it',
+    'yes send it',
+    'send it',
+    'send it now',
+    'yes',
+    'y',
+    '1',
+    'send',
+    'yes, send it now',
+  ];
+  for (const text of accepts) {
+    assert.deepStrictEqual(
+      labelsFromMessages([consentPrompt, { direction: 'in', source: 'customer', text }]),
+      ['App-Link sent'],
+      `accept ${JSON.stringify(text)} must tag App-Link sent`
+    );
+  }
+  // eslint-disable-next-line no-console
+  console.log('✓ consent decline substrings must not false-tag App-Link sent');
+}
+
 async function testSyncPersistsInferredLabels() {
   const { syncInferredDeskLabels } = require('../src/agent/deskAutoLabels');
   const labels = tmpLabelStore();
@@ -310,6 +355,7 @@ async function main() {
   await testGoodCreditDoesNotTag();
   await testInferFromSessionPath();
   await testInferFromTranscriptWithoutSession();
+  await testConsentDeclineMustNotTagAppLinkSent();
   await testSyncPersistsInferredLabels();
   await testBackfillWorkerDoesNotUseInboxList();
   await testBackfillSkipsWhenEmergency();
