@@ -1107,6 +1107,9 @@
       // GET /api/chats from putting the badge back after you open a chat.
       readByWa: {},
       chatsLoadSeq: 0,
+      // Invalidates in-flight GET /api/chats/:wa so a slower prior chat cannot
+      // paint the wrong title/transcript over the chat staff just opened.
+      threadLoadSeq: 0,
       shortcuts: [],
       labels: [],
       labelColors: ['#128c7e', '#027eb5', '#c4530a', '#b42318', '#6941c6', '#067647', '#363f72', '#b54708', '#ca8a04'],
@@ -1872,8 +1875,13 @@
 
     async function loadThread(wa, silent) {
       el('threadError').textContent = '';
+      const seq = ++state.threadLoadSeq;
       try {
         const data = await api('/api/chats/' + encodeURIComponent(wa));
+        // A slower prior open / 5s poll must not overwrite the chat staff
+        // selected after this request started (title + bubbles vs selected WA).
+        if (seq !== state.threadLoadSeq) return;
+        if (state.selected && state.selected !== wa) return;
         el('threadTitle').textContent = '+' + wa;
         const s = data.session;
         el('threadStatus').textContent = s
@@ -1922,6 +1930,7 @@
         }).join('');
         if (!silent || stickBottom) box.scrollTop = box.scrollHeight;
       } catch (err) {
+        if (seq !== state.threadLoadSeq) return;
         if (!silent) el('threadError').textContent = err.message;
         if (err.status === 401) showLogin();
       }

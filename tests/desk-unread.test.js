@@ -440,6 +440,18 @@ function testDeskUiWiresExplicitRead() {
     ),
     'selected row must not fake unreadCount=0'
   );
+  assert.ok(
+    html.includes('threadLoadSeq'),
+    'thread open must sequence in-flight GETs like the chat list'
+  );
+  assert.ok(
+    /seq !== state\.threadLoadSeq/.test(html),
+    'stale loadThread responses must not paint over a newer selection'
+  );
+  assert.ok(
+    /state\.selected && state\.selected !== wa/.test(html),
+    'loadThread must ignore payloads for a WA that is no longer selected'
+  );
   // eslint-disable-next-line no-console
   console.log('✓ desk UI marks read on open, not on every poll');
 }
