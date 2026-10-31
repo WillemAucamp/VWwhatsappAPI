@@ -445,6 +445,53 @@ function testDeskUiWiresExplicitRead() {
 }
 
 /**
+ * Chat click sets state.selected before markRead+loadThread finish. Without
+ * disarming compose/chrome and pinning the destination WA, Enter/Send during
+ * that window messages the newly selected number while the old transcript is
+ * still on screen.
+ */
+function testDeskUiDisarmsComposerOnChatSwitch() {
+  const html = fs.readFileSync(
+    path.join(__dirname, '../public/agent/index.html'),
+    'utf8'
+  );
+  assert.ok(
+    html.includes('prepareThreadChromeForSwitch'),
+    'chat switch must reset thread chrome before markRead/load await'
+  );
+  assert.ok(
+    /switched\s*=\s*next\s*!==\s*state\.selected[\s\S]*prepareThreadChromeForSwitch\(next\)/.test(
+      html
+    ),
+    'click handler must disarm on selection change before network awaits'
+  );
+  assert.ok(
+    /function\s+prepareThreadChromeForSwitch\s*\([^)]*\)\s*\{[\s\S]*setThreadActionsEnabled\(false\)/.test(
+      html
+    ),
+    'switch prep must disable compose/takeover/release immediately'
+  );
+  assert.ok(
+    /async function sendReply\s*\(\)\s*\{[\s\S]*const wa = state\.selected[\s\S]*encodeURIComponent\(wa\)/.test(
+      html
+    ),
+    'sendReply must pin destination WA at start (not re-read mid-flight)'
+  );
+  assert.ok(
+    /if \(el\('replyBox'\)\.disabled\) return/.test(html),
+    'composer must refuse send while disarmed after a chat switch'
+  );
+  assert.ok(
+    /const data = await api\('\/api\/chats\/' \+ encodeURIComponent\(wa\)\);\s*\n\s*\/\/ Ignore a slower prior[\s\S]*if \(state\.selected !== wa\) return;/.test(
+      html
+    ),
+    'loadThread must not paint/re-arm actions for a WA that is no longer selected'
+  );
+  // eslint-disable-next-line no-console
+  console.log('✓ desk UI disarms composer on chat switch and pins send destination');
+}
+
+/**
  * Opt-in parity with WhatsApp's own read receipts: marking a chat read on the
  * desk can tell Meta to show the customer blue ticks. Per the Cloud API docs
  * that is POST /{phone-number-id}/messages with status=read and the inbound
@@ -532,6 +579,7 @@ async function main() {
   await testReadCursorCoversLatestMessage();
   testReadStoreBackendSelection();
   testDeskUiWiresExplicitRead();
+  testDeskUiDisarmsComposerOnChatSwitch();
   // eslint-disable-next-line no-console
   console.log('\ndesk unread tests passed.');
 }

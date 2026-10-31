@@ -1584,19 +1584,40 @@
       list.querySelectorAll('.chat-item').forEach((btn) => {
         btn.addEventListener('click', async () => {
           const next = btn.getAttribute('data-wa');
-          if (next !== state.selected) clearPendingImages();
+          const switched = next !== state.selected;
           state.selected = next;
+          // Selection flips before markRead+loadThread return. If chrome and
+          // composer still show the previous WA, Send/Takeover/Release would
+          // hit the new number while staff still see the old transcript.
+          if (switched) prepareThreadChromeForSwitch(next);
           renderChatList();
           // Clicking a chat is the explicit open: mark it read before loading
           // the thread so a slow GET /api/chats cannot put the badge back.
           const marked = await markChatRead(next, true);
+          if (state.selected !== next) return;
           if (!marked) {
             el('threadError').textContent =
               'Could not mark this chat as read. Check your connection and try again.';
           }
-          await loadThread(state.selected);
+          await loadThread(next);
         });
       });
+    }
+
+    /** Disarm compose/actions and clear stale chrome as soon as selection changes. */
+    function prepareThreadChromeForSwitch(wa) {
+      hideSlashMenu();
+      hideEmojiPicker();
+      setThreadActionsEnabled(false);
+      el('replyBox').value = '';
+      el('replyBox').style.height = '';
+      el('threadError').textContent = '';
+      el('threadTitle').textContent = wa ? '+' + wa : 'Select a chat';
+      el('threadStatus').textContent = 'Loading…';
+      state.threadLabelIds = [];
+      renderThreadLabels([]);
+      el('messages').innerHTML =
+        '<div class="empty">Loading conversation…</div>';
     }
 
     function setInboxBanner(text, danger) {
@@ -1874,6 +1895,8 @@
       el('threadError').textContent = '';
       try {
         const data = await api('/api/chats/' + encodeURIComponent(wa));
+        // Ignore a slower prior open/poll once staff has already switched away.
+        if (state.selected !== wa) return;
         el('threadTitle').textContent = '+' + wa;
         const s = data.session;
         el('threadStatus').textContent = s
@@ -1987,6 +2010,7 @@
 
     el('sendBtn').addEventListener('click', sendReply);
     el('replyBox').addEventListener('keydown', (e) => {
+      if (el('replyBox').disabled) return;
       if (state.slash.open) {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
@@ -2030,7 +2054,11 @@
     async function sendReply() {
       const text = el('replyBox').value.trim();
       const pending = state.pendingImages.slice();
-      if (!state.selected) return;
+      // Pin destination at click/Enter time so a mid-flight chat switch cannot
+      // retarget Graph to a different WA than the one staff meant to message.
+      const wa = state.selected;
+      if (!wa) return;
+      if (el('replyBox').disabled) return;
       if (!pending.length && !text) return;
       if (state.sending) return;
       state.sending = true;
@@ -2042,7 +2070,7 @@
         if (pending.length) {
           for (let i = 0; i < pending.length; i++) {
             const item = pending[i];
-            await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply-media', {
+            await api('/api/chats/' + encodeURIComponent(wa) + '/reply-media', {
               method: 'POST',
               body: JSON.stringify({
                 imageBase64: item.base64,
@@ -2063,20 +2091,21 @@
           }
           clearPendingImages();
         } else {
-          await api('/api/chats/' + encodeURIComponent(state.selected) + '/reply', {
+          await api('/api/chats/' + encodeURIComponent(wa) + '/reply', {
             method: 'POST',
             body: JSON.stringify({ text }),
           });
           el('replyBox').value = '';
         }
-        await loadThread(state.selected);
+        if (state.selected === wa) await loadThread(wa);
         await loadChats(true);
       } catch (err) {
         el('threadError').textContent = err.data && err.data.error ? err.data.error : err.message;
         renderAttachStrip();
       } finally {
         state.sending = false;
-        el('sendBtn').disabled = false;
+        // Do not re-arm Send if staff already switched to another chat.
+        if (state.selected === wa) el('sendBtn').disabled = false;
       }
     }
 
@@ -2450,13 +2479,15 @@
 
     async function doTakeover() {
       closeMenus();
-      if (!state.selected) return;
+      const wa = state.selected;
+      if (!wa) return;
+      if (el('takeoverBtn').disabled) return;
       try {
-        await api('/api/chats/' + encodeURIComponent(state.selected) + '/takeover', {
+        await api('/api/chats/' + encodeURIComponent(wa) + '/takeover', {
           method: 'POST',
           body: '{}',
         });
-        await loadThread(state.selected);
+        if (state.selected === wa) await loadThread(wa);
         await loadChats(true);
       } catch (err) {
         el('threadError').textContent = err.message;
@@ -2464,13 +2495,15 @@
     }
     async function doRelease() {
       closeMenus();
-      if (!state.selected) return;
+      const wa = state.selected;
+      if (!wa) return;
+      if (el('releaseBtn').disabled) return;
       try {
-        await api('/api/chats/' + encodeURIComponent(state.selected) + '/release', {
+        await api('/api/chats/' + encodeURIComponent(wa) + '/release', {
           method: 'POST',
           body: '{}',
         });
-        await loadThread(state.selected);
+        if (state.selected === wa) await loadThread(wa);
         await loadChats(true);
       } catch (err) {
         el('threadError').textContent = err.message;
