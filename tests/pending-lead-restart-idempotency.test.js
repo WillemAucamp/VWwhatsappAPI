@@ -9,12 +9,20 @@
  * _loggedLeadKeys lived only in memory, so a new FsmEngine after restart
  * flushed pendingLead and appended a duplicate CRM/log row.
  *
+ * Also covers the residual where BOTH marker writes fail (lastLoggedLeadKey
+ * never lands): FileLeadLogger must upsert by fingerprint so a restart
+ * flush cannot append a second jsonl row (LEAD_LOGGER=file for launch).
+ *
  * Run: node tests/pending-lead-restart-idempotency.test.js
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { MemorySessionStore } = require('../src/session/store');
 const { FsmEngine } = require('../src/engine/fsmEngine');
+const { FileLeadLogger } = require('../src/logger/leadLogger');
 const { driveToFinalConsent } = require('./melrose-path');
 
 class CapturingLogger {
@@ -136,11 +144,81 @@ async function testSameProcessClearFailStillSingleLog() {
   console.log('✓ same-process pendingLead clear-fail flush stays single-log');
 }
 
+/**
+ * Both marker writes fail → disk keeps pendingLead with lastLoggedLeadKey null
+ * after logLead already appended. New FsmEngine flush must not append again.
+ */
+function wrapStoreAllMarkerFails(store) {
+  let armed = false;
+  const origSet = store.set.bind(store);
+  store.set = async (wa, session) => {
+    if (armed && session && session.lastLoggedLeadKey) {
+      throw new Error('simulated marker and clear set failure');
+    }
+    return origSet(wa, session);
+  };
+  return {
+    arm() {
+      armed = true;
+    },
+    disarm() {
+      armed = false;
+    },
+  };
+}
+
+function countLeadLines(filePath) {
+  if (!fs.existsSync(filePath)) return 0;
+  return fs
+    .readFileSync(filePath, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim())
+    .length;
+}
+
+async function testFileLoggerNoDoubleLogWhenMarkerNeverLands() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lead-idem-'));
+  const logPath = path.join(dir, 'leads.jsonl');
+  const store = new MemorySessionStore();
+  const logger = new FileLeadLogger(logPath);
+  const gate = wrapStoreAllMarkerFails(store);
+  const engine = makeEngine(store, logger);
+
+  const wa = '27824440003';
+  await driveToConfirmQualify(engine, wa);
+
+  gate.arm();
+  await engine.handleInbound(wa, 'yes');
+  gate.disarm();
+
+  assert.strictEqual(countLeadLines(logPath), 1, 'terminal must append once');
+  const queued = await store.get(wa);
+  assert.ok(queued.pendingLead, 'pendingLead remains when marker never lands');
+  assert.strictEqual(
+    queued.lastLoggedLeadKey,
+    null,
+    'lastLoggedLeadKey must stay null when every marker write fails'
+  );
+
+  const engine2 = makeEngine(store, logger);
+  await engine2.flushPendingLead(wa);
+
+  assert.strictEqual(
+    countLeadLines(logPath),
+    1,
+    'FileLeadLogger fingerprint upsert must block restart double-append'
+  );
+
+  // eslint-disable-next-line no-console
+  console.log('✓ file logger blocks double-append when marker never lands');
+}
+
 async function main() {
   // eslint-disable-next-line no-console
   console.log('Running pending-lead restart idempotency tests…\n');
   await testNoDoubleLogAfterRestartWhenClearFails();
   await testSameProcessClearFailStillSingleLog();
+  await testFileLoggerNoDoubleLogWhenMarkerNeverLands();
   // eslint-disable-next-line no-console
   console.log('\nAll pending-lead restart idempotency tests passed.');
 }
