@@ -1653,9 +1653,17 @@
         });
         closeEmergencyModal();
         el('emergencyText').value = '';
+        // Opens the emergency WA next. Without resetting chrome here, the
+        // previously open chat's draft/transcript stay visible across
+        // loadChats+markRead+loadThread while state.selected already points
+        // at `wa` — Enter/Send/Takeover/Release would hit the wrong number.
         state.selected = wa;
+        prepareThreadChromeForSwitch(wa);
+        renderChatList();
         await loadChats();
+        if (state.selected !== wa) return;
         await markChatRead(wa, true);
+        if (state.selected !== wa) return;
         await loadThread(wa);
       } catch (err) {
         el('emergencyError').textContent = err.message || 'Send failed';
@@ -1824,6 +1832,27 @@
         hideEmojiPicker();
         clearPendingImages();
       }
+    }
+
+    /**
+     * Selection can flip before markRead/loadThread return (chat click or
+     * emergency "Message a number"). Disarm compose/actions and replace stale
+     * chrome immediately so Send/Takeover/Release cannot hit the new WA while
+     * the previous customer's title+transcript are still on screen.
+     */
+    function prepareThreadChromeForSwitch(wa) {
+      hideSlashMenu();
+      hideEmojiPicker();
+      setThreadActionsEnabled(false);
+      el('replyBox').value = '';
+      el('replyBox').style.height = '';
+      el('threadError').textContent = '';
+      el('threadTitle').textContent = wa ? '+' + wa : 'Select a chat';
+      el('threadStatus').textContent = 'Loading…';
+      state.threadLabelIds = [];
+      renderThreadLabels([]);
+      el('messages').innerHTML =
+        '<div class="empty">Loading conversation…</div>';
     }
 
     function renderThreadLabels(labels) {
