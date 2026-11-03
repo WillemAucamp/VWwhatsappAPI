@@ -445,6 +445,42 @@ function testDeskUiWiresExplicitRead() {
 }
 
 /**
+ * Emergency / search "Message a number" flips state.selected to the typed WA
+ * then awaits loadChats+markRead+loadThread. Without disarming compose/chrome
+ * first, Enter/Send/Takeover/Release during that window hit the emergency WA
+ * while the previously open customer's transcript is still painted.
+ * Distinct from chat-item click gap (PR103).
+ */
+function testDeskUiDisarmsComposerAfterEmergencySend() {
+  const html = fs.readFileSync(
+    path.join(__dirname, '../public/agent/index.html'),
+    'utf8'
+  );
+  assert.ok(
+    html.includes('prepareThreadChromeForSwitch'),
+    'desk must expose a chrome reset used when selection flips before load'
+  );
+  assert.ok(
+    /function\s+prepareThreadChromeForSwitch\s*\([^)]*\)\s*\{[\s\S]*setThreadActionsEnabled\(false\)/.test(
+      html
+    ),
+    'emergency/chat switch prep must disable compose/takeover/release immediately'
+  );
+  assert.ok(
+    /state\.selected\s*=\s*wa;\s*prepareThreadChromeForSwitch\(wa\)/.test(html),
+    'emergency success must disarm chrome when selecting the messaged WA'
+  );
+  assert.ok(
+    /prepareThreadChromeForSwitch\(wa\);[\s\S]*await loadChats\(\);[\s\S]*if \(state\.selected !== wa\) return;/.test(
+      html
+    ),
+    'emergency open must abort if selection moved during loadChats'
+  );
+  // eslint-disable-next-line no-console
+  console.log('✓ desk UI disarms composer after emergency Message-a-number send');
+}
+
+/**
  * Opt-in parity with WhatsApp's own read receipts: marking a chat read on the
  * desk can tell Meta to show the customer blue ticks. Per the Cloud API docs
  * that is POST /{phone-number-id}/messages with status=read and the inbound
@@ -532,6 +568,7 @@ async function main() {
   await testReadCursorCoversLatestMessage();
   testReadStoreBackendSelection();
   testDeskUiWiresExplicitRead();
+  testDeskUiDisarmsComposerAfterEmergencySend();
   // eslint-disable-next-line no-console
   console.log('\ndesk unread tests passed.');
 }
