@@ -1123,6 +1123,9 @@
       editingShortcutId: null,
       editingLabelId: null,
       assignDraft: [],
+      // Destination WA for the open Assign-labels modal. Pin at open so an
+      // in-flight emergency "Message a number" cannot retarget Save.
+      assignForWa: null,
       sending: false,
       emergencyInbox: localStorage.getItem('agentEmergencyInbox') === '1',
     };
@@ -1653,6 +1656,10 @@
         });
         closeEmergencyModal();
         el('emergencyText').value = '';
+        // Selection flips while other UI (e.g. Assign labels) may still be open.
+        // Drop the assign modal so Save cannot hit this new WA with another
+        // chat's draft; openAssignLabels pins assignForWa as a second guard.
+        closeAssignLabelsModal();
         state.selected = wa;
         await loadChats();
         await markChatRead(wa, true);
@@ -2758,8 +2765,12 @@
     // —— Assign labels ——
     function openAssignLabelsModal() {
       if (!state.selected) return;
+      // Pin before any await/other handler can flip state.selected (emergency
+      // Message-a-number success closes its modal then selects the new WA).
+      const wa = state.selected;
+      state.assignForWa = wa;
       el('assignLabelsError').textContent = '';
-      el('assignLabelsSub').textContent = 'Select labels for +' + state.selected + '.';
+      el('assignLabelsSub').textContent = 'Select labels for +' + wa + '.';
       state.assignDraft = state.threadLabelIds.slice();
       const list = el('assignLabelsList');
       if (!state.labels.length) {
@@ -2788,22 +2799,24 @@
     }
     function closeAssignLabelsModal() {
       el('assignLabelsModal').classList.add('hidden');
+      state.assignForWa = null;
     }
     el('closeAssignLabelsModal').addEventListener('click', closeAssignLabelsModal);
     el('assignLabelsModal').addEventListener('click', (e) => {
       if (e.target === el('assignLabelsModal')) closeAssignLabelsModal();
     });
     el('saveAssignLabelsBtn').addEventListener('click', async () => {
-      if (!state.selected) return;
+      const wa = state.assignForWa || state.selected;
+      if (!wa) return;
       el('assignLabelsError').textContent = '';
       try {
-        const saved = await api('/api/chats/' + encodeURIComponent(state.selected) + '/labels', {
+        const saved = await api('/api/chats/' + encodeURIComponent(wa) + '/labels', {
           method: 'PUT',
           body: JSON.stringify({ labelIds: state.assignDraft }),
         });
         state.threadLabelIds = saved.labelIds || [];
         state.chats = state.chats.map((c) => {
-          if (c.waNumber !== state.selected) return c;
+          if (c.waNumber !== wa) return c;
           return {
             ...c,
             labelIds: saved.labelIds || [],
@@ -2812,7 +2825,7 @@
         });
         renderChatList();
         closeAssignLabelsModal();
-        await loadThread(state.selected);
+        if (state.selected === wa) await loadThread(wa);
         await loadChats(true);
       } catch (err) {
         el('assignLabelsError').textContent = err.message;

@@ -445,6 +445,42 @@ function testDeskUiWiresExplicitRead() {
 }
 
 /**
+ * Assign-labels Save used live state.selected. Emergency "Message a number"
+ * can still complete after its modal was dismissed and flip selected while
+ * Assign labels is open — Save then PUT the draft onto the emergency WA and
+ * wiped that chat's labels. Pin assignForWa at open; close assign on emergency
+ * select. Distinct from PR100/102/103/106 (send/composer/loadThread races).
+ */
+function testDeskUiPinsAssignLabelsDestinationWa() {
+  const html = fs.readFileSync(
+    path.join(__dirname, '../public/agent/index.html'),
+    'utf8'
+  );
+  assert.ok(
+    html.includes('assignForWa'),
+    'desk must pin the Assign-labels destination WA'
+  );
+  assert.ok(
+    /function\s+openAssignLabelsModal\s*\(\)\s*\{[\s\S]*state\.assignForWa\s*=\s*wa/.test(
+      html
+    ),
+    'opening Assign labels must pin assignForWa before Save'
+  );
+  assert.ok(
+    /saveAssignLabelsBtn'\)\.addEventListener\('click', async \(\) => \{[\s\S]*const wa = state\.assignForWa \|\| state\.selected[\s\S]*encodeURIComponent\(wa\)/.test(
+      html
+    ),
+    'Assign labels Save must PUT to the pinned WA, not re-read state.selected'
+  );
+  assert.ok(
+    /closeAssignLabelsModal\(\);\s*state\.selected\s*=\s*wa/.test(html),
+    'emergency Message-a-number success must close Assign labels before selecting the new WA'
+  );
+  // eslint-disable-next-line no-console
+  console.log('✓ desk UI pins Assign-labels destination against emergency select flip');
+}
+
+/**
  * Opt-in parity with WhatsApp's own read receipts: marking a chat read on the
  * desk can tell Meta to show the customer blue ticks. Per the Cloud API docs
  * that is POST /{phone-number-id}/messages with status=read and the inbound
@@ -532,6 +568,7 @@ async function main() {
   await testReadCursorCoversLatestMessage();
   testReadStoreBackendSelection();
   testDeskUiWiresExplicitRead();
+  testDeskUiPinsAssignLabelsDestinationWa();
   // eslint-disable-next-line no-console
   console.log('\ndesk unread tests passed.');
 }
