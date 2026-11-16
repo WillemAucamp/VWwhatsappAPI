@@ -28,7 +28,11 @@ Open [Meta for Developers](https://developers.facebook.com/) → your app → **
 | `PUBLIC_BASE_URL` | Public origin of this process, no trailing slash, e.g. `https://abc.ngrok-free.app` |
 | `APPLICATION_LINK` | URL sent after a successful qualify |
 | `STOCK_LINK` | Fallback URL if the catalog is empty or product_list send fails |
+| `AGENT_NOTIFY_WEBHOOK_URL` | Optional. POST JSON on human handover (and exhausted follow-ups if enabled). See [OPERATIONS.md](./OPERATIONS.md) |
+| `AGENT_HANDOVER_NUMBER` | Optional. Copied onto that JSON only — the bot does not WhatsApp it |
 | `NODE_ENV` | `production` on a real host (forces webhook HMAC) |
+
+`WHATSAPP_WABA_ID` and `WHATSAPP_CATALOG_ID` in `.env.example` / `src/config.js` default to the **Melrose** WABA and catalog. Override both if this process is not Melrose, or boot will link the wrong catalog.
 
 ```bash
 cp .env.example .env
@@ -115,9 +119,11 @@ Free-form bot text (and interactive menus) only work inside the **24-hour** wind
 | `src/fsm/states.js` | Branching tree: option key → next state; `optionTitles` = button labels |
 | `src/content/copy.js` | Body text above the buttons |
 | `src/transport/whatsapp.js` | Graph `type=interactive` (reply buttons ≤3, else list) |
-| `POST /webhook` | Accepts `text` and `interactive` (`button_reply` / `list_reply`) |
+| `POST /webhook` | Accepts `text`, `interactive` (`button_reply` / `list_reply`), catalog `order`, `image`, `document`. Returns **200 before** FSM / Graph media download. |
 
-Staff can still reply in the WhatsApp Business app on the same thread (Coexistence). The bot goes quiet after `help` / `stop` / handover.
+Staff can still reply in the WhatsApp Business app on the same thread (Coexistence). The bot goes quiet after `help` / `stop` / handover, and after any **agent desk** reply (silent takeover until Release to bot — [AGENT_DESK.md](./AGENT_DESK.md)).
+
+Customer images and documents show on the desk when Graph download succeeds; other inbound types (audio, video, sticker, …) store a placeholder row and skip the menu. The webhook returns **200 before** media download — a failed download is a permanent `(media unavailable)` row, not a Meta retry. Staff paste/attach images still reach WhatsApp; the desk transcript does not keep those outbound bytes. Details: [OPERATIONS.md](./OPERATIONS.md), [AGENT_DESK.md](./AGENT_DESK.md).
 
 ## Troubleshooting
 
@@ -127,9 +133,19 @@ Staff can still reply in the WhatsApp Business app on the same thread (Coexisten
 | POST 403 | `WHATSAPP_APP_SECRET` must match the app that signed the webhook |
 | POST 503 in production | App secret missing |
 | Taps do nothing | Webhook subscribed to **messages**; bot logs show `interactive` inbound |
+| Customer went quiet after typing `ok` / `1` / `thanks` | Exact free-text labels + off-menu second miss → silent hold. Staff **Release to bot** (or Take over). Details: [OPERATIONS.md](./OPERATIONS.md) |
+| Soft-closed “when can I start …?” restarted the menu | Live reopen keyword `start` is whole-word-in-sentence. Exact-reopen hosts require the whole message to be `hi` / `hello` / `start` / `restart`. [OPERATIONS.md](./OPERATIONS.md) |
+| Customer vanished after staff deleted the desk chat | Soft-delete hides the inbox row; it does not erase WhatsApp or transcripts. Hold-revive clears `agentTakenOver` and undeletes on the next inbound. [AGENT_DESK.md](./AGENT_DESK.md) |
+| Desk says App-Link sent but they never got the form URL | Live auto-tag substring-matches `send it` (`don't send it` still stamps the label). FSM only sends on an **exact** `FINAL_CONSENT` yes. [AGENT_DESK.md](./AGENT_DESK.md) |
+| Reply / labels hit the wrong number after **Message a number** | Emergency Send selects that WA before chrome updates; Assign **Save** re-reads `state.selected`. [AGENT_DESK.md](./AGENT_DESK.md) |
+| Duplicate row in `data/logs/leads.jsonl` after a deploy | `LEAD_LOGGER=file` appends again if `lastLoggedLeadKey` never landed. [OPERATIONS.md](./OPERATIONS.md) |
+| CRM/Slack never got a handover ping | `AGENT_NOTIFY_WEBHOOK_URL` empty or non-2xx (live does not retry). Unqualified / Send-link / desk takeover do not notify. [OPERATIONS.md](./OPERATIONS.md) |
+| `check:catalog` lists the wrong cars | You left the Melrose `WHATSAPP_CATALOG_ID` / `WHATSAPP_WABA_ID` defaults |
 | Send `#100` | Payload had a non-Graph field (this bot strips `mediaSlot`) |
 | Send `#190` | Token expired — create a system-user token |
 | Send `#131047` | Outside 24h — use a template |
 | Empty replies | Copy key blank or env links unset |
 | `check-meta` Graph fail | Wrong token, phone-number ID, or app does not own that WABA |
 | Coexistence missing | You used migrate/API-only; reconnect with Business app onboarding |
+
+Day-2 webhook, session, and follow-up behaviour: [OPERATIONS.md](./OPERATIONS.md). Staff inbox: [AGENT_DESK.md](./AGENT_DESK.md).
